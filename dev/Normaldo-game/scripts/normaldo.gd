@@ -286,6 +286,32 @@ var _last_tap_pos    : Vector2     = Vector2.ZERO
 const _DTAP_TIME : float = 0.20   # max gap between taps — must be a FAST double-tap
 const _DTAP_DIST : float = 55.0   # taps must be close together (не путать с кайтом)
 
+# ── Эффекты новых предметов ───────────────────────────────────────────────────
+# Три эффекта живут таймерами и тикают в _physics_process. Длительность у всех
+# короткая (3 c) намеренно: это «окно возможности», а не режим — за 3 секунды
+# успеваешь продавить одну стену, но не пройти паттерн целиком.
+#
+#   шляпа мага  — _slow_immune_remaining, гасит apply_slow()
+#   банка колы  — _speed_boost_remaining, множитель в _move_speed_mult()
+#   маска Кейси — переиспользует механику шрамов Джокера (_begin_scars)
+#
+# См. /Концепция/Эффекты и бонусы.md
+const CASEY_MASK_DURATION : float = 3.0
+const MAGIC_HAT_DURATION  : float = 3.0
+const COLA_DURATION       : float = 3.0
+const COLA_SPEED_MULT     : float = 1.55
+
+var _slow_immune_remaining : float = 0.0
+var _speed_boost_remaining : float = 0.0
+
+# ── Учёт добычи мини-игр ──────────────────────────────────────────────────────
+# Пока учёт включён, каждая съеденная пицца и каждый доллар попадают ещё и в
+# _loot_tally. В конце мини-игры бросается множитель ×1…×5 и разница
+# доначисляется — см. loot_multiplier.gd.
+var _loot_tally_active : bool = false
+var _loot_pizza_tally  : int  = 0
+var _loot_dollar_tally : int  = 0
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 func _apply_skin_to_sprite() -> void:
@@ -824,11 +850,14 @@ func _effective_fat_speed(state: int) -> float:
 	return base
 
 func _move_speed_mult() -> float:
+	# Банка колы складывается с бонусами скинов — она короткая (3 c) и должна
+	# ощущаться рывком даже на быстром скине.
+	var boost := COLA_SPEED_MULT if _speed_boost_remaining > 0.0 else 1.0
 	if SaveData.active_skin == "spider_man":
-		return 1.25
+		return 1.25 * boost
 	if _wizard_bonus_active and _wizard_bonus_type == 2:
-		return 1.4
-	return 1.0
+		return 1.4 * boost
+	return boost
 
 # ── Input ─────────────────────────────────────────────────────────────────────
 
@@ -898,6 +927,10 @@ func _physics_process(delta: float) -> void:
 	# Slow countdown + state change detection
 	if _slow_remaining > 0.0:
 		_slow_remaining -= delta
+	if _slow_immune_remaining > 0.0:
+		_slow_immune_remaining -= delta
+	if _speed_boost_remaining > 0.0:
+		_speed_boost_remaining -= delta
 	if _invert_remaining > 0.0:
 		_invert_remaining -= delta
 		if _invert_remaining <= 0.0 and _music_reversed:
@@ -995,9 +1028,151 @@ func _update_mouth() -> void:
 # ── Collisions ────────────────────────────────────────────────────────────────
 
 func apply_slow(duration: float) -> void:
+	# Шляпа мага гасит замедление целиком, а не сокращает — иначе за 3 секунды
+	# эффект не читается.
+	if _slow_immune_remaining > 0.0:
+		_vfx_dodge_flash()
+		return
 	if duration >= _slow_remaining:
 		_slow_total     = duration
 		_slow_remaining = duration
+
+# ── Эффекты новых предметов ───────────────────────────────────────────────────
+
+# Маска Кейси: неуязвимость к физическому урону. Переиспользует механику
+# «шрамов» Джокера — та же маска на голове, тот же бейдж, но без 60-секундного
+# гейта перезарядки: гейт нужен пассивке скина, а не подобранному предмету.
+func apply_casey_mask(duration: float = CASEY_MASK_DURATION) -> void:
+	_begin_scars(duration, false)
+
+# Шляпа мага: иммунитет к замедляющим предметам. Активное замедление тоже
+# снимаем — подобрать шляпу под бананом и остаться медленным было бы обманом.
+func apply_slow_immunity(duration: float = MAGIC_HAT_DURATION) -> void:
+	_slow_immune_remaining = maxf(_slow_immune_remaining, duration)
+	_slow_remaining        = 0.0
+	start_skill_cd("item:magic_hat", duration)
+	_show_floating_text("НЕ ЗАМЕДЛИТЬ!", Color(0.45, 0.60, 1.00))
+	_vfx_particles(SkinSkills.TRANSFORM)
+	_play_oneshot(_RESIST_SFX)
+
+# Банка колы: ускорение движения головы.
+func apply_speed_boost(duration: float = COLA_DURATION) -> void:
+	_speed_boost_remaining = maxf(_speed_boost_remaining, duration)
+	start_skill_cd("item:cola", duration)
+	_show_floating_text("УСКОРЕНИЕ!", Color(1.00, 0.35, 0.30))
+	_vfx_particles(SkinSkills.TRANSFORM)
+	_play_oneshot(_SFX_GLITTER)
+
+# Чек лузера: доллары, набранные за забег, сгорают. Прогресс жира и опыт не
+# трогаем — предмет бьёт по кошельку, а не по забегу.
+func apply_loser_ticket() -> void:
+	if _dollars <= 0:
+		_show_floating_text("И ТАК НОЛЬ", Color(0.70, 0.70, 0.70))
+		return
+	_dollars = 0
+	dollars_changed.emit(_dollars)
+	_show_floating_text("LOOOOSER", Color(1.00, 0.85, 0.20))
+	_flash_hit()
+	_play_oneshot(_SFX_POOF)
+
+# Чёрный туз: сжигает жир до минимума одним касанием. На SKINNY жира уже нет —
+# тогда это обычный смертельный удар, как у любого препятствия.
+func apply_fat_burn() -> void:
+	if fat_state <= 0:
+		_take_hit(1)
+		return
+	fat_state    = 0
+	_pizza_count = 0
+	_apply_skin_to_sprite()
+	stats_changed.emit(fat_state, _pizza_count, _total_pizza_count)
+	_show_floating_text("ЖИР СГОРЕЛ!", Color(0.85, 0.20, 0.55))
+	_flash_hit()
+	_spawn_hit_bubble()
+	_play_oneshot(_skin_hit_sfx)
+	# Короткая неуязвимость, иначе следующий предмет в той же линии добивает
+	# игрока раньше, чем он успевает среагировать на потерю жира.
+	_invincible = true
+	await get_tree().create_timer(1.5).timeout
+	_invincible = false
+
+# Наручники: энд гейм.
+func apply_handcuffs() -> void:
+	# Маска Кейси разбирается выше, в диспетчере (она ломается и слетает, как от
+	# любого препятствия). Здесь остаются dev-бессмертие и обычное окно
+	# неуязвимости после удара — иначе предмет ломал бы и тестирование, и
+	# честную паузу после потери жира.
+	if _dev_immortal or _invincible:
+		_vfx_dodge_flash()
+		return
+	_last_hit_group = "handcuffs"
+	_last_hit_name  = "handcuffs"
+	_show_floating_text("ЭНД ГЕЙМ", Color(1.00, 0.20, 0.20))
+	_die()
+
+# Песочные часы: замедляют МИР, а не голову. Разница принципиальная — эффект
+# должен читаться как передышка, поэтому предметы и фон едут медленнее, а
+# управление остаётся прежним. Владеет эффектом спавнер (он же чинит тайминги
+# паттернов), здесь только запуск.
+func _apply_hourglass() -> void:
+	var spawner := get_parent().get_node_or_null("Spawner")
+	if spawner and spawner.has_method("apply_slow_mo"):
+		spawner.apply_slow_mo()
+	_show_floating_text("ВРЕМЯ ЗАМЕДЛЕНО", Color(0.55, 0.85, 1.00))
+	_vfx_particles(SkinSkills.TRANSFORM)
+	_play_oneshot(_SFX_GLITTER)
+
+# Жетон казино: единственный предмет забега, который платит ВНЕ забега —
+# начисляется сразу в сейв, чтобы не сгорел вместе со смертью.
+func apply_casino_chip() -> void:
+	SaveData.add_tokens(1, "run_drop")
+	_show_floating_text("+1 ЖЕТОН", Color(1.00, 0.80, 0.15))
+	_dollar_audio.play()
+	_vfx_particles(SkinSkills.TRANSFORM)
+
+# ── Учёт добычи мини-игр ──────────────────────────────────────────────────────
+
+# Учёт с автоматическим начислением через `window` секунд. Нужен «супер пицце»:
+# сам предмет исчезает через ~3 c, а превращённое им поле игрок доедает дольше,
+# и корутина, живущая на предмете, до начисления просто не доживает — Godot
+# отменяет await у освобождённого объекта. Голова живёт весь забег, поэтому
+# ждём здесь.
+func run_loot_tally(window: float, popup_host: Node = null) -> void:
+	begin_loot_tally()
+	await get_tree().create_timer(window).timeout
+	if not is_instance_valid(self):
+		return
+	var got  : Vector2i = loot_tally()
+	var mult : int      = LootMultiplier.roll()
+	award_loot_tally(mult)
+	if got == Vector2i.ZERO:
+		return
+	var host : Node = popup_host if (popup_host != null and is_instance_valid(popup_host)) else get_parent()
+	if host != null:
+		LootMultiplier.show_popup(host, mult, get_viewport_rect().size * Vector2(0.5, 0.32))
+
+func begin_loot_tally() -> void:
+	_loot_tally_active = true
+	_loot_pizza_tally  = 0
+	_loot_dollar_tally = 0
+
+func loot_tally() -> Vector2i:
+	return Vector2i(_loot_pizza_tally, _loot_dollar_tally)
+
+# Доначисляет (mult - 1) от собранного за мини-игру. Возвращает добавку, чтобы
+# мини-игра могла показать её в своём итоговом окне.
+func award_loot_tally(mult: int) -> Vector2i:
+	_loot_tally_active = false
+	var extra_pizza  : int = _loot_pizza_tally  * (mult - 1)
+	var extra_dollar : int = _loot_dollar_tally * (mult - 1)
+	_loot_pizza_tally  = 0
+	_loot_dollar_tally = 0
+	if extra_pizza <= 0 and extra_dollar <= 0:
+		return Vector2i.ZERO
+	for _i in extra_pizza:
+		_eat_pizza()
+	for _i in extra_dollar:
+		_collect_dollar()
+	return Vector2i(extra_pizza, extra_dollar)
 
 # Тап пришёлся на тело конуса? (мир ≈ экран, без камеры) — тогда это тап по конусу,
 # а не движение/дабл-тап Нормальдо.
@@ -1637,6 +1812,8 @@ func _max_fat_state() -> int:
 func _eat_pizza() -> void:
 	_pizza_count       += 1
 	_total_pizza_count += 1
+	if _loot_tally_active:
+		_loot_pizza_tally += 1
 
 	# Wizard: extra XP on boost
 	if _wizard_bonus_active and _wizard_bonus_type == 1:
@@ -1854,6 +2031,8 @@ func _cleanup_attract_sparks() -> void:
 
 func _collect_dollar() -> void:
 	_dollars += 1
+	if _loot_tally_active:
+		_loot_dollar_tally += 1
 	_dollar_audio.play()
 	dollars_changed.emit(_dollars)
 
@@ -1861,19 +2040,25 @@ func _collect_dollar() -> void:
 # Worn on the head for 5 s (invulnerable). The mask falls off when the timer
 # ends OR the moment Normaldo ploughs into something (one-hit shield).
 func _activate_scars() -> void:
-	# Repeatable, but only once per 60 s (hidden recharge gate).
-	if not is_skill_ready("scars_recharge"):
+	_begin_scars(5.0, true)
+
+# Общая машинка «маска на голове + неуязвимость»: пассивка Джокера и предмет
+# «маска Кейси» отличаются только длительностью и наличием гейта перезарядки.
+func _begin_scars(duration: float, gated: bool) -> void:
+	# Пассивка повторяемая, но не чаще раза в 60 c (скрытый гейт перезарядки).
+	if gated and not is_skill_ready("scars_recharge"):
 		return
 	_scars_active = true
 	_invincible   = true
 	_scars_token += 1
 	var tok := _scars_token
-	start_skill_cd("passive:scars", 5.0)    # mask badge = the 5 s invuln window
-	start_skill_cd("scars_recharge", 60.0)  # 60 s before it can trigger again
+	start_skill_cd("passive:scars", duration)   # бейдж маски = окно неуязвимости
+	if gated:
+		start_skill_cd("scars_recharge", 60.0)
 	_show_floating_text("НЕУЯЗВИМ!", Color(0.65, 0.25, 1.0))
 	if not is_instance_valid(_scars_mask):
 		_spawn_scars_mask()
-	get_tree().create_timer(5.0).timeout.connect(func():
+	get_tree().create_timer(duration).timeout.connect(func():
 		if is_instance_valid(self) and _scars_active and _scars_token == tok:
 			_end_scars())
 
@@ -2001,6 +2186,55 @@ func _on_area_entered(area: Area2D) -> void:
 			else:
 				area.queue_free()
 			return
+
+	# ── Новые предметы ────────────────────────────────────────────────────────
+	# Стоят ВЫШЕ веток obstacle/slowing намеренно: наручники и чёрный туз лежат
+	# ещё и в группе obstacle (чтобы их сносил бумбокс и жёг молотов), и общая
+	# ветка урона перехватила бы их раньше собственного эффекта.
+	if area.is_in_group("handcuffs") or area.is_in_group("black_ace"):
+		# Маска Кейси гасит их так же, как любое препятствие: ломается предмет,
+		# маска слетает. Иначе получалось бы, что неуязвимость работает от бочки,
+		# но не от наручников — а игрок видит один и тот же щит.
+		if _scars_active:
+			_last_hit_group = "handcuffs" if area.is_in_group("handcuffs") else "black_ace"
+			_end_scars()
+			_vfx_resist_break(area.global_position)
+			_kill_item(area)
+			return
+		var lethal := area.is_in_group("handcuffs")
+		area.queue_free()
+		if lethal:
+			apply_handcuffs()
+		elif not _invincible:
+			apply_fat_burn()
+		return
+	if area.is_in_group("casey_mask"):
+		area.queue_free()
+		apply_casey_mask()
+		return
+	if area.is_in_group("magic_hat"):
+		area.queue_free()
+		apply_slow_immunity()
+		return
+	if area.is_in_group("cola"):
+		area.queue_free()
+		apply_speed_boost()
+		return
+	if area.is_in_group("loser_ticket"):
+		area.queue_free()
+		apply_loser_ticket()
+		return
+	if area.is_in_group("casino_chip"):
+		area.queue_free()
+		apply_casino_chip()
+		return
+	if area.is_in_group("hourglass"):
+		area.queue_free()
+		_apply_hourglass()
+		return
+	if area.is_in_group("magic_box"):
+		area.open(self)
+		return
 
 	if area.is_in_group("pizza"):
 		_eat_pizza()

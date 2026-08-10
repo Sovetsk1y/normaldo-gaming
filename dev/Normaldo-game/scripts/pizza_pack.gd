@@ -8,6 +8,13 @@ const PIZZA_TEX   := preload("res://assets/items/pizza.png")
 const PACK_HEAD_OFFSET := Vector2(0.0, -60.0)
 const EFFECT_DURATION  := 2.5
 
+# Сколько считаем добычу «супер пиццы» для множителя рейта. Взрыв превращает
+# препятствия в пиццу по всему экрану, и до дальних Нормальдо долетает уже
+# после того, как сам пакет истаял: при 250 px/s правый край едет к голове
+# ~3.8 c. Поэтому окно учёта заметно длиннее EFFECT_DURATION.
+# См. loot_multiplier.gd
+const TALLY_WINDOW := 5.5
+
 @export var speed: float = 250.0
 
 var _active   : bool   = false
@@ -68,6 +75,12 @@ func explode() -> void:
 	ptc.color                     = Color(1.0, 0.55, 0.1, 1.0)
 	ptc.position                  = Vector2(0.0, 12.0)
 	add_child(ptc)
+
+	# Учёт добычи для множителя ×1…×5 стартует ДО превращения — иначе первые
+	# пиццы, съеденные вплотную к голове, в бросок не попадут. Ждёт и начисляет
+	# сама голова: пакет к концу окна учёта уже освобождён.
+	if _normaldo and _normaldo.has_method("run_loot_tally"):
+		_normaldo.run_loot_tally(TALLY_WINDOW, get_parent())
 
 	var spawner := get_parent()
 	var to_transform : Array = []

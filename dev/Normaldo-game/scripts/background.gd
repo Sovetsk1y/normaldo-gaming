@@ -201,13 +201,18 @@ func _ready() -> void:
 		_maybe_spawn_lamp2_for_tile(tile)
 		_maybe_spawn_rat_for_tile(tile)
 
+# Множитель скорости прокрутки. Песочные часы замедляют мир целиком, поэтому
+# фон обязан ехать медленнее вместе с предметами — иначе стены «убегают» от
+# зависших в воздухе бочек и сцена расползается. Ставит spawner.apply_slow_mo().
+var speed_mult : float = 1.0
+
 func _process(delta: float) -> void:
 	# Running rats keep ticking on the menu/intro too — gives the empty room a
 	# bit of life before the player starts scrolling.
 	_update_rats_run(delta)
 	if not _scrolling:
 		return
-	var shift := SCROLL_SPEED * delta
+	var shift := SCROLL_SPEED * speed_mult * delta
 
 	_bg_intro.position.x -= shift
 	if _bg_intro.visible and _bg_intro.position.x <= -BG_WIDTH:
@@ -491,7 +496,7 @@ func _make_city_tile(x: float) -> Sprite2D:
 func _update_city(delta: float) -> void:
 	if _city_a == null or _city_b == null:
 		return
-	var shift := CITY_SCROLL_SPEED * delta
+	var shift := CITY_SCROLL_SPEED * speed_mult * delta
 	_city_a.position.x -= shift
 	_city_b.position.x -= shift
 	if _city_a.position.x <= -_city_w:

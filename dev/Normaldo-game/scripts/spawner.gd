@@ -20,6 +20,10 @@ const COMPASS_SCRIPT       := preload("res://scripts/compass_item.gd")
 const ROADSIGN_BUM_SCRIPT  := preload("res://scripts/roadsign_bum.gd")
 const CONE_SCRIPT          := preload("res://scripts/cone.gd")
 const THIEF_SCRIPT         := preload("res://scripts/thief.gd")
+# Предметы-эффекты: один скрипт на восемь видов, вид задаётся полем `kind`.
+const EFFECT_ITEM_SCRIPT   := preload("res://scripts/effect_item.gd")
+const MAGIC_BOX_SCRIPT     := preload("res://scripts/magic_box.gd")
+const NINJA_SCRIPT         := preload("res://scripts/ninja_item.gd")
 const PIZZA_TEX          := preload("res://assets/items/pizza.png")
 const TRASH_TEX          := preload("res://assets/items/trash_bin.png")
 const STONE_TEX          := preload("res://assets/items/stone.png")
@@ -80,13 +84,19 @@ const T45_BATCH_SIZES : Array = [3, 3, 5, 5, 8, 8]
 const BOSS_TEST_DELAY : float = 10.0
 var _boss_test_t      : float = 0.0
 
+# Длина эпизода — 285 c (4:45) вместо прежних 420 c (7:00). Семь минут до
+# босса не выдерживал никто из тестеров: пик интереса приходился на 3-4-ю
+# минуту, дальше шло повторение уже показанных сет-писов. Резали пропорционально
+# (×0.68), поэтому форма кривой сложности осталась прежней — просто плотнее.
+# Каденцию сет-писов в CAMPAIGN_DIRECTOR ужали тем же коэффициентом, иначе на
+# укороченных фазах успевало показаться вдвое меньше сценок.
 const CAMPAIGN_PHASES : Array = [
-	{ "speed": 220.0, "duration":  60.0, "no_pizza": false },  # T1
-	{ "speed": 242.0, "duration":  80.0, "no_pizza": false },  # T2
-	{ "speed": 264.0, "duration":  90.0, "no_pizza": false },  # T3
-	{ "speed": 297.0, "duration":  90.0, "no_pizza": false },  # T4
-	{ "speed": 330.0, "duration":  80.0, "no_pizza": false },  # T5
-	{ "speed": 330.0, "duration":  20.0, "no_pizza": true  },  # pre-boss
+	{ "speed": 220.0, "duration":  45.0, "no_pizza": false },  # T1
+	{ "speed": 242.0, "duration":  55.0, "no_pizza": false },  # T2
+	{ "speed": 264.0, "duration":  60.0, "no_pizza": false },  # T3
+	{ "speed": 297.0, "duration":  60.0, "no_pizza": false },  # T4
+	{ "speed": 330.0, "duration":  50.0, "no_pizza": false },  # T5
+	{ "speed": 330.0, "duration":  15.0, "no_pizza": true  },  # pre-boss
 ]
 
 # Per-phase pattern tier weights: [T1_w, T2_w, T3_w, T45_w]
@@ -108,11 +118,11 @@ const CAMPAIGN_PAT_WEIGHTS : Array = [
 #   sp   — eligible set-piece ids for this phase
 # See /Концепция/Эпизод 1 — прогрессия предметов (редизайн).md
 const CAMPAIGN_DIRECTOR : Array = [
-	{ "res": 0.90, "int": 0.85, "cad": 30.0, "sp": ["sandwich", "zigzag"] },
-	{ "res": 0.76, "int": 0.72, "cad": 24.0, "sp": ["sandwich", "zigzag", "barrel_cascade", "snake_columns", "bum_crowd", "glove_wave", "cone"] },
-	{ "res": 0.66, "int": 0.64, "cad": 20.0, "sp": ["barrel_cascade", "snake_columns", "stone_chess", "bum_wall", "bum_crowd", "diagonal", "glove_wave", "cone"] },
-	{ "res": 0.58, "int": 0.56, "cad": 18.0, "sp": ["snake_columns", "stone_chess", "glove_wave", "diagonal", "bum_wall", "bum_crowd", "cone"] },
-	{ "res": 0.52, "int": 0.50, "cad": 15.0, "sp": ["stone_chess", "glove_wave", "molotov_wave", "diagonal", "bum_crowd"] },
+	{ "res": 0.90, "int": 0.85, "cad": 20.0, "sp": ["sandwich", "zigzag"] },
+	{ "res": 0.76, "int": 0.72, "cad": 16.0, "sp": ["sandwich", "zigzag", "barrel_cascade", "snake_columns", "bum_crowd", "glove_wave", "cone"] },
+	{ "res": 0.66, "int": 0.64, "cad": 14.0, "sp": ["barrel_cascade", "snake_columns", "stone_chess", "bum_wall", "bum_crowd", "diagonal", "glove_wave", "cone"] },
+	{ "res": 0.58, "int": 0.56, "cad": 12.0, "sp": ["snake_columns", "stone_chess", "glove_wave", "diagonal", "bum_wall", "bum_crowd", "cone"] },
+	{ "res": 0.52, "int": 0.50, "cad": 10.0, "sp": ["stone_chess", "glove_wave", "molotov_wave", "diagonal", "bum_crowd"] },
 ]
 
 # Item speed goes up in STEPS (background scrolls at a fixed, slower pace — see
@@ -126,14 +136,43 @@ const SPEEDUP_STEP         : float = 0.10    # +10% за шаг, компаун�
 
 func _campaign_item_speed() -> float:
 	if _elapsed < SPEEDUP_FIRST_AT:
-		return CAMPAIGN_SPEED_MIN
+		return CAMPAIGN_SPEED_MIN * world_speed_mult
 	# Кол-во сработавших ускорений: 1 на 17-й секунде, +1 каждые SPEEDUP_INTERVAL.
 	var steps := 1 + int((_elapsed - SPEEDUP_FIRST_AT) / SPEEDUP_INTERVAL)
 	var mult  := pow(1.0 + SPEEDUP_STEP, float(steps))
-	return minf(CAMPAIGN_SPEED_MIN * mult, CAMPAIGN_SPEED_MAX)
+	return minf(CAMPAIGN_SPEED_MIN * mult, CAMPAIGN_SPEED_MAX) * world_speed_mult
 const LETHAL_SET_PIECES : Array = ["glove_wave", "molotov_wave"]
 var _last_sp_at : float  = -999.0   # _elapsed at the last set-piece
 var _last_sp_id : String = ""       # avoid immediate repeats
+
+# ── Анти-наложение предметов разного размера ─────────────────────────────────
+# Ударяющие предметы теперь спавнятся размером ×1…×3 (см. ItemSizing). Крупный
+# экземпляр перестаёт помещаться в свой лейн: при высоте экрана 430 лейн равен
+# 86 px, а предмет ×3 — это 180 px, то есть три лейна.
+#
+# Поэтому перед каждым спавном место РЕЗЕРВИРУЕТСЯ. Все предметы едут влево с
+# одной скоростью, значит два предмета пересекаются только если совпали и по
+# вертикали, и по времени спавна: горизонтальное расстояние между ними — это
+# speed × разница во времени. Отсюда проверка ниже в две строки.
+#
+# Гарантии разные для двух видов спавна:
+#   • ОДИНОЧНЫЙ (случайный поток, бонус между паттернами) — можно до ×3, после
+#     чего следующая единица спавна ждёт, пока гигант уедет (_big_clear_t).
+#   • В ПАТТЕРНЕ — только до PATTERN_MULT_MAX. Соседние лейны в паттернах заняты
+#     осознанно, и предмет обязан остаться внутри своего: 86 px лейн против
+#     2 × 37.5 px радиусов двух соседних ×1.25 — не пересекаются.
+const SPAN_PAD         : float = 1.02   # с запасом: круги не должны касаться вовсе
+
+# Потолок размера внутри паттерна выводится из двух геометрий поля, а не
+# подбирается на глаз. Оба неравенства проверяет dev/smoke_items.gd:
+#   по горизонтали  2 × BASE_R × PATTERN_MULT_MAX < COL_SPACING  (75 < 85)
+#   по вертикали    BASE_R × (1 + PATTERN_MULT_MAX) < высота лейна (67.5 < 86)
+# Первое держит два предмета подряд в одном лейне, второе — двух соседей в
+# смежных лейнах. Поднимать потолок без пересчёта COL_SPACING нельзя.
+const PATTERN_MULT_MAX : float = 1.25
+
+var _spans       : Array = []     # [{y, r, t}] — занятое место
+var _big_clear_t : float = -1.0   # до этого _elapsed нельзя начинать новую единицу
 
 var _elapsed        : float = 0.0
 var _spawn_timer    : float = 0.5
@@ -200,6 +239,125 @@ func _process(delta: float) -> void:
 		if dur != INF and _phase_elapsed >= dur:
 			_advance_endless_phase()
 
+# Забыть резервы, до которых предмету уже не догнать.
+func _prune_spans(speed: float) -> void:
+	if speed <= 0.0:
+		return
+	# Тот же запас, что и в проверке конфликта, иначе резерв успевал бы истечь
+	# на волосок раньше, чем перестаёт мешать.
+	var reach := ItemSizing.radius_for(ItemSizing.MULT_MAX) * 2.0 * SPAN_PAD
+	var keep : Array = []
+	for e in _spans:
+		if speed * (_elapsed - float(e["t"])) < reach:
+			keep.append(e)
+	_spans = keep
+
+func _register_span(y: float, r: float) -> void:
+	_spans.append({"y": y, "r": r, "t": _elapsed})
+
+func _span_conflict(y: float, r: float, speed: float) -> bool:
+	for e in _spans:
+		var reach : float = (r + float(e["r"])) * SPAN_PAD
+		if absf(y - float(e["y"])) < reach and speed * (_elapsed - float(e["t"])) < reach:
+			return true
+	return false
+
+# Самый крупный размер из допустимых: не вылезает за экран и ни с чем не
+# пересекается. Всегда возвращает минимум ×1 — базовый размер паттернами уже
+# заложен и конфликтовать не может.
+func _fit_size_mult(y: float, speed: float, want: float) -> float:
+	var vp_h := get_viewport_rect().size.y
+	var m    := want
+	while m > 1.0:
+		var r := ItemSizing.radius_for(m)
+		if y - r >= 4.0 and y + r <= vp_h - 4.0 and not _span_conflict(y, r, speed):
+			return m
+		m -= 0.15
+	return 1.0
+
+# Выдать ударяющему предмету случайный размер и занять под него место.
+# solo=true — предмет прилетел один (случайный поток / бонус), ему можно до ×3.
+func _size_hazard(node: Node2D, y: float, speed: float, solo: bool) -> void:
+	_prune_spans(speed)
+	var want : float = ItemSizing.roll_hazard_mult() if solo else randf_range(1.0, PATTERN_MULT_MAX)
+	var m    : float = _fit_size_mult(y, speed, want)
+	ItemSizing.apply_node_scale(node, m)
+	var r := ItemSizing.radius_for(m)
+	_register_span(y, r)
+	# Гигант забирает себе целую полосу — держим следующую единицу спавна, пока
+	# он не уедет на свой диаметр, иначе она въедет ему в бок.
+	if m > PATTERN_MULT_MAX and speed > 0.0:
+		_big_clear_t = maxf(_big_clear_t, _elapsed + (2.0 * r) / speed)
+
+# Ресурсы и прочие предметы место не занимают собой, но ЗАНИМАЮТ его для
+# крупных: иначе следующий гигант вырастет прямо поверх пиццы.
+func _mark_base_span(y: float) -> void:
+	_register_span(y, ItemSizing.BASE_R)
+
+# Дождаться, пока уедет крупный предмет (см. _size_hazard).
+func _await_big_clear() -> void:
+	if _big_clear_t <= _elapsed:
+		return
+	var wait := _big_clear_t - _elapsed
+	_big_clear_t = -1.0
+	await get_tree().create_timer(wait).timeout
+
+# ── Песочные часы: замедление мира ───────────────────────────────────────────
+# Замедляем не время движка, а сам мир: скорость всех живых предметов и
+# прокрутку фона. Управление головой не трогаем — в этом весь смысл эффекта,
+# игрок получает передышку, а не общий тормоз.
+#
+# Живым предметам скорость домножаем разово: они уже расставлены по расстоянию,
+# и одинаковый множитель для всех сохраняет интервалы между ними в точности.
+#
+# А вот НОВЫЕ предметы на время эффекта не спавним вовсе, и это не лень. Паттерн
+# захватывает `speed` один раз в начале и от него же считает паузы между
+# колонками (_col_gap = COL_SPACING / speed). Замедли предметы посреди паттерна —
+# и его оставшиеся колонки продолжат вылетать с прежним темпом, но ехать будут
+# медленнее: расстояние между ними схлопнется с 85 px до 38, то есть предметы
+# налезут друг на друга. Пауза потока убирает проблему целиком и заодно делает
+# эффект честной «передышкой»: поле медленно доезжает и пустеет.
+const SLOW_MO_FACTOR   : float = 0.45
+const SLOW_MO_DURATION : float = 5.0
+
+var world_speed_mult : float = 1.0
+var _slow_mo_token   : int   = 0
+
+func apply_slow_mo(factor: float = SLOW_MO_FACTOR, duration: float = SLOW_MO_DURATION) -> void:
+	_slow_mo_token += 1
+	var tok := _slow_mo_token
+	# Если поток уже стоит — значит идёт мини-игра или босс, и пауза/возобновление
+	# принадлежат им. Тогда только замедляем то, что уже летит.
+	var owns_pause := not _frozen
+	if is_equal_approx(world_speed_mult, 1.0):
+		_scale_live_speeds(factor)
+	world_speed_mult = factor
+	_set_background_mult(factor)
+	if owns_pause:
+		pause_for_event()
+
+	await get_tree().create_timer(duration).timeout
+
+	# Пока часы висели, мог прилететь второй экземпляр — тогда выход из режима
+	# принадлежит ему, а не нам.
+	if not is_instance_valid(self) or tok != _slow_mo_token:
+		return
+	_scale_live_speeds(1.0 / factor)
+	world_speed_mult = 1.0
+	_set_background_mult(1.0)
+	if owns_pause:
+		resume_after_event()
+
+func _scale_live_speeds(k: float) -> void:
+	for child in get_children():
+		if child.get("speed") != null:
+			child.speed = float(child.speed) * k
+
+func _set_background_mult(k: float) -> void:
+	var bg := get_parent().get_node_or_null("Background")
+	if bg and bg.get("speed_mult") != null:
+		bg.speed_mult = k
+
 func _lane_centers() -> Array:
 	var h      := get_viewport_rect().size.y
 	var result : Array = []
@@ -227,6 +385,8 @@ func _run_campaign_pattern() -> void:
 	var speed := _campaign_item_speed()   # непрерывный разгон предметов по времени
 	var lanes := _lane_centers()
 	var vp_w  := get_viewport_rect().size.x
+
+	await _await_big_clear()
 
 	if cfg["no_pizza"]:
 		await _campaign_pre_boss_pattern(speed, lanes, vp_w)
@@ -267,37 +427,77 @@ func _random_burst(dc: Dictionary, speed: float, lanes: Array, vp_w: float) -> v
 	var count := randi_range(3, 5)
 	for i in count:
 		if _frozen: return
+		# Перед КАЖДЫМ предметом, а не только перед серией: гигант рождается
+		# именно здесь, и следующий предмет серии — первый, кто может въехать
+		# ему в бок.
+		await _await_big_clear()
+		if _frozen: return
 		_spawn_random_item(dc, speed, lanes, vp_w)
 		if i < count - 1:
 			await get_tree().create_timer(interval).timeout
 
+# Наручники — единственный предмет с мгновенной смертью, поэтому у них
+# отдельный, более жёсткий гейт: только с фазы FROM (третья минута, игрок уже
+# читает поле) и с собственным низким шансом поверх обычного розыгрыша.
+const HANDCUFFS_FROM_PHASE : int   = 3
+const HANDCUFFS_CHANCE     : float = 0.012
+
 # One weighted-random item. Lethal telegraph threats (glove/molotov/bomb) never
 # come from the random stream — only from readable set-pieces.
+#
+# Одиночные предметы (solo=true) — единственное место, где ударяющему предмету
+# разрешён размер до ×3: вокруг него гарантированно пусто, и спавнер придержит
+# следующую единицу, пока гигант не уедет.
 func _spawn_random_item(dc: Dictionary, speed: float, lanes: Array, vp_w: float) -> void:
 	var y : float = lanes[randi() % LANE_COUNT] + _t1_osc_y()
+
+	if _phase >= HANDCUFFS_FROM_PHASE and randf() < HANDCUFFS_CHANCE:
+		_spawn_effect_item("handcuffs", y, vp_w, speed)
+		return
+
 	if randf() < float(dc["res"]):
 		var r := randf()
-		if   r < 0.72: _spawn_item(y, vp_w, PIZZA_TEX, 0.09, speed, 0, true, true, true)
-		elif r < 0.92: _spawn_dollar(y, vp_w, speed)
-		elif r < 0.97: _inst_lane(MONEY_BAG_SCENE, speed, vp_w, lanes)
-		else:          _inst_lane(MAGNET_SCENE, speed, vp_w, lanes)
+		if   r < 0.66: _spawn_item(y, vp_w, PIZZA_TEX, 0.09, speed, 0, true, true, true)
+		elif r < 0.84: _spawn_dollar(y, vp_w, speed)
+		elif r < 0.89: _inst_lane(MONEY_BAG_SCENE, speed, vp_w, lanes)
+		elif r < 0.925: _inst_lane(MAGNET_SCENE, speed, vp_w, lanes)
+		elif r < 0.950: _spawn_effect_item("cola", y, vp_w, speed)          # банка колы (ускорение)
+		elif r < 0.968: _spawn_effect_item("magic_hat", y, vp_w, speed)     # шляпа мага (иммун к замедлению)
+		elif r < 0.984: _spawn_effect_item("casey_mask", y, vp_w, speed)    # маска Кейси (иммун к урону)
+		elif r < 0.993: _spawn_effect_item("hourglass", y, vp_w, speed)     # песочные часы (замедление мира)
+		elif r < 0.998: _spawn_scripted(MAGIC_BOX_SCRIPT, y, vp_w, speed)   # мэджик бокс
+		else:           _spawn_effect_item("casino_chip", y, vp_w, speed)   # жетон автомата (редкий)
 	else:
 		var h := randf()
-		if   h < 0.22: _spawn_slowing(y, vp_w, speed)                                       # banana/beer (slow)
-		elif h < 0.37: _spawn_t1_negative(y, vp_w, speed, true)                             # trash barrel (1 dmg)
-		elif h < 0.51: _spawn_item(y, vp_w, STONE_TEX, 0.16, speed, 1, false, false, false, "stone")
-		elif h < 0.63: _spawn_snake(y, vp_w, speed)
-		elif h < 0.73: _spawn_homeless(y, vp_w, speed)
-		elif h < 0.81: _spawn_dog(y, vp_w, speed)
-		elif h < 0.88: _spawn_scripted(THIEF_SCRIPT, y, vp_w, speed)          # вор
-		elif h < 0.94: _spawn_scripted(ROADSIGN_BUM_SCRIPT, y, vp_w, speed)   # бомж со знаком
-		else:          _spawn_scripted(COMPASS_SCRIPT, y, vp_w, speed)        # компас (реверс)
+		if   h < 0.20: _spawn_slowing(y, vp_w, speed)                                       # banana/beer (slow)
+		elif h < 0.33: _spawn_t1_negative(y, vp_w, speed, true)                             # trash barrel (1 dmg)
+		elif h < 0.45: _spawn_item(y, vp_w, STONE_TEX, 0.16, speed, 1, false, false, false, "stone", true)
+		elif h < 0.56: _spawn_snake(y, vp_w, speed, true)
+		elif h < 0.65: _spawn_homeless(y, vp_w, speed, true)
+		elif h < 0.72: _spawn_dog(y, vp_w, speed, true)
+		elif h < 0.78: _spawn_scripted(THIEF_SCRIPT, y, vp_w, speed)          # вор
+		elif h < 0.83: _spawn_scripted(ROADSIGN_BUM_SCRIPT, y, vp_w, speed)   # бомж со знаком
+		elif h < 0.87: _spawn_scripted(COMPASS_SCRIPT, y, vp_w, speed)        # компас (реверс)
+		elif h < 0.92: _spawn_effect_item("black_ace", y, vp_w, speed)        # чёрный туз (сжигает жир)
+		elif h < 0.97: _spawn_scripted(NINJA_SCRIPT, y, vp_w, speed)          # ниндзя (сюрикены)
+		else:          _spawn_effect_item("loser_ticket", y, vp_w, speed)     # чек лузера (обнуляет доллары)
 
-func _spawn_homeless(y: float, vp_w: float, speed: float) -> void:
+# Предмет-эффект: скрипт один, вид задаётся полем `kind` (см. effect_item.gd).
+func _spawn_effect_item(kind: String, y: float, vp_w: float, speed: float) -> void:
+	var node := Area2D.new()
+	node.set_script(EFFECT_ITEM_SCRIPT)
+	node.set("kind", kind)
+	node.set("speed", speed)
+	node.position = Vector2(vp_w + 80.0, y)
+	_mark_base_span(y)
+	add_child(node)
+
+func _spawn_homeless(y: float, vp_w: float, speed: float, solo: bool = false) -> void:
 	var hm := HOMELESS_SCENE.instantiate()
 	if hm.get("speed") != null:
 		hm.speed = speed
 	hm.position = Vector2(vp_w + 80.0, y)
+	_size_hazard(hm, y, speed, solo)
 	add_child(hm)
 
 # Dev: заспавнить вора вручную (кнопка в HUD).
@@ -314,6 +514,7 @@ func _spawn_scripted(script: Script, y: float, vp_w: float, speed: float) -> voi
 	if node.get("speed") != null:
 		node.speed = speed
 	node.position = Vector2(vp_w + 80.0, y)
+	_mark_base_span(y)
 	add_child(node)
 
 # Конус — высокий (3 лейна), ставим по центру, блокирует средние ряды.
@@ -396,6 +597,10 @@ func _setpiece_cone(speed: float, lanes: Array, vp_w: float) -> void:
 # Одна "куча" — 2-3 бомжа плотным горизонтальным кластером в одном лейне.
 func _spawn_homeless_clump(y: float, vp_w: float, speed: float) -> void:
 	var n := randi_range(2, 3)
+	# Куче размер НЕ рандомим: бомжи в ней стоят плотно (шаг 36 px), это её
+	# смысл, и любое увеличение развалило бы кластер. Но место она занимает —
+	# иначе следующим спавном поверх кучи мог бы родиться гигант.
+	_mark_base_span(y)
 	for i in n:
 		var hm := HOMELESS_SCENE.instantiate()
 		if hm.get("speed") != null:
@@ -497,10 +702,11 @@ func _endless_pick_pat_tier() -> int:
 
 func _run_endless_pattern(allow_twin: bool = true) -> void:
 	var cfg     = ENDLESS_PHASES[_phase]
-	var speed  := cfg["speed"] as float
+	var speed  := (cfg["speed"] as float) * world_speed_mult
 	var lanes  := _lane_centers()
 	var vp_w   := get_viewport_rect().size.x
 	var pt     := _endless_pick_pat_tier()
+	await _await_big_clear()
 	_pat_tier   = pt
 	await _dispatch_pat(pt, speed, lanes, vp_w)
 	if _frozen:
@@ -1044,25 +1250,40 @@ func _t5_molotov_checkerboard(speed: float, lanes: Array, vp_w: float, cols: int
 
 # ── Bonus item (inter-pattern) ────────────────────────────────────────────────
 
+# В бесконечном режиме случайного потока нет — весь «инвентарь» новых предметов
+# приходит через этот бонус между паттернами. Поэтому пул здесь шире, чем был:
+# иначе половина предметов существовала бы только в кампании.
 func _spawn_bonus_item(speed: float, vp_w: float, lanes: Array) -> void:
+	var y : float = lanes[randi() % LANE_COUNT]
 	var roll := randf()
-	if   roll < 0.30: _inst_lane(MAGNET_SCENE,     speed, vp_w, lanes)
-	elif roll < 0.55: _inst_lane(BOOMBOX_SCENE,    speed, vp_w, lanes)
-	elif roll < 0.75: _inst_lane(PIZZA_PACK_SCENE,  speed, vp_w, lanes)
-	else:             _inst_lane(MONEY_BAG_SCENE,   speed, vp_w, lanes)
+	if   roll < 0.18: _inst_lane(MAGNET_SCENE,      speed, vp_w, lanes)
+	elif roll < 0.34: _inst_lane(BOOMBOX_SCENE,     speed, vp_w, lanes)
+	elif roll < 0.48: _inst_lane(PIZZA_PACK_SCENE,  speed, vp_w, lanes)
+	elif roll < 0.60: _inst_lane(MONEY_BAG_SCENE,   speed, vp_w, lanes)
+	elif roll < 0.68: _spawn_effect_item("hourglass",  y, vp_w, speed)
+	elif roll < 0.76: _spawn_effect_item("casey_mask", y, vp_w, speed)
+	elif roll < 0.83: _spawn_effect_item("magic_hat",  y, vp_w, speed)
+	elif roll < 0.89: _spawn_effect_item("cola",       y, vp_w, speed)
+	elif roll < 0.93: _spawn_scripted(MAGIC_BOX_SCRIPT, y, vp_w, speed)
+	elif roll < 0.96: _spawn_effect_item("black_ace",    y, vp_w, speed)
+	elif roll < 0.98: _spawn_scripted(NINJA_SCRIPT,      y, vp_w, speed)
+	elif roll < 0.995: _spawn_effect_item("loser_ticket", y, vp_w, speed)
+	else:              _spawn_effect_item("casino_chip",  y, vp_w, speed)
 
 # ── Scene helpers ─────────────────────────────────────────────────────────────
 
-func _spawn_snake(y: float, vp_w: float, speed: float) -> void:
+func _spawn_snake(y: float, vp_w: float, speed: float, solo: bool = false) -> void:
 	var s      := SNAKE_SCENE.instantiate()
 	s.speed     = speed * 1.05
 	s.position  = Vector2(vp_w + 80.0, y)
+	_size_hazard(s, y, speed, solo)
 	add_child(s)
 
-func _spawn_dog(y: float, vp_w: float, speed: float) -> void:
+func _spawn_dog(y: float, vp_w: float, speed: float, solo: bool = false) -> void:
 	var d      := DOG_SCENE.instantiate()
 	d.speed     = speed
 	d.position  = Vector2(vp_w + 80.0, y)
+	_size_hazard(d, y, speed, solo)
 	add_child(d)
 
 func _spawn_molotov(y: float, vp_w: float, speed: float, fire_count: int = 4) -> void:
@@ -1104,9 +1325,11 @@ func _inst_lane(scene: PackedScene, speed: float, vp_w: float, lanes: Array, set
 	node.position = Vector2(vp_w + 80.0, lanes[randi() % LANE_COUNT])
 	add_child(node)
 
-func _spawn_item(y: float, vp_w: float, tex: Texture2D, scale: float,
-		speed: float, damage: int, eatable: bool = false, rotates: bool = true,
-		pulses: bool = false, skin_tag: String = "") -> Node:
+# Собрать предмет, НЕ добавляя в дерево — нужно и обычному спавну, и мэджик
+# боксу, который сам решает, куда предмет полетит.
+func _make_item(tex: Texture2D, scale: float, speed: float, damage: int,
+		eatable: bool = false, rotates: bool = true, pulses: bool = false,
+		skin_tag: String = "") -> Node2D:
 	var item          := ITEM_SCENE.instantiate()
 	item.speed         = speed
 	item.is_eatable    = eatable
@@ -1118,9 +1341,62 @@ func _spawn_item(y: float, vp_w: float, tex: Texture2D, scale: float,
 	var sprite        := item.get_node("Sprite2D") as Sprite2D
 	sprite.texture     = tex
 	sprite.scale       = Vector2.ONE * scale
-	item.position      = Vector2(vp_w + 80.0, y)
+	return item
+
+func _spawn_item(y: float, vp_w: float, tex: Texture2D, scale: float,
+		speed: float, damage: int, eatable: bool = false, rotates: bool = true,
+		pulses: bool = false, skin_tag: String = "", solo: bool = false) -> Node:
+	var item := _make_item(tex, scale, speed, damage, eatable, rotates, pulses, skin_tag)
+	item.position = Vector2(vp_w + 80.0, y)
+	# Размер рандомим только ударяющим — ресурсы должны читаться «на съедобность»
+	# мгновенно, а для этого пицца обязана быть всегда одного размера.
+	if damage > 0:
+		_size_hazard(item, y, speed, solo)
+	else:
+		_mark_base_span(y)
 	add_child(item)
 	return item
+
+# ── Пул мэджик бокса ─────────────────────────────────────────────────────────
+# Ящик сам решает, куда полетит предмет, поэтому получает его НЕ добавленным в
+# дерево. Пул смещён в плюс (пицца/доллары ≈ 60 %), но с ощутимой долей риска —
+# иначе ящик превращается в гарантированную награду и обесценивает поток.
+# См. magic_box.gd
+func build_random_item(speed: float) -> Node2D:
+	var roll := randf()
+	if roll < 0.42:
+		return _make_item(PIZZA_TEX, 0.09, speed, 0, true, true, true)
+	elif roll < 0.60:
+		var d := _make_item(DOLLAR_TEX, 0.36, speed, 0, false, true, true)
+		d.item_group = "dollar"
+		return d
+	elif roll < 0.66:
+		return _effect_node("casey_mask", speed)
+	elif roll < 0.72:
+		return _effect_node("magic_hat", speed)
+	elif roll < 0.78:
+		return _effect_node("cola", speed)
+	elif roll < 0.83:
+		return _effect_node("hourglass", speed)
+	elif roll < 0.86:
+		return _effect_node("casino_chip", speed)
+	elif roll < 0.92:
+		var sl := (BANANA_PEEL_SCENE if randf() < 0.5 else BEER_SCENE).instantiate()
+		sl.speed = speed
+		return sl
+	elif roll < 0.97:
+		var sn := SNAKE_SCENE.instantiate()
+		sn.speed = speed
+		return sn
+	else:
+		return _effect_node("black_ace", speed)
+
+func _effect_node(kind: String, speed: float) -> Node2D:
+	var node := Area2D.new()
+	node.set_script(EFFECT_ITEM_SCRIPT)
+	node.set("kind", kind)
+	node.set("speed", speed)
+	return node
 
 func _spawn_dollar(y: float, vp_w: float, speed: float) -> void:
 	var item       := ITEM_SCENE.instantiate()
@@ -1134,6 +1410,7 @@ func _spawn_dollar(y: float, vp_w: float, speed: float) -> void:
 	sprite.texture  = DOLLAR_TEX
 	sprite.scale    = Vector2.ONE * 0.36
 	item.position   = Vector2(vp_w + 80.0, y)
+	_mark_base_span(y)
 	add_child(item)
 
 func _spawn_slowing(y: float, vp_w: float, speed: float, banana_only: bool = false) -> void:
@@ -1237,8 +1514,16 @@ func clear_items() -> void:
 	set_process(false)
 	_frozen          = true
 	_pattern_running = false
+	_reset_spans()
 	for child in get_children():
 		child.queue_free()
+
+# Резервы места привязаны к _elapsed, а он не идёт, пока спавнер заморожен.
+# Любая пауза/зачистка обязана их сбросить, иначе после возобновления спавнер
+# считает, что весь экран ещё занят уехавшими предметами.
+func _reset_spans() -> void:
+	_spans.clear()
+	_big_clear_t = -1.0
 
 # ── Event hooks (ЖИРОБОСС mini-game) ──────────────────────────────────────────
 # pause_for_event stops phase advancement + new pattern spawns while keeping the
@@ -1247,6 +1532,7 @@ func clear_items() -> void:
 func pause_for_event() -> void:
 	_frozen          = true
 	_pattern_running = false
+	_reset_spans()
 	set_process(false)
 
 # Like clear_items(), but the items visibly COLLAPSE — drop off the bottom with
@@ -1273,6 +1559,7 @@ func collapse_items() -> void:
 	set_process(false)
 	_frozen          = true
 	_pattern_running = false
+	_reset_spans()
 	for child in get_children():
 		if child is Node2D:
 			collapse_node(child)
@@ -1283,6 +1570,7 @@ func resume_after_event() -> void:
 	_frozen          = false
 	_pattern_running = false
 	_spawn_timer     = 0.6
+	_reset_spans()
 	set_process(true)
 
 func current_phase_speed() -> float:

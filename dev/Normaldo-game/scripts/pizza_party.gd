@@ -236,6 +236,10 @@ func _tick_fly_in(delta: float) -> void:
 		_pack.position.x = _park_x
 		_play_t = _play_time   # отсчёт длительности стартует с началом PLAY
 		_state = State.PLAY
+		# С этого момента считаем всё съеденное: в конце мини-игры добыча
+		# умножается на бросок ×1…×5. См. loot_multiplier.gd
+		if _normaldo.has_method("begin_loot_tally"):
+			_normaldo.begin_loot_tally()
 
 # ── Phase: tap to spit, dodge in the left part ────────────────────────────────
 # Ends only when the pizza's stock is tapped empty (see _on_pack_tap) — no timer.
@@ -381,6 +385,7 @@ func _run_outro() -> void:
 		_normaldo.clear_left_region()
 	_clear_ui()
 	_restore_music()
+	await _award_multiplier()
 	# NB: we do NOT clear _proj here — the items that already flew out of the pack
 	# keep flying to completion (they self-remove once off-screen in
 	# _drive_projectiles). Only the empty pack folds up and dies.
@@ -395,6 +400,20 @@ func _run_outro() -> void:
 	_event_frozen = false
 	_arm_timer = repeat_interval
 	_state = State.IDLE
+
+# Бросок множителя рейта: всё, что игрок наел за мини-игру, доначисляется
+# ×1…×5. Без этого «тапалка» отдавала примерно столько же, сколько обычный
+# поток предметов, и её было выгоднее просто облететь.
+func _award_multiplier() -> void:
+	if not _normaldo.has_method("award_loot_tally"):
+		return
+	var got : Vector2i = _normaldo.loot_tally() if _normaldo.has_method("loot_tally") else Vector2i.ZERO
+	var mult : int = LootMultiplier.roll()
+	_normaldo.award_loot_tally(mult)
+	if got == Vector2i.ZERO:
+		return
+	LootMultiplier.show_popup(self, mult, get_viewport_rect().size * 0.5)
+	await get_tree().create_timer(0.9).timeout
 
 # Close the lid + fold the pack up (shrink + slight roll + fade), then free it.
 func _fold_pack() -> void:

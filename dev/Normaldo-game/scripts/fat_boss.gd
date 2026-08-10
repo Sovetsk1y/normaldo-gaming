@@ -435,8 +435,14 @@ func _run_outro() -> void:
 
 	# Cosmetic transfer of the tally into the HUD, then credit the run score.
 	await _fly_loot_to_hud()
+	# Множитель рейта ×1…×5 — начисляем УЖЕ умноженную добычу, чтобы игрок видел
+	# в HUD итог, а не сначала базу, а потом добавку. См. loot_multiplier.gd
+	var mult : int = LootMultiplier.roll()
+	if _pizza_got > 0 or _dollar_got > 0:
+		LootMultiplier.show_popup(_ui, mult, get_viewport_rect().size * 0.5)
+		await get_tree().create_timer(0.5).timeout
 	if _normaldo.has_method("fat_boss_award"):
-		_normaldo.fat_boss_award(_pizza_got, _dollar_got)
+		_normaldo.fat_boss_award(_pizza_got * mult, _dollar_got * mult)
 	_teardown_bar_hud()
 
 	# Drop the shake camera so the default (no-camera) framing is fully restored.

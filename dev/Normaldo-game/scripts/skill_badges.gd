@@ -12,6 +12,8 @@ const UI_FONT  := preload("res://assets/fonts/RussoOne-Regular.ttf")
 const SMOKE_TEX := preload("res://assets/bosses/ninja_foot/smoke.png")
 const CASEY_TEX := preload("res://assets/items/casey_mask.png")
 const COMPASS_TEX := preload("res://assets/items/compass.png")
+const HAT_TEX     := preload("res://assets/items/magic_hat.png")
+const COLA_TEX    := preload("res://assets/items/cola.png")
 
 const D    : float = 34.0
 const PAD  : float = 10.0
@@ -89,7 +91,7 @@ func setup(nrm: Node) -> void:
 			# ...plus the Casey-mask circle that appears only while the mask is on.
 			specs.append({ "key": "passive:scars", "tex": CASEY_TEX, "sym": "",
 				"mod": Color(1, 1, 1), "ring": RING_PASS, "dyn": true,
-				"title": "НЕУЯЗВИМОСТЬ", "desc": "Маска Кейси — 5 c неуязвимости." })
+				"title": "НЕУЯЗВИМОСТЬ", "desc": "Маска Кейси — неуязвимость к урону." })
 		else:
 			specs.append({ "key": "passive:" + pid, "tex": null,
 				"sym": "★", "mod": Color(1, 1, 1), "ring": RING_PASS, "dyn": false,
@@ -100,6 +102,15 @@ func setup(nrm: Node) -> void:
 	specs.append({ "key": "compass", "tex": COMPASS_TEX, "sym": "",
 		"mod": Color(1, 1, 1), "ring": Color(0.75, 0.40, 1.00), "dyn": true,
 		"title": "РЕВЕРС", "desc": "Компас перевернул управление на 5 c." })
+
+	# Эффекты подобранных предметов — такие же динамические кружки: появляются
+	# только на время действия и для любого скина.
+	specs.append({ "key": "item:magic_hat", "tex": HAT_TEX, "sym": "",
+		"mod": Color(1, 1, 1), "ring": Color(0.45, 0.60, 1.00), "dyn": true,
+		"title": "ШЛЯПА МАГА", "desc": "Иммунитет к замедляющим предметам." })
+	specs.append({ "key": "item:cola", "tex": COLA_TEX, "sym": "",
+		"mod": Color(1, 1, 1), "ring": Color(1.00, 0.35, 0.30), "dyn": true,
+		"title": "БАНКА КОЛЫ", "desc": "Голова двигается быстрее." })
 
 	# Laid out from this layer's origin — the HUD positions the layer itself
 	# (under the resources strip, right of the fat panel).
