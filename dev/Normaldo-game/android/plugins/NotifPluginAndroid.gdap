@@ -1,0 +1,15 @@
+; Godot 4 Android plugin descriptor. The editor's Android exporter reads this
+; from res://android/plugins/ and injects the AAR + its runtime dependencies
+; into the custom gradle build. `binary` is resolved relative to this file.
+;
+; The AAR is produced by ../../addons/notif_plugin/android/build.sh and copied
+; here next to this descriptor.
+[config]
+name="NotifPluginAndroid"
+binary_type="local"
+binary="NotifPluginAndroid.aar"
+
+[dependencies]
+remote=["androidx.core:core-ktx:1.12.0", "com.google.firebase:firebase-messaging:24.0.3"]
+local=[]
+custom_maven_repos=[]

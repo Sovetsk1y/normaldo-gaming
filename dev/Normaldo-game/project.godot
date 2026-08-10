@@ -1,0 +1,52 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Normaldo"
+config/version="1.0.1"
+run/main_scene="res://scenes/game.tscn"
+config/features=PackedStringArray("4.2", "GL Compatibility")
+run/max_fps=60
+boot_splash/bg_color=Color(0.04, 0.03, 0.08, 1)
+boot_splash/image="res://assets/ui/splash.png"
+config/icon="res://assets/ui/icons/app_icon.png"
+config/main_scene="res://scenes/game.tscn"
+
+[autoload]
+
+Logger="*res://scripts/logger.gd"
+SaveData="*res://scripts/save_data.gd"
+SkinRegistry="*res://scripts/skin_registry.gd"
+SkinSkills="*res://scripts/skin_skills.gd"
+QuestManager="*res://scripts/quest_manager.gd"
+LeaderboardMock="*res://scripts/leaderboard_mock.gd"
+LeaderboardClient="*res://scripts/leaderboard_client.gd"
+Analytics="*res://scripts/analytics.gd"
+Notifications="*res://scripts/notifications.gd"
+NotifPlanner="*res://scripts/notif_planner.gd"
+
+[display]
+
+window/size/viewport_width=960
+window/size/viewport_height=430
+window/stretch/mode="canvas_items"
+window/handheld/orientation=4
+window/ios/hide_home_indicator=false
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=true
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/vram_compression/import_etc2_astc=true

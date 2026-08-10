@@ -1,0 +1,16 @@
+[gd_scene load_steps=3 format=3 uid="uid://boxing_glove"]
+
+[ext_resource type="Script" path="res://scripts/boxing_glove.gd" id="1_glove"]
+[ext_resource type="Texture2D" path="res://assets/items/boxing_glove.png" id="2_glove_tex"]
+
+[node name="BoxingGlove" type="Area2D"]
+collision_layer = 2
+collision_mask = 0
+script = ExtResource("1_glove")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_glove_tex")
+scale = Vector2(0.11, 0.11)
+texture_filter = 1

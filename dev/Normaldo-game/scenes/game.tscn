@@ -1,0 +1,80 @@
+[gd_scene load_steps=16 format=3 uid="uid://byq1nm2b4lmry"]
+
+[ext_resource type="Texture2D" uid="uid://ynqm6rksvx34" path="res://assets/backgrounds/bg_intro.png" id="1_bg_intro"]
+[ext_resource type="Texture2D" uid="uid://icxr7vcuk5jc" path="res://assets/normaldo/normaldo1.png" id="2_norm"]
+[ext_resource type="Script" path="res://scripts/background.gd" id="3_bg"]
+[ext_resource type="Script" path="res://scripts/normaldo.gd" id="4_normaldo"]
+[ext_resource type="Script" path="res://scripts/spawner.gd" id="5_spawner"]
+[ext_resource type="Script" path="res://scripts/stick_gauge.gd" id="6_gauge"]
+[ext_resource type="AudioStream" uid="uid://dpui2qon718ly" path="res://assets/audio/main_theme.mp3" id="7_music"]
+[ext_resource type="Script" path="res://scripts/music_player.gd" id="8_music_player"]
+[ext_resource type="Script" path="res://scripts/hud.gd" id="9_hud"]
+[ext_resource type="Script" path="res://scripts/couch.gd" id="10_couch"]
+[ext_resource type="Script" path="res://scripts/tv.gd" id="11_tv"]
+[ext_resource type="Script" path="res://scripts/fat_boss.gd" id="12_fatboss"]
+[ext_resource type="Script" path="res://scripts/pizza_party.gd" id="13_pizzaparty"]
+[ext_resource type="Script" path="res://scripts/slots_game.gd" id="14_slots"]
+
+[sub_resource type="CircleShape2D" id="SubResource_1"]
+radius = 32.0
+
+[node name="Game" type="Node2D"]
+
+[node name="HUD" type="CanvasLayer" parent="."]
+script = ExtResource("9_hud")
+
+[node name="Music" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("7_music")
+script = ExtResource("8_music_player")
+
+[node name="Background" type="Node2D" parent="."]
+script = ExtResource("3_bg")
+
+[node name="BgIntro" type="Sprite2D" parent="Background"]
+texture = ExtResource("1_bg_intro")
+centered = false
+
+[node name="BgA" type="Sprite2D" parent="Background"]
+centered = false
+
+[node name="BgB" type="Sprite2D" parent="Background"]
+centered = false
+
+[node name="BgC" type="Sprite2D" parent="Background"]
+centered = false
+
+[node name="Couch" type="Node2D" parent="."]
+script = ExtResource("10_couch")
+
+[node name="Tv" type="Sprite2D" parent="."]
+script = ExtResource("11_tv")
+
+[node name="Spawner" type="Node2D" parent="."]
+script = ExtResource("5_spawner")
+
+[node name="Normaldo" type="Area2D" parent="."]
+z_index = 3
+position = Vector2(220, 325)
+collision_mask = 2
+script = ExtResource("4_normaldo")
+
+[node name="Sprite2D" type="Sprite2D" parent="Normaldo"]
+z_index = 1
+position = Vector2(-14, 2)
+texture = ExtResource("2_norm")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Normaldo"]
+shape = SubResource("SubResource_1")
+
+[node name="StickGauge" type="Node2D" parent="Normaldo"]
+position = Vector2(-14, 2)
+script = ExtResource("6_gauge")
+
+[node name="FatBoss" type="Node2D" parent="."]
+script = ExtResource("12_fatboss")
+
+[node name="PizzaParty" type="Node2D" parent="."]
+script = ExtResource("13_pizzaparty")
+
+[node name="SlotsGame" type="Node2D" parent="."]
+script = ExtResource("14_slots")

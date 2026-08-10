@@ -1,0 +1,11 @@
+[gd_scene load_steps=2 format=3 uid="uid://shuriken"]
+
+[ext_resource type="Script" path="res://scripts/shuriken.gd" id="1_shuriken"]
+
+[node name="Shuriken" type="Area2D"]
+script = ExtResource("1_shuriken")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture_filter = 1

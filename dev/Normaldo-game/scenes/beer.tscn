@@ -1,0 +1,19 @@
+[gd_scene load_steps=4 format=3 uid="uid://beer_item"]
+
+[ext_resource type="Script" path="res://scripts/slowing_item.gd" id="1_slowing"]
+[ext_resource type="Texture2D" path="res://assets/items/beer.png" id="2_beer_tex"]
+[ext_resource type="AudioStream" path="res://assets/audio/beer.mp3" id="3_beer_snd"]
+
+[node name="Beer" type="Area2D"]
+collision_layer = 2
+collision_mask = 0
+script = ExtResource("1_slowing")
+slow_duration = 4.0
+slow_sound = ExtResource("3_beer_snd")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_beer_tex")
+scale = Vector2(0.09, 0.09)
+texture_filter = 1

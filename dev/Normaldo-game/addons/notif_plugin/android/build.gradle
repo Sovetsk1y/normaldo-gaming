@@ -1,0 +1,38 @@
+// Single-module Android library that produces NotifPluginAndroid.aar.
+// Versions track the Godot 4.2.2 Android build template
+// (export_templates/4.2.2.stable/android_source.zip → config.gradle):
+//   AGP 8.2.0 · compileSdk 34 · minSdk 21 · Kotlin 1.9.20 · Gradle 8.2 · JDK 17
+plugins {
+    id 'com.android.library' version '8.2.0'
+    id 'org.jetbrains.kotlin.android' version '1.9.20'
+}
+
+android {
+    namespace 'com.normaldo.notif'
+    compileSdk 34
+
+    defaultConfig {
+        minSdk 21
+        consumerProguardFiles 'consumer-rules.pro'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    // GodotPlugin base class. compileOnly: the engine library is already in the
+    // host APK, so bundling it here would duplicate classes at merge time.
+    compileOnly 'org.godotengine:godot:4.2.2.stable'
+
+    // FCM. compileOnly here; the host APK pulls it at runtime via the .gdap
+    // remote dependency (keeps the AAR from bundling Firebase + duplicating it).
+    compileOnly 'com.google.firebase:firebase-messaging:24.0.3'
+
+    implementation 'androidx.core:core-ktx:1.12.0'
+}

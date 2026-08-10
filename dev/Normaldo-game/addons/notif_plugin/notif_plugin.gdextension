@@ -1,0 +1,31 @@
+; GDExtension config for NotifPluginIOS (iOS only).
+; Godot auto-detects this file inside res:// at startup and again during
+; iOS export — no preset checkbox toggling required.
+;
+; NOTE: Android does NOT ship as a GDExtension. A scheduled local notification
+; must fire when the game process is dead, which on Android requires a
+; manifest-declared BroadcastReceiver + AlarmManager — components the OS loads
+; by class name from the APK, impossible for a GDExtension .so (loaded only
+; inside a live Godot process). The Android backend is therefore a Godot Android
+; plugin (Kotlin) under addons/notif_plugin/android/, registering the matching
+; `NotifPluginAndroid` singleton. See that dir's README.
+
+[configuration]
+entry_symbol = "notif_plugin_init"
+compatibility_minimum = 4.2
+
+; On iOS the binary MUST be a static library packaged as .xcframework —
+; Apple rejects apps that runtime-load arbitrary dylibs. The xcframework
+; below is produced by `build.sh` and bundles arm64 device + arm64/x86_64
+; simulator slices.
+[libraries]
+ios.release = "res://addons/notif_plugin/ios/notif_plugin.xcframework"
+ios.debug   = "res://addons/notif_plugin/ios/notif_plugin.xcframework"
+
+; (No android.* entries — see the note above; Android is a Godot Android plugin,
+; not a GDExtension.)
+
+; Icons for the editor — empty for now; we don't need a custom icon for an
+; engine-only singleton (it never shows up in the scene tree).
+[icons]
+NotifPluginIOS = ""

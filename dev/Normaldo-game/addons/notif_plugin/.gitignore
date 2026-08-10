@@ -1,0 +1,5 @@
+bin/
+ios/*.xcframework/
+.sconsign.dblite
+*.o
+*.d

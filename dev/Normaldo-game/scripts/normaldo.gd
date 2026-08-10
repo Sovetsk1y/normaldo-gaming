@@ -1,0 +1,2072 @@
+extends Area2D
+
+signal stats_changed(fat_state: int, pizza_count: int, total_pizzas: int)
+signal died(total_pizzas: int, death_pos: Vector2)
+signal dollars_changed(count: int)
+signal unique_ability_changed(ready: bool)
+signal wizard_state_changed(pizzas_done: int, bonus_active: bool, bonus_type: int, bonus_remaining: float)
+signal mutagen_caught
+signal slot_machine_caught   # СЛОТЫ mini-game trigger (caught like the mutagen)
+# ЖИРОБОСС mini-game: a good item touched the giant. fat_boss.gd tallies it into
+# the local counter (NOT the run score) and credits it all at the end.
+signal fat_boss_loot_collected(kind: String, world_pos: Vector2)
+signal active_denied   # tried to fire the active ability while on cooldown
+
+const FAT_THRESHOLDS = [30, 60, 90]
+
+# Множитель скорости движения по жиру
+const FAT_SPEED_MULT = [1.0, 0.72, 0.50, 0.30]
+
+# Classic skin textures (fallback / used when active_skin == "classic")
+const _CLASSIC_TEX = [
+	preload("res://assets/normaldo/normaldo1.png"),
+	preload("res://assets/normaldo/normaldo2.png"),
+	preload("res://assets/normaldo/normaldo3.png"),
+	preload("res://assets/normaldo/normaldo4.png"),
+]
+const _CLASSIC_EAT_TEX = [
+	preload("res://assets/normaldo/normaldo1_eat.png"),
+	preload("res://assets/normaldo/normaldo2_eat.png"),
+	preload("res://assets/normaldo/normaldo3_eat.png"),
+	preload("res://assets/normaldo/normaldo4_eat.png"),
+]
+const _CLASSIC_EAT_SFX = [
+	preload("res://assets/audio/eat1.mp3"),
+	preload("res://assets/audio/eat2.mp3"),
+]
+const _CLASSIC_HIT_SFX := preload("res://assets/audio/hit.mp3")
+const _CLASSIC_FAT_SFX := preload("res://assets/audio/get_fat.mp3")
+
+const BANANA_SOUND    := preload("res://assets/audio/banana.mp3")
+const BEER_SOUND      := preload("res://assets/audio/beer.mp3")
+const DOLLAR_SOUND    := preload("res://assets/audio/dollars.mp3")
+const MAGNET_SOUND    := preload("res://assets/audio/magnet.mp3")
+
+const UI_FONT := preload("res://assets/fonts/RussoOne-Regular.ttf")
+
+# Active skin resources — populated in _load_skin()
+var _skin_tex     : Array = []
+var _skin_eat_tex : Array = []
+var _skin_eat_sfx : Array = []
+var _skin_hit_sfx : AudioStream = null
+var _skin_fat_sfx : AudioStream = null
+
+const SLOW_MULTIPLIER  := 0.30
+const PROXIMITY_RADIUS := 80.0
+const EAT_ANIM_TIME    := 0.25
+const _CLASSIC_TEX_REF := 91.0  # pixel width of classic skin — normalisation reference
+
+# Per-skin multiplier applied on top of the classic-width normalisation in
+# `_apply_skin_to_sprite()`. Use when a particular skin reads visibly too
+# small (or too big) at the default 1.0 ratio.
+const _SKIN_SCALE_BUMP : Dictionary = {
+	"viking": 1.10,
+	"tyson":  1.10,
+}
+
+# ── Menu idle (decor before the run starts) ──────────────────────────────────
+# Fired at the exact frame the remote "button press" jerk happens. The TV node
+# listens for this and swaps to a new track at that moment so the on-screen
+# action and the audio change are in lock-step.
+signal menu_remote_button_pressed
+
+const _MENU_REMOTE_TEX       := preload("res://assets/normaldo/menu_remote.png")
+const _MENU_PIZZA_TEX        := preload("res://assets/items/pizza.png")
+# Random delay (seconds) between menu pizzas spawning behind Normaldo.
+const _MENU_PIZZA_INTERVAL_MIN : float = 4.0
+const _MENU_PIZZA_INTERVAL_MAX : float = 9.0
+# Two-phase animation: pizza emerges from behind Normaldo (slower, BEHIND his
+# sprite) up to a peak position, then snaps to his mouth (faster, IN FRONT).
+const _MENU_PIZZA_OUT_TIME     : float = 0.24
+const _MENU_PIZZA_IN_TIME      : float = 0.45
+# Peak offset relative to Normaldo's centre. Pizza emerges diagonally — out to
+# the side AND slightly up — instead of sliding straight horizontally.
+const _MENU_PIZZA_OFFSET_X     : float = 55.0
+const _MENU_PIZZA_OFFSET_Y     : float = -18.0   # negative = up
+# Pizza source is 511×449; this scale renders a small slice next to Normaldo.
+const _MENU_PIZZA_SCALE        : float = 0.055
+
+# Remote-control animation (Normaldo "changes the TV channel" between tracks).
+# Timing breakdown: slide out → tiny jerk down (button press) → jerk back up →
+# slide back behind him.
+const _MENU_REMOTE_SCALE       : float = 1.0
+# Out to the right toward the TV, sitting a few pixels below Normaldo's
+# centre so the remote rests around hand/lap height.
+const _MENU_REMOTE_PEAK        : Vector2 = Vector2(28.0, 10.0)
+const _MENU_REMOTE_PRESS_DROP  : float = 5.0
+const _MENU_REMOTE_OUT_TIME    : float = 0.45
+const _MENU_REMOTE_PRESS_TIME  : float = 0.08
+const _MENU_REMOTE_RETURN_TIME : float = 0.40
+# Suppress pizza spawns while this many seconds remain on the current TV clip
+# — otherwise the remote animation and a pizza in flight can end up on screen
+# at the same time.
+const _MENU_PIZZA_TV_LOCKOUT   : float = 5.0
+
+# ── Hit speech bubbles ───────────────────────────────────────────────────────
+# Pop a random sticker above Normaldo's head when he takes damage. Same
+# fade-in + scale-up + hold + fade-out shape as the intro-throw "ahh".
+# Comic reaction stickers, addressable by name (show_reaction) and also folded
+# into the random damage-pop pool below.
+const REACTIONS : Dictionary = {
+	"bam1":     preload("res://assets/ui/reactions/bam1.png"),
+	"bam2":     preload("res://assets/ui/reactions/bam2.png"),
+	"dang":     preload("res://assets/ui/reactions/dang.png"),
+	"dangbang": preload("res://assets/ui/reactions/dangbang.png"),
+	"kek":      preload("res://assets/ui/reactions/kek.png"),
+	"lol":      preload("res://assets/ui/reactions/lol.png"),
+	"oops":     preload("res://assets/ui/reactions/oops.png"),
+	"pow":      preload("res://assets/ui/reactions/pow.png"),
+}
+const _HIT_BUBBLE_TEXTURES : Array = [
+	preload("res://assets/normaldo/ahh.png"),
+	preload("res://assets/normaldo/dang.png"),
+	preload("res://assets/normaldo/slakebake.png"),
+	preload("res://assets/normaldo/slakebake2.png"),
+	preload("res://assets/ui/reactions/bam1.png"),
+	preload("res://assets/ui/reactions/bam2.png"),
+	preload("res://assets/ui/reactions/dangbang.png"),
+	preload("res://assets/ui/reactions/kek.png"),
+	preload("res://assets/ui/reactions/lol.png"),
+	preload("res://assets/ui/reactions/pow.png"),
+	preload("res://assets/ui/reactions/oops.png"),
+]
+const _HIT_BUBBLE_OFFSET    : Vector2 = Vector2(0.0, -52.0)
+const _HIT_BUBBLE_PEAK_SC   : float   = 0.22
+const _HIT_BUBBLE_START_SC  : float   = 0.06
+const _HIT_BUBBLE_IN_TIME   : float   = 0.14
+const _HIT_BUBBLE_HOLD_TIME : float   = 0.35
+const _HIT_BUBBLE_OUT_TIME  : float   = 0.20
+
+# ── Intro-throw sequence (game-start) ────────────────────────────────────────
+const _INTRO_AHH_TEX        := preload("res://assets/normaldo/ahh.png")
+# Hand origin for the thrown remote — same lap height as the menu remote.
+# Clear of the right edge of Normaldo's silhouette (classic sprite reaches
+# ~+32 from his centre, wider skins ~+50) so the remote sticks out where the
+# eye can see it even though it draws behind him (z_index = -1).
+const _INTRO_REMOTE_OFFSET  : Vector2 = Vector2(54.0, 6.0)
+# "ahh" emote — small cloud that pops above Normaldo's head and vanishes.
+const _INTRO_AHH_OFFSET     : Vector2 = Vector2(-4.0, -56.0)
+const _INTRO_AHH_PEAK_SCALE : float   = 0.20
+const _INTRO_AHH_START_SCALE: float   = 0.06
+const _INTRO_AHH_IN_TIME    : float   = 0.18
+const _INTRO_AHH_HOLD_TIME  : float   = 0.45
+const _INTRO_AHH_OUT_TIME   : float   = 0.22
+# Jump-off: small arc forward + up over mid-screen, lands at viewport centre.
+const _INTRO_JUMP_RIGHT     : float   = 60.0
+const _INTRO_JUMP_PEAK_UP   : float   = 90.0
+const _INTRO_JUMP_UP_TIME   : float   = 0.32
+const _INTRO_JUMP_DOWN_TIME : float   = 0.30
+
+
+@onready var _sprite : Sprite2D = $Sprite2D
+@onready var _gauge            = $StickGauge
+
+var _base_scale     : Vector2 = Vector2.ONE
+var fat_state       : int     = 0
+var _pizza_count    : int   = 0
+var _dead           : bool  = false
+# Cause of the last hit, captured in _handle_obstacle for the analytics death
+# event (cleared on each non-fatal hit; whatever's set when _die fires is what
+# killed the player).
+var _last_hit_group : String = ""
+var _last_hit_name  : String = ""
+var _invincible     : bool  = false
+var _input_enabled  : bool  = false
+var _fat_boss_active : bool = false   # ЖИРОБОСС mini-game in progress
+var _fat_boss_factor : float = 1.0    # live size factor (1 = normal, ~12 = huge)
+var _dev_immortal   : bool  = false  # dev toggle: no death on Skinny hit
+var _bobbing        : bool  = false
+# Public x-velocity (px/sec), updated each physics tick. Used by ceiling decor
+# (e.g. lamps) to pick a swing direction when Normaldo brushes past them.
+var velocity_x      : float = 0.0
+var _prev_x         : float = 0.0
+var _slow_remaining   : float = 0.0
+var _slow_total       : float = 0.0
+var _was_slowed       : bool  = false
+var _invert_remaining : float = 0.0   # компас: реверс управления на N секунд
+var _music_reversed   : bool  = false # играет ли реверс-трек во время компаса
+const _MUSIC_FWD := preload("res://assets/audio/main_theme.mp3")
+const _MUSIC_REV := preload("res://assets/audio/main_theme_reversed.mp3")
+var _sway_t           : float = 0.0
+var _magnet_remaining : float = 0.0
+var _was_magnetic     : bool  = false
+
+const COUCH_SEAT_OFFSET := Vector2(0, -20)  # положение относительно центра дивана
+
+var _touching : bool = false
+# Count of fingers currently down on the screen. The old code tracked a
+# single bool from InputEventScreenTouch.pressed, which flipped to `false`
+# the instant ANY finger released — even if a second finger was still down
+# and actively dragging. Counting touches by index lets us keep accepting
+# drag events from whichever finger is moving.
+var _touch_count : int = 0
+
+# Pizza-pack mini-game: confine Normaldo to the left region. `_region_max_x` < 0
+# means no limit. Touches that START past it are ignored (so right-side taps spit
+# pizza instead of dragging the head); we remember their finger index to also drop
+# their drag/release events.
+var _region_max_x    : float      = -1.0
+var _ignored_touches : Dictionary = {}
+
+var _couch              : Node2D = null
+var _total_pizza_count  : int   = 0
+var _dollars            : int   = 0
+var _nearby_pizzas      : int   = 0
+var _eating             : bool  = false
+var _eat_timer          : float = 0.0
+var _morphing           : bool  = false   # fat-morph spin in progress (owns the sprite)
+var _bob_t              : float = 0.0
+# Menu-idle decor: keeps Normaldo bobbing + lets a pizza occasionally slide in
+# from one of his sides. Only runs while we're on the main menu; gameplay
+# turns it off via stop_menu_idle().
+var _menu_idle          : bool      = false
+var _menu_pizza_timer   : float     = 0.0
+var _menu_pizza         : Sprite2D  = null
+var _menu_remote        : Sprite2D  = null
+# Lazy reference to the Tv sibling — used to ask whether the current channel
+# is about to flip so we can stop spawning pizzas during that window.
+var _menu_tv_node       : Node      = null
+var _audio              : AudioStreamPlayer
+var _fat_audio          : AudioStreamPlayer
+var _dollar_audio       : AudioStreamPlayer
+
+# ── Skill system state ────────────────────────────────────────────────────────
+
+var _skill_bonus_xp          : int   = 0
+var _dracula_immortal_ready  : bool  = true
+var _harry_second_chance_ready: bool = true
+var _joker_doubled_skill     : int   = -1
+
+# Wizard magic
+const WIZARD_PIZZA_THRESHOLD : int = 50
+var _wizard_run_pizzas   : int   = 0
+var _wizard_bonus_active : bool  = false
+var _wizard_bonus_timer  : float = 0.0
+var _wizard_bonus_type   : int   = -1  # 0=magnet 1=xp_boost 2=speed_boost
+var _wizard_aura         : CPUParticles2D = null
+
+var _skill_audio : AudioStreamPlayer
+
+# ── Skill SFX ────────────────────────────────────────────────────────────────
+
+const _SKILL_SFX_DODGE     := preload("res://assets/audio/resist.mp3")
+const _SKILL_SFX_COUNTER   := preload("res://assets/audio/dollars.mp3")
+const _SKILL_SFX_TRANSFORM := preload("res://assets/audio/get_fat.mp3")
+
+# ── NEW skin model runtime: resists / active ability / passive cooldowns ──────
+const _PROJECTILE_SCRIPT := preload("res://scripts/skill_projectile.gd")
+const _SMOKE_TEX         := preload("res://assets/bosses/ninja_foot/smoke.png")
+const _WHEEL_TEX         := preload("res://assets/skills/ship_wheel.png")
+const _CARD_TEX          := preload("res://assets/skills/card.png")
+const _X3_TEX            := preload("res://assets/skills/x3.png")
+const _CASEY_TEX         := preload("res://assets/items/casey_mask.png")
+const _SFX_GLITTER       := preload("res://assets/audio/magic_glitter.mp3")   # transformus flight
+const _SFX_POOF          := preload("res://assets/audio/magic_poof.mp3")      # item → pizza/dollar
+const _ITEM_SCENE        := preload("res://scenes/item.tscn")
+const _PIZZA_TEX         := preload("res://assets/items/pizza.png")
+const _DOLLAR_TEX        := preload("res://assets/items/dollar.png")
+const _RESIST_SFX        := preload("res://assets/audio/resist.mp3")
+
+# key -> [remaining, total]; keys: "resist:<tag>", "active", "passive:<id>"
+var _skill_cd        : Dictionary = {}
+var _resist_cd_for   : Dictionary = {}   # item tag -> cooldown seconds
+var _ability_cfg     : Dictionary = {}   # active ability dict ({} = none)
+var _passive_id      : String     = ""
+var _double_ryag     : bool        = false   # glasses: fires Рыгалити twice
+var _active_charges  : int         = 1       # shots left before the cooldown
+var _active_max_charges : int      = 1       # charges the ability recharges to
+var _treasure_passive: bool        = false   # pirate: 50% x5 dollar
+var _scars_passive   : bool        = false   # joker: invuln after fattening
+var _skin_runtime_built : bool     = false   # _build_skin_runtime has run this run
+var _scars_active    : bool        = false   # joker mask currently worn
+var _scars_token     : int         = 0       # invalidates stale mask timers
+var _scars_mask      : Sprite2D    = null
+var _last_tap_t      : float       = -10.0
+var _last_tap_pos    : Vector2     = Vector2.ZERO
+const _DTAP_TIME : float = 0.20   # max gap between taps — must be a FAST double-tap
+const _DTAP_DIST : float = 55.0   # taps must be close together (не путать с кайтом)
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+func _apply_skin_to_sprite() -> void:
+	_sprite.texture = _skin_tex[fat_state]
+	var tex_w = _skin_tex[fat_state].get_size().x
+	var s     = _CLASSIC_TEX_REF / tex_w if tex_w > 0.0 else 1.0
+	# Per-skin scale bump for skins that look too small at the normalised
+	# width (e.g. viking's silhouette reads tiny next to the classic ref).
+	s *= _SKIN_SCALE_BUMP.get(SaveData.active_skin, 1.0)
+	_base_scale     = Vector2(s, s)
+	_sprite.scale   = _base_scale
+	# Classic texture has the head shifted left in the image; other skins are centered
+	_sprite.position.x = -14.0 if tex_w <= 91.0 else 0.0
+
+# Swap the sprite to the current fat-state texture + recompute _base_scale, WITHOUT
+# touching the live scale (the morph tween drives scale itself). Returns the base.
+func _refresh_fat_sprite() -> Vector2:
+	_sprite.texture = _skin_tex[fat_state]
+	var tex_w = _skin_tex[fat_state].get_size().x
+	var s = _CLASSIC_TEX_REF / tex_w if tex_w > 0.0 else 1.0
+	s *= _SKIN_SCALE_BUMP.get(SaveData.active_skin, 1.0)
+	_base_scale = Vector2(s, s)
+	_sprite.position.x = -14.0 if tex_w <= 91.0 else 0.0
+	return _base_scale
+
+# Fat-change morph: the head spins CLOCKWISE down to a point, swaps to the new fat
+# sprite at the point, then spins back out at full size. Used on every fattening
+# (normal eating + the slots golden-pizza), so it's the universal "got fat" beat.
+func play_fat_morph() -> void:
+	if not is_instance_valid(_sprite):
+		return
+	_morphing = true
+	var spr := _sprite
+	var start_rot := spr.rotation
+	var tw := create_tween()
+	tw.tween_property(spr, "scale", Vector2.ZERO, 0.16) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(spr, "rotation", start_rot + TAU, 0.16) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_callback(func():
+		if not is_instance_valid(spr):
+			_morphing = false
+			return
+		var bs := _refresh_fat_sprite()
+		spr.scale = Vector2.ZERO
+		var t2 := create_tween()
+		t2.tween_property(spr, "scale", bs, 0.26) \
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		t2.parallel().tween_property(spr, "rotation", start_rot + TAU * 2.0, 0.26) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		t2.tween_callback(func():
+			if is_instance_valid(spr):
+				spr.rotation = 0.0
+			_morphing = false))
+
+# СЛОТЫ golden pizza: jump straight to the LAST fat state (one morph), regardless
+# of the pizza count (and bump the count so it persists past the next eaten pizza).
+func fatten_to_max() -> void:
+	var target : int = _skin_tex.size() - 1
+	if fat_state >= target:
+		return
+	fat_state = target
+	if target - 1 < FAT_THRESHOLDS.size():
+		_pizza_count = maxi(_pizza_count, FAT_THRESHOLDS[target - 1])
+	_fat_audio.play()
+	stats_changed.emit(fat_state, _pizza_count, _total_pizza_count)
+	play_fat_morph()
+
+func _ready() -> void:
+	_load_skin(SaveData.active_skin)
+	_couch    = get_parent().get_node("Couch")
+	position  = _couch.menu_position() + COUCH_SEAT_OFFSET
+	area_entered.connect(_on_area_entered)
+	_apply_skin_to_sprite()
+
+	# AudioStreamPlayer — создаём программно
+	_audio = AudioStreamPlayer.new()
+	_audio.volume_db = -4.0
+	add_child(_audio)
+
+	_fat_audio = AudioStreamPlayer.new()
+	_fat_audio.stream    = _skin_fat_sfx if _skin_fat_sfx else _CLASSIC_FAT_SFX
+	_fat_audio.volume_db = -10.0
+	add_child(_fat_audio)
+
+	_dollar_audio = AudioStreamPlayer.new()
+	_dollar_audio.stream    = DOLLAR_SOUND
+	_dollar_audio.volume_db = 2.0
+	add_child(_dollar_audio)
+
+	_skill_audio = AudioStreamPlayer.new()
+	_skill_audio.volume_db = -6.0
+	add_child(_skill_audio)
+
+	# ProximityArea — большой радиус для детекта пиццы рядом (открытие рта)
+	var prox          := Area2D.new()
+	prox.name          = "ProximityArea"
+	prox.collision_layer = 0
+	prox.collision_mask  = 2
+	prox.monitorable     = false
+	var prox_col      := CollisionShape2D.new()
+	var prox_circle   := CircleShape2D.new()
+	prox_circle.radius = PROXIMITY_RADIUS
+	prox_col.shape     = prox_circle
+	prox.add_child(prox_col)
+	add_child(prox)
+	prox.area_entered.connect(_on_pizza_nearby)
+	prox.area_exited.connect(_on_pizza_left)
+
+func reload_skin() -> void:
+	_load_skin(SaveData.active_skin)
+	_apply_skin_to_sprite()
+	_fat_audio.stream = _skin_fat_sfx if _skin_fat_sfx else _CLASSIC_FAT_SFX
+	_dracula_immortal_ready    = true
+	_harry_second_chance_ready = true
+
+func enable_input() -> void:
+	_input_enabled = true
+	# Kill the lingering couch-idle bob — once the run starts, the head should
+	# sit steady. Leaving _bobbing on (set by Couch.start_game → start_bob)
+	# kept the menu wobble running through gameplay.
+	_bobbing = false
+	_bob_t   = 0.0
+	if is_instance_valid(_sprite):
+		_sprite.position.y = 0.0
+	_skill_bonus_xp = 0
+	_dracula_immortal_ready    = true
+	_harry_second_chance_ready = true
+	_wizard_run_pizzas   = 0
+	_wizard_bonus_active = false
+	_wizard_bonus_type   = -1
+	_wizard_cleanup_aura()
+	_joker_doubled_skill = -1
+	_last_tap_t = -10.0
+	_build_skin_runtime()
+	unique_ability_changed.emit(true)
+
+func disable_input() -> void:
+	_input_enabled = false
+
+func is_input_enabled() -> bool:
+	return _input_enabled
+
+# ── ЖИРОБОСС mini-game hooks (driven by fat_boss.gd) ──────────────────────────
+# begin: lock control + go invincible, clear transient debuffs and the gauge.
+# set_fat_boss_factor: scale the WHOLE Area2D (sprite + collision) so the huge
+#   head also eats everything near it. factor 1.0 = normal size.
+# end: restore normal scale, control and vulnerability.
+
+func begin_fat_boss() -> void:
+	_fat_boss_active  = true
+	_input_enabled    = false
+	_invincible       = true
+	_touching         = false
+	_touch_count      = 0
+	_slow_remaining   = 0.0
+	_magnet_remaining = 0.0
+	_cleanup_attract_sparks()
+	if is_instance_valid(_gauge) and _gauge.has_method("hide_gauge"):
+		_gauge.hide_gauge()
+
+func set_fat_boss_factor(f: float) -> void:
+	scale = Vector2(f, f)
+	_fat_boss_factor = f
+
+# Eat-sfx pitch: lowest at max size, back to normal as he deflates.
+# (12.0 matches FatBoss MAX_FACTOR; the clamp covers the tap-pulse overshoot.)
+func _eat_pitch() -> float:
+	if not _fat_boss_active:
+		return 1.0
+	return clampf(remap(_fat_boss_factor, 1.0, 12.0, 1.0, 0.72), 0.72, 1.0)
+
+func set_fat_boss_rotation(r: float) -> void:
+	rotation = r
+
+func end_fat_boss() -> void:
+	scale            = Vector2.ONE
+	rotation         = 0.0
+	_fat_boss_active = false
+	_fat_boss_factor = 1.0
+	_invincible      = false
+	_input_enabled   = true
+	self.modulate    = Color(1.0, 1.0, 1.0)
+	_audio.pitch_scale = 1.0   # clear any low pitch left from the mini-game
+
+# Credit the mini-game's tallied loot to the run score in one shot, after the
+# end fly-in. Mirrors _eat_pizza / _collect_dollar bookkeeping (fat_state bump
+# + signals) without the per-item animation/sfx spam of calling them N times.
+func fat_boss_award(pizzas: int, dollars: int) -> void:
+	if pizzas > 0:
+		_pizza_count       += pizzas
+		_total_pizza_count += pizzas
+		var new_state := fat_state
+		for i in FAT_THRESHOLDS.size():
+			if _pizza_count >= FAT_THRESHOLDS[i]:
+				new_state = i + 1
+		fat_state = maxi(fat_state, mini(new_state, _max_fat_state()))
+		stats_changed.emit(fat_state, _pizza_count, _total_pizza_count)
+	if dollars > 0:
+		_dollars += dollars
+		dollars_changed.emit(_dollars)
+	if pizzas > 0 or dollars > 0:
+		_pulse_fat()
+
+# ── Pizza-pack mini-game: confine to the left region ──────────────────────────
+# Clamp the head to x ≤ max_x and stop right-region touches from moving it (they
+# spit pizza instead). Control + damage stay ON — he must dodge in the left part.
+func set_left_region(max_x: float) -> void:
+	_region_max_x = max_x
+
+func clear_left_region() -> void:
+	_region_max_x = -1.0
+	_ignored_touches.clear()
+
+# ── СЛОТЫ mini-game: free drag off, column-driven externally, stays vulnerable ─
+func begin_slots_mode() -> void:
+	_input_enabled    = false
+	_invincible       = false
+	_touching         = false
+	_touch_count      = 0
+	_slow_remaining   = 0.0
+	_magnet_remaining = 0.0
+	_region_max_x     = -1.0
+	_ignored_touches.clear()
+	# Make sure resists / active / passive are configured for this skin so they
+	# work during the top-down slots mini-game too (covers dev-launched runs
+	# where enable_input()/_build_skin_runtime() may not have fired).
+	if not _skin_runtime_built:
+		_build_skin_runtime()
+
+func end_slots_mode() -> void:
+	_input_enabled   = true
+	_sprite.rotation = 0.0
+
+# Arc jump to `target` with a full somersault (кувырок). Returns the position
+# tween so the caller can await the landing.
+func slots_intro_jump(target: Vector2) -> Tween:
+	var peak := Vector2((position.x + target.x) * 0.5, minf(position.y, target.y) - 90.0)
+	var jt := create_tween()
+	jt.tween_property(self, "position", peak, 0.28).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	jt.tween_property(self, "position", target, 0.32).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	var st := create_tween()
+	st.tween_property(_sprite, "rotation", TAU, 0.60).set_trans(Tween.TRANS_LINEAR)
+	st.tween_callback(func():
+		if is_instance_valid(_sprite):
+			_sprite.rotation = 0.0)
+	return jt
+
+func start_bob() -> void:
+	_bobbing = true
+	_bob_t   = 0.0
+
+# ── Menu idle: bob + occasional pizza emerging from behind ──────────────────
+# Called by HUD when the main-menu screen is up. Drives a subtle sway
+# (via existing _bobbing) and schedules a pizza prop to spawn every few
+# seconds. Tapping into the same eat-animation + SFX makes the moment feel
+# native instead of bolted on.
+func start_menu_idle() -> void:
+	_menu_idle        = true
+	_bobbing          = true
+	_bob_t            = 0.0
+	_menu_pizza_timer = randf_range(_MENU_PIZZA_INTERVAL_MIN, _MENU_PIZZA_INTERVAL_MAX)
+
+func stop_menu_idle() -> void:
+	_menu_idle = false
+	_bobbing   = false
+	if is_instance_valid(_menu_pizza):
+		_menu_pizza.queue_free()
+	_menu_pizza = null
+	if is_instance_valid(_menu_remote):
+		_menu_remote.queue_free()
+	_menu_remote = null
+
+# Triggered by the TV node 3 seconds before its current track ends. Pulls a
+# remote-control sprite out of Normaldo's "lap", does a tiny press jerk, then
+# slides it back. The press jerk emits menu_remote_button_pressed which the
+# TV listens to so the audio swap is frame-synced with the on-screen click.
+func play_tv_remote_anim() -> void:
+	if not _menu_idle or is_instance_valid(_menu_remote):
+		return
+	var remote := Sprite2D.new()
+	remote.texture        = _MENU_REMOTE_TEX
+	remote.scale          = Vector2.ONE * _MENU_REMOTE_SCALE
+	remote.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	# New asset already points east (toward the TV) — no flip required.
+	# Sits in FRONT of Normaldo's body (he's holding it out to the side).
+	remote.z_index        = 1
+	remote.position       = Vector2.ZERO
+	add_child(remote)
+	_menu_remote = remote
+
+	var peak     := _MENU_REMOTE_PEAK
+	var pressed  := peak + Vector2(0.0, _MENU_REMOTE_PRESS_DROP)
+
+	var tw := create_tween()
+	# Phase 1: slide out from behind to the peak (held toward TV).
+	tw.tween_property(remote, "position", peak, _MENU_REMOTE_OUT_TIME)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	# Phase 2a: jerk down — Normaldo presses the button.
+	tw.tween_property(remote, "position", pressed, _MENU_REMOTE_PRESS_TIME)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	# Press moment — TV listens to this and swaps tracks in lock-step.
+	tw.tween_callback(func(): menu_remote_button_pressed.emit())
+	# Phase 2b: jerk back up.
+	tw.tween_property(remote, "position", peak, _MENU_REMOTE_PRESS_TIME)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	# Phase 3: retract back behind body.
+	tw.tween_property(remote, "position", Vector2.ZERO, _MENU_REMOTE_RETURN_TIME)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	tw.tween_callback(func():
+		if is_instance_valid(remote):
+			remote.queue_free()
+		_menu_remote = null
+	)
+
+# Spawns the thrown remote at Normaldo's hand and returns it to the caller as
+# a free Sprite2D parented to Normaldo's parent (the scene root). The caller
+# tweens it toward the TV and frees it on impact. z_index sits behind the TV
+# so the remote visually disappears when it slides under the screen.
+func spawn_thrown_remote() -> Sprite2D:
+	# Yank the menu-remote out of the way first — otherwise the lap one and
+	# the thrown one render on top of each other for the first frame.
+	if is_instance_valid(_menu_remote):
+		_menu_remote.queue_free()
+		_menu_remote = null
+	var rem := Sprite2D.new()
+	rem.texture        = _MENU_REMOTE_TEX
+	rem.scale          = Vector2.ONE * _MENU_REMOTE_SCALE
+	rem.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	# Sits below the TV (z 2) but above the Background (z 0) — the offset is
+	# tuned so the remote sticks out past Normaldo's silhouette, so it still
+	# reads as "leaving his hand" even though Normaldo (z 3) draws over it.
+	rem.z_index        = 1
+	# Add to the scene root FIRST, then set global_position — assigning the
+	# global property before the node is in the tree silently degrades to a
+	# plain local-position write, which lands the remote at (0,0) of the root.
+	get_parent().add_child(rem)
+	rem.global_position = global_position + _INTRO_REMOTE_OFFSET
+	return rem
+
+# Pops the "ahh" emote above Normaldo's head: fade-in + scale-up, brief hold,
+# then fade-out + scale-down. Self-frees when the tween completes.
+func spawn_ahh_emote() -> void:
+	var ahh := Sprite2D.new()
+	ahh.texture        = _INTRO_AHH_TEX
+	ahh.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	ahh.position       = _INTRO_AHH_OFFSET
+	ahh.scale          = Vector2.ONE * _INTRO_AHH_START_SCALE
+	ahh.modulate       = Color(1.0, 1.0, 1.0, 0.0)
+	ahh.z_index        = 5
+	add_child(ahh)
+
+	var tw := create_tween()
+	tw.tween_property(ahh, "modulate:a", 1.0, _INTRO_AHH_IN_TIME)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(ahh, "scale", Vector2.ONE * _INTRO_AHH_PEAK_SCALE, _INTRO_AHH_IN_TIME)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(_INTRO_AHH_HOLD_TIME)
+	tw.tween_property(ahh, "modulate:a", 0.0, _INTRO_AHH_OUT_TIME)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(ahh, "scale", Vector2.ONE * _INTRO_AHH_START_SCALE, _INTRO_AHH_OUT_TIME)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tw.tween_callback(func():
+		if is_instance_valid(ahh):
+			ahh.queue_free()
+	)
+
+# Two-phase arc up-and-forward, then down to mid-screen. While airborne the
+# sprite does a full flip so the jump reads as a tumble, not a slide.
+# Returns the await-able final Tween so the caller can hand off to input.
+func play_intro_jump() -> Tween:
+	var vp     := get_viewport_rect()
+	var land   := Vector2(position.x + _INTRO_JUMP_RIGHT, vp.get_center().y)
+	var peak   := Vector2((position.x + land.x) * 0.5, land.y - _INTRO_JUMP_PEAK_UP)
+
+	var jump_tw := create_tween()
+	jump_tw.tween_property(self, "position", peak, _INTRO_JUMP_UP_TIME)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	jump_tw.tween_property(self, "position", land, _INTRO_JUMP_DOWN_TIME)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+
+	# Full somersault timed to match the whole arc — kicked off in parallel so
+	# the sprite tumbles while the position tween carries it through the peak.
+	var spin_tw := create_tween()
+	spin_tw.tween_property(_sprite, "rotation", TAU, _INTRO_JUMP_UP_TIME + _INTRO_JUMP_DOWN_TIME)\
+		.set_trans(Tween.TRANS_LINEAR)
+	spin_tw.tween_callback(func():
+		if is_instance_valid(_sprite):
+			_sprite.rotation = 0.0
+	)
+	return jump_tw
+
+func _tick_menu_idle(delta: float) -> void:
+	if not _menu_idle:
+		return
+	# Only schedule a new pizza if the previous one has finished its lifecycle,
+	# the remote isn't currently out, and the TV isn't about to flip channels.
+	# Otherwise the remote click and a pizza in flight overlap on screen.
+	if is_instance_valid(_menu_pizza):
+		return
+	if is_instance_valid(_menu_remote):
+		return
+	if _is_tv_near_channel_swap():
+		return
+	_menu_pizza_timer -= delta
+	if _menu_pizza_timer <= 0.0:
+		_spawn_menu_pizza()
+		_menu_pizza_timer = randf_range(_MENU_PIZZA_INTERVAL_MIN, _MENU_PIZZA_INTERVAL_MAX)
+
+func _is_tv_near_channel_swap() -> bool:
+	if _menu_tv_node == null:
+		var parent := get_parent()
+		if parent != null:
+			_menu_tv_node = parent.get_node_or_null("Tv")
+	if _menu_tv_node == null:
+		return false
+	# TV exposes its AudioStreamPlayer as `_tv_audio`. We read it via .get() to
+	# avoid a tight class-level dependency.
+	var audio = _menu_tv_node.get("_tv_audio")
+	if audio == null or not audio.playing:
+		return false
+	var stream = audio.stream
+	if stream == null:
+		return false
+	var total : float = stream.get_length()
+	if total <= 0.0:
+		return false
+	var remaining : float = total - audio.get_playback_position()
+	return remaining <= _MENU_PIZZA_TV_LOCKOUT
+
+func _spawn_menu_pizza() -> void:
+	var pizza := Sprite2D.new()
+	pizza.texture        = _MENU_PIZZA_TEX
+	pizza.scale          = Vector2.ONE * _MENU_PIZZA_SCALE
+	pizza.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	# Phase 1 — pizza emerges from BEHIND Normaldo's sprite (z_index = -1),
+	# starting at his centre so the body fully hides it before it slides out.
+	pizza.z_index        = -1
+	var side : float = 1.0 if randf() < 0.5 else -1.0
+	# Mirror the slice when it spawns from the LEFT side so its visual
+	# orientation reads as "facing Normaldo" rather than away from him.
+	pizza.flip_h = side < 0.0
+	pizza.position = Vector2.ZERO
+	add_child(pizza)
+	_menu_pizza = pizza
+
+	# Diagonal peak: out to the side and slightly up — not a flat horizontal slide.
+	var peak := Vector2(side * _MENU_PIZZA_OFFSET_X, _MENU_PIZZA_OFFSET_Y)
+
+	var tw := create_tween()
+	# Phase 1: emerge from behind to the peak. Slower, eases out so it lingers
+	# briefly at the high point before being pulled back.
+	tw.tween_property(pizza, "position", peak, _MENU_PIZZA_OUT_TIME)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	# Snap the pizza IN FRONT of Normaldo for the return leg so it visibly
+	# crosses over his silhouette into his mouth instead of sliding through it.
+	tw.tween_callback(func():
+		if is_instance_valid(pizza):
+			pizza.z_index = 1
+	)
+	# Phase 2: rocket back to his mouth — faster, accelerating in.
+	tw.tween_property(pizza, "position", Vector2.ZERO, _MENU_PIZZA_IN_TIME)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_callback(Callable(self, "_eat_pizza_menu"))
+	tw.tween_callback(Callable(pizza, "queue_free"))
+
+# Like _eat_pizza() but without any of the gameplay side-effects (no fat
+# state, no XP, no quest counters). Just the visual + SFX.
+func _eat_pizza_menu() -> void:
+	if not is_instance_valid(self):
+		return
+	if not _skin_eat_sfx.is_empty():
+		_audio.stream = _skin_eat_sfx[randi() % _skin_eat_sfx.size()]
+		_audio.play()
+	_eating         = true
+	_eat_timer      = EAT_ANIM_TIME
+	_sprite.texture = _skin_eat_tex[fat_state]
+
+func set_tilt(angle: float, duration: float) -> void:
+	var tw := create_tween()
+	tw.tween_property(_sprite, "rotation", angle, duration) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+func move_to(target: Vector2, duration: float) -> void:
+	var tw := create_tween()
+	tw.tween_property(self, "position", target, duration) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+func fly_to_seat(duration: float) -> void:
+	if not _couch:
+		return
+	var target := _couch.get_viewport_rect().get_center() + COUCH_SEAT_OFFSET
+	var tw := create_tween()
+	tw.tween_property(self, "position", target, duration) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+
+func _load_skin(skin_id: String) -> void:
+	var skin := SkinRegistry.get_skin(skin_id)
+	var tex_dir : String = skin.get("tex_dir", "")
+	var aud_dir : String = skin.get("audio_dir", "")
+
+	if tex_dir.is_empty():
+		_skin_tex     = _CLASSIC_TEX.duplicate()
+		_skin_eat_tex = _CLASSIC_EAT_TEX.duplicate()
+	else:
+		_skin_tex     = []
+		_skin_eat_tex = []
+		for i in 4:
+			_skin_tex.append(    load(tex_dir + "state%d.png"     % (i + 1)))
+			_skin_eat_tex.append(load(tex_dir + "state%d_eat.png" % (i + 1)))
+
+	if aud_dir.is_empty():
+		_skin_eat_sfx = _CLASSIC_EAT_SFX.duplicate()
+		_skin_hit_sfx = _CLASSIC_HIT_SFX
+		_skin_fat_sfx = _CLASSIC_FAT_SFX
+	else:
+		_skin_eat_sfx = []
+		for f in ["eat1.mp3", "eat2.mp3"]:
+			var p = aud_dir + f
+			if ResourceLoader.exists(p):
+				_skin_eat_sfx.append(load(p))
+		if _skin_eat_sfx.is_empty():
+			_skin_eat_sfx = _CLASSIC_EAT_SFX.duplicate()
+		var hp := aud_dir + "hit.mp3"
+		_skin_hit_sfx = load(hp) if ResourceLoader.exists(hp) else _CLASSIC_HIT_SFX
+		var fp := aud_dir + "fat.mp3"
+		_skin_fat_sfx = load(fp) if ResourceLoader.exists(fp) else _CLASSIC_FAT_SFX
+
+# ── Skill speed helpers ───────────────────────────────────────────────────────
+
+func _effective_fat_speed(state: int) -> float:
+	var base = FAT_SPEED_MULT[state]
+	if SaveData.active_skin == "glasses":
+		var penalty = 1.0 - base
+		return 1.0 - penalty * 0.5
+	return base
+
+func _move_speed_mult() -> float:
+	if SaveData.active_skin == "spider_man":
+		return 1.25
+	if _wizard_bonus_active and _wizard_bonus_type == 2:
+		return 1.4
+	return 1.0
+
+# ── Input ─────────────────────────────────────────────────────────────────────
+
+func _input(event: InputEvent) -> void:
+	if _dead or not _input_enabled:
+		return
+	if event is InputEventScreenTouch:
+		var t := event as InputEventScreenTouch
+		# Increment/decrement on each finger touch so alternating thumbs
+		# (very common for fast play) don't reset the active state when one
+		# finger releases while the other is still dragging.
+		if t.pressed:
+			# Right-region touch (pizza mini-game) → not for movement; remember it.
+			if _region_max_x >= 0.0 and t.position.x > _region_max_x:
+				_ignored_touches[t.index] = true
+				return
+			# Double-tap → fire the active ability toward the tap point.
+			if _touch_on_cone(t.position):
+				_ignored_touches[t.index] = true
+				return
+			var now := Time.get_ticks_msec() / 1000.0
+			if now - _last_tap_t <= _DTAP_TIME and t.position.distance_to(_last_tap_pos) <= _DTAP_DIST:
+				_last_tap_t = -10.0
+				_try_fire_ability(t.position)
+			else:
+				_last_tap_t   = now
+				_last_tap_pos = t.position
+			_touch_count += 1
+		else:
+			if _ignored_touches.erase(t.index):
+				return
+			_touch_count = maxi(0, _touch_count - 1)
+		_touching = _touch_count > 0
+	elif event is InputEventScreenDrag:
+		# Any drag event implies *some* finger is moving — feed all of them
+		# into the position update so the head responds smoothly even when
+		# two fingers are down at once. event.relative is per-finger.
+		var d := event as InputEventScreenDrag
+		if _ignored_touches.has(d.index):
+			return
+		if _touch_count > 0:
+			var speed = _effective_fat_speed(fat_state) * _move_speed_mult() * (SLOW_MULTIPLIER if _slow_remaining > 0.0 else 1.0)
+			if _invert_remaining > 0.0:
+				speed = -speed   # компас: свайп в одну сторону двигает в другую (и по X, и по Y)
+			position  += d.relative * speed
+			var s      := get_viewport_rect().size
+			var xmax    : float = s.x if _region_max_x < 0.0 else minf(_region_max_x, s.x)
+			position.x = clampf(position.x, 0.0, xmax)
+			position.y = clampf(position.y, 0.0, s.y)
+
+func _physics_process(delta: float) -> void:
+	if _dead:
+		return
+
+	_tick_skill_cd(delta)
+
+	# Eat animation timer
+	if _eat_timer > 0.0:
+		_eat_timer -= delta
+		if _eat_timer <= 0.0:
+			_eating = false
+			_update_mouth()
+
+	# Schedule and tick the menu-idle pizza prop.
+	_tick_menu_idle(delta)
+
+	# Slow countdown + state change detection
+	if _slow_remaining > 0.0:
+		_slow_remaining -= delta
+	if _invert_remaining > 0.0:
+		_invert_remaining -= delta
+		if _invert_remaining <= 0.0 and _music_reversed:
+			_set_music_reversed(false)
+	var is_slowed := _slow_remaining > 0.0
+	if is_slowed != _was_slowed:
+		_was_slowed = is_slowed
+		if is_slowed:
+			_on_slow_start()
+		else:
+			_on_slow_end()
+
+	# Wizard bonus countdown
+	if _wizard_bonus_active:
+		_wizard_bonus_timer -= delta
+		if _wizard_bonus_timer <= 0.0:
+			_wizard_bonus_active = false
+			_wizard_bonus_type   = -1
+			_wizard_cleanup_aura()
+			wizard_state_changed.emit(_wizard_run_pizzas % WIZARD_PIZZA_THRESHOLD, false, -1, 0.0)
+		else:
+			wizard_state_changed.emit(_wizard_run_pizzas % WIZARD_PIZZA_THRESHOLD, true, _wizard_bonus_type, _wizard_bonus_timer)
+
+	var s := get_viewport_rect().size
+	var xmax : float = s.x if _region_max_x < 0.0 else minf(_region_max_x, s.x)
+	position.x = clampf(position.x, 0.0, xmax)
+	position.y = clampf(position.y, 0.0, s.y)
+	if delta > 0.0:
+		velocity_x = (position.x - _prev_x) / delta
+	_prev_x = position.x
+
+	# Bob: only while the couch-idle flag is set (menu / pre-run). Gameplay
+	# clears it in enable_input() so the head stays steady during the run.
+	if _bobbing:
+		_bob_t += delta * 1.8
+		_sprite.position.y = lerp(_sprite.position.y, sin(_bob_t) * 3.0, 0.15)
+	else:
+		_sprite.position.y = lerp(_sprite.position.y, 0.0, 0.20)
+
+	# Магнит — притягивает пиццы и доллары
+	var is_magnetic := _magnet_remaining > 0.0
+	if is_magnetic != _was_magnetic:
+		_was_magnetic = is_magnetic
+		if not is_magnetic:
+			_cleanup_attract_sparks()
+	if is_magnetic:
+		_magnet_remaining -= delta
+		var spawner := get_parent().get_node_or_null("Spawner")
+		if spawner:
+			var target_local = spawner.to_local(global_position)
+			for child in spawner.get_children():
+				if child.is_in_group("pizza") or child.is_in_group("dollar"):
+					var dir = target_local - child.position
+					if dir.length_squared() > 25.0:
+						var item_spd := (child.get("speed") as float) if child.get("speed") != null else 0.0
+						child.position += dir.normalized() * (item_spd + 350.0) * delta
+					_ensure_attract_sparks(child)
+
+	# Sway + modulate под дебафом замедления — оба непрерывно управляются по таймеру
+	if is_slowed:
+		var t         := _slow_remaining / _slow_total if _slow_total > 0.0 else 0.0
+		var strength  := clampf(t / 0.25, 0.0, 1.0)  # полная сила до последних 25%, потом быстрый фейд
+		self.modulate  = Color(1.0, 1.0, 1.0).lerp(Color(0.72, 0.30, 1.40), strength)
+		_sway_t += delta * 3.5
+		_sprite.rotation = sin(_sway_t) * 0.13 * strength
+	else:
+		self.modulate    = Color(1.0, 1.0, 1.0)
+		_sprite.rotation = lerp(_sprite.rotation, 0.0, 0.12)
+
+# ── Slow visual feedback ─────────────────────────────────────────────────────
+
+func _on_slow_start() -> void:
+	_sway_t = 0.0
+
+func _on_slow_end() -> void:
+	pass
+
+# ── Proximity (mouth open/close) ──────────────────────────────────────────────
+
+func _on_pizza_nearby(area: Area2D) -> void:
+	if area.is_in_group("pizza"):
+		_nearby_pizzas += 1
+		_update_mouth()
+
+func _on_pizza_left(area: Area2D) -> void:
+	if area.is_in_group("pizza"):
+		_nearby_pizzas = maxi(0, _nearby_pizzas - 1)
+		_update_mouth()
+
+func _update_mouth() -> void:
+	if _eating or _morphing:   # the morph owns the sprite while spinning
+		return
+	_sprite.texture = _skin_eat_tex[fat_state] if _nearby_pizzas > 0 else _skin_tex[fat_state]
+
+# ── Collisions ────────────────────────────────────────────────────────────────
+
+func apply_slow(duration: float) -> void:
+	if duration >= _slow_remaining:
+		_slow_total     = duration
+		_slow_remaining = duration
+
+# Тап пришёлся на тело конуса? (мир ≈ экран, без камеры) — тогда это тап по конусу,
+# а не движение/дабл-тап Нормальдо.
+func _touch_on_cone(pos: Vector2) -> bool:
+	for c in get_tree().get_nodes_in_group("cone"):
+		if is_instance_valid(c) and c.has_method("contains_point") and c.contains_point(pos):
+			return true
+	return false
+
+# Компас: реверс управления на `duration` секунд.
+func apply_invert(duration: float) -> void:
+	_invert_remaining = maxf(_invert_remaining, duration)
+	start_skill_cd("compass", _invert_remaining)   # кружок-кулдаун в HUD
+	_show_floating_text("РЕВЕРС!", Color(0.85, 0.5, 1.0))
+	if not _music_reversed:
+		_set_music_reversed(true)
+
+# Разворачивает/возвращает фоновую музыку (реверс-трек на время компаса).
+# Не трогаем, если играет НЕ основная тема (напр. трек мини-игры).
+func _set_music_reversed(on: bool) -> void:
+	var m = get_parent().get_node_or_null("Music")
+	if m == null or not m.has_method("swap_to"):
+		return
+	var length : float = _MUSIC_FWD.get_length()
+	var cur_path : String = m.stream.resource_path if m.stream != null else ""
+	if on:
+		if cur_path == _MUSIC_FWD.resource_path:
+			# Реверс «продолжается» с текущей точки, только назад.
+			var rev_from : float = clampf(length - m.get_playback_position(), 0.0, length)
+			m.swap_to(_MUSIC_REV, 0.3, rev_from)
+			_music_reversed = true
+	else:
+		if cur_path == _MUSIC_REV.resource_path:
+			var fwd_from : float = clampf(length - m.get_playback_position(), 0.0, length)
+			m.swap_to(_MUSIC_FWD, 0.3, fwd_from)
+		_music_reversed = false
+
+# Урон от «хазарда», который сам себя не уничтожает (напр. крутящийся знак бомжа).
+# Уважает неуязвимость / маску Джокера — 1.5-c грейс ставит сам _take_hit.
+func hazard_hit(dmg: int = 1) -> void:
+	if _dead or _invincible or _scars_active or not _input_enabled or _fat_boss_active:
+		return
+	_take_hit(dmg)
+
+# ── Skill system helpers ──────────────────────────────────────────────────────
+
+func _area_tag(area: Area2D) -> String:
+	var t = area.get("skin_tag")
+	if t != null and str(t) != "": return str(t)
+	if area.has_meta("item_tag"): return str(area.get_meta("item_tag"))
+	# Group-based fallback
+	if area.is_in_group("fire"):  return "fire"
+	if area.is_in_group("glove"): return "glove"
+	if area.is_in_group("snake"): return "snake"
+	if area.is_in_group("bum"):   return "bum"
+	# Texture-based fallback for the shared item.tscn negatives (trash / stone).
+	if area.has_node("Sprite2D"):
+		var tex := (area.get_node("Sprite2D") as Sprite2D).texture
+		if tex != null:
+			var fn := str(tex.resource_path).get_file()
+			if fn.begins_with("trash"): return "trash"
+			if fn.begins_with("stone"): return "stone"
+	return ""
+
+func _skill_matches(skill: Dictionary, area: Area2D) -> bool:
+	var in_group := false
+	for g in skill["groups"]:
+		if area.is_in_group(g):
+			in_group = true; break
+	if not in_group: return false
+	var tags : Array = skill.get("tags", [])
+	if tags.is_empty(): return true
+	var tag := _area_tag(area)
+	for t in tags:
+		if tag == t or area.is_in_group(t): return true
+	return false
+
+func _resolve_skills(area: Area2D) -> Dictionary:
+	var r := { "dodged": false, "transformed": "", "counter_xp": 0, "counter_dollars": 0,
+			   "counter_triggered": false, "adapted": false, "adapted_duration": 0.0 }
+	var skills := SkinSkills.get_skills(SaveData.active_skin)
+	for i in skills.size():
+		var s : Dictionary = skills[i]
+		if not _skill_matches(s, area): continue
+		var chance := float(s.get("chance", 1.0))
+		if SaveData.active_skin == "joker" and i == _joker_doubled_skill:
+			chance = minf(chance * 2.0, 1.0)
+		match s["type"]:
+			SkinSkills.TRANSFORM:
+				if r.transformed.is_empty() and randf() < chance:
+					r.transformed = s.get("into", "pizza")
+			SkinSkills.DODGE:
+				if not r.dodged and r.transformed.is_empty() and randf() < chance:
+					r.dodged = true
+			SkinSkills.ADAPT:
+				if not r.adapted:
+					r.adapted_duration = float(area.get_meta("slow_duration", 4.0)) * 0.5
+					r.adapted = true
+			SkinSkills.COUNTER:
+				if not r.dodged and r.transformed.is_empty():
+					r.counter_triggered = true
+					r.counter_xp      += int(s.get("bonus_xp", 0))
+					r.counter_dollars += int(s.get("bonus_dollars", 0))
+					if SaveData.active_skin == "joker" and r.counter_xp == 0 and r.counter_dollars == 0:
+						var rr := randf()
+						if rr < 0.33:   r.counter_xp = 20
+						elif rr < 0.66: r.counter_dollars = 15
+						else:           r.counter_xp = 10
+	return r
+
+# ── NEW skin model: cooldowns, resists, active ability, passives ──────────────
+
+# Read by the HUD cooldown badges (scripts/skill_badges.gd).
+func skill_cd_total(key: String) -> float:
+	var c = _skill_cd.get(key)
+	return c[1] if c != null else 0.0
+
+func skill_cd_remaining(key: String) -> float:
+	var c = _skill_cd.get(key)
+	return c[0] if c != null else 0.0
+
+func is_skill_ready(key: String) -> bool:
+	var c = _skill_cd.get(key)
+	return c == null or c[0] <= 0.0
+
+# Charge readout for the HUD active-ability badge.
+func active_charges() -> int:
+	# The cooldown refills charges lazily on the next fire; reflect that here so
+	# the badge shows full charges the instant the cooldown ends.
+	if _active_charges <= 0 and is_skill_ready("active"):
+		return _active_max_charges
+	return _active_charges
+
+func active_max_charges() -> int:
+	return _active_max_charges
+
+func start_skill_cd(key: String, total: float) -> void:
+	if total <= 0.0:
+		return
+	_skill_cd[key] = [total, total]
+
+func _tick_skill_cd(delta: float) -> void:
+	if _skill_cd.is_empty():
+		return
+	for k in _skill_cd.keys():
+		var c = _skill_cd[k]
+		if c[0] > 0.0:
+			c[0] = maxf(0.0, c[0] - delta)
+
+# Configure the active skin's resists / ability / passive for this run.
+func _build_skin_runtime() -> void:
+	_skin_runtime_built = true
+	var sid := SaveData.active_skin
+	_skill_cd.clear()
+	_resist_cd_for.clear()
+	for r in SkinSkills.get_resists(sid):
+		var cd := float(r.get("cd", 8.0))
+		for tag in r.get("items", [r.get("item", "")]):
+			if str(tag) != "":
+				_resist_cd_for[str(tag)] = cd
+	_ability_cfg      = SkinSkills.get_ability(sid)
+	_active_max_charges = maxi(1, int(_ability_cfg.get("charges", 1)))
+	_active_charges   = _active_max_charges
+	_passive_id       = SkinSkills.get_passive(sid).get("id", "")
+	_double_ryag      = (sid == "glasses")
+	_treasure_passive = (_passive_id == "treasure")
+	_scars_passive    = (_passive_id == "scars")
+	_harry_second_chance_ready = (_passive_id == "second_chance")
+	# Retired legacy uniques (Dracula immortality / Wizard magic) — the new model
+	# gives Dracula «Бомж-жор» and Wizard no passive.
+	_dracula_immortal_ready = false
+
+# A resist fired: break the item instead of taking the hit, start its cooldown.
+func _trigger_resist(tag: String, area: Area2D) -> void:
+	start_skill_cd("resist:" + tag, float(_resist_cd_for.get(tag, 8.0)))
+	_skill_audio.stream    = _RESIST_SFX
+	_skill_audio.volume_db = -6.0
+	_skill_audio.play()
+	_vfx_resist_break(area.global_position)
+	_show_floating_text("РЕЗИСТ!", Color(0.95, 0.32, 0.28))
+	# Dracula passive: smashing a bum with the resist fattens by 3 pizzas.
+	if _passive_id == "bum_feast" and tag == "bum":
+		for _i in 3:
+			_eat_pizza()
+		_show_floating_text("+3", Color(0.72, 0.20, 1.00))
+	_kill_item(area)
+
+# Destroy an obstacle with the "falling death" used in the ЖИРОБОСС mini-game:
+# knock_down() drops it under gravity with a spin AND plays its death cry
+# (бомж/собака have their own). Falls back to on_hit / queue_free.
+func _kill_item(area: Object) -> void:
+	if not is_instance_valid(area):
+		return
+	if area.has_method("knock_down"):
+		area.knock_down()
+	elif area.has_method("on_hit"):
+		area.on_hit()
+	else:
+		area.queue_free()
+
+func _vfx_resist_break(pos: Vector2) -> void:
+	var p := CPUParticles2D.new()
+	p.emitting = true; p.one_shot = true; p.explosiveness = 0.9
+	p.amount = 16; p.lifetime = 0.45; p.spread = 180.0
+	p.initial_velocity_min = 70.0; p.initial_velocity_max = 150.0
+	p.scale_amount_min = 3.0; p.scale_amount_max = 7.0
+	p.emission_shape = CPUParticles2D.EMISSION_SHAPE_SPHERE
+	p.emission_sphere_radius = 10.0
+	var g := Gradient.new()
+	g.set_color(0, Color(1.0, 0.45, 0.35, 1.0))
+	g.add_point(1.0, Color(0.9, 0.15, 0.10, 0.0))
+	p.color_ramp = g
+	get_parent().add_child(p)
+	p.global_position = pos
+	p.finished.connect(p.queue_free)
+
+# ── Active ability (double-tap) ───────────────────────────────────────────────
+
+func _try_fire_ability(target: Vector2) -> void:
+	if _ability_cfg.is_empty():
+		return
+	# Charge-based cooldown: the ability holds `_active_max_charges` shots; the
+	# cooldown only starts once the LAST charge is spent, then refills them all.
+	if _active_charges <= 0:
+		if not is_skill_ready("active"):
+			# On cooldown — deny with feedback: pulse the badge + float a word.
+			_show_floating_text("Перезарядка", Color(1.0, 0.55, 0.25))
+			active_denied.emit()
+			return
+		_active_charges = _active_max_charges   # cooldown finished → recharge
+	var dir := (target - global_position)
+	if dir.length() < 4.0:
+		dir = Vector2.RIGHT
+	dir = dir.normalized()
+	if _ability_cfg.get("type", "") == SkinSkills.RYAGALITY:
+		_fire_rygality(dir, _ability_cfg.get("color", Color(0.35, 1.0, 0.45)))
+		if _double_ryag:
+			await get_tree().create_timer(0.16).timeout
+			if is_instance_valid(self):
+				_fire_rygality(dir, _ability_cfg.get("color", Color(0.35, 1.0, 0.45)))
+	else:
+		_cast_spell(str(_ability_cfg.get("id", "")), dir)
+	# Consume a charge; start the cooldown only when they're all gone.
+	_active_charges -= 1
+	if _active_charges <= 0:
+		start_skill_cd("active", float(_ability_cfg.get("cd", 8.0)))
+
+# Generic projectile spawned at Normaldo, flying along `dir`.
+func _spawn_skill_projectile(dir: Vector2, speed: float, spr: Node2D, radius: float,
+		scan: Array, handler: Callable, spin: float = 0.0, life: float = 2.4) -> Node2D:
+	var proj := Area2D.new()   # Area2D: коллизию предметов ловит движок (area_entered)
+	proj.set_script(_PROJECTILE_SCRIPT)
+	proj.z_index = 38
+	get_parent().add_child(proj)
+	proj.global_position = global_position
+	proj.set("velocity", dir * speed)
+	proj.set("radius", radius)
+	proj.set("life", life)
+	proj.set("spin", spin)
+	proj.set("scan_groups", scan)
+	proj.set("hit_handler", handler)
+	proj.call("setup", spr)
+	return proj
+
+func _make_sprite(tex: Texture2D, px: float, mod: Color = Color(1, 1, 1)) -> Sprite2D:
+	var s := Sprite2D.new()
+	s.texture        = tex
+	s.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	var tsz := tex.get_size()
+	var sc  := px / maxf(tsz.x, tsz.y)
+	s.scale    = Vector2(sc, sc)
+	s.modulate = mod
+	return s
+
+# Every kind of item the Рыгалити cloud can smash — anything from a pizza to a
+# ninja-foot shuriken. Mini-game pickups (mutagen / slot machine) are excluded.
+const _RYAG_HIT_GROUPS : Array = ["obstacle", "fire", "slowing", "pizza",
+	"pizza_pack", "dollar", "money_bag", "bomb", "molotov", "magnet"]
+
+# Рыгалити: a big tinted smoke cloud flies along the tap line, breaks the FIRST
+# item it touches and dissipates. No spin — it pulsates in size instead.
+func _fire_rygality(dir: Vector2, col: Color) -> void:
+	var spr := _make_sprite(_SMOKE_TEX, 92.0, Color(col.r, col.g, col.b, 0.95))
+	var base := spr.scale
+	_spawn_skill_projectile(dir, 460.0, spr, 52.0, _RYAG_HIT_GROUPS, _break_once_handler(), 0.0)
+	var tw := spr.create_tween().set_loops()
+	tw.tween_property(spr, "scale", base * 1.18, 0.35).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(spr, "scale", base * 0.88, 0.35).set_trans(Tween.TRANS_SINE)
+	_skill_audio.stream = _SKILL_SFX_DODGE
+	_skill_audio.volume_db = -7.0
+	_skill_audio.play()
+
+func _cast_spell(spell_id: String, dir: Vector2) -> void:
+	match spell_id:
+		"expecto_patronum":
+			_cast_expecto()
+		"helm_throw":
+			# Штурвал пробивает любые предметы на линии и НЕ ломается (pierce).
+			var spr := _make_sprite(_WHEEL_TEX, 56.0)
+			_spawn_skill_projectile(dir, 520.0, spr, 34.0, _RYAG_HIT_GROUPS, _break_handler(), 9.0, 3.0)
+			_play_skill_sfx(SkinSkills.DODGE)
+		"royal_gambit":
+			# Middle card flies straight; top/bottom fan out slightly diagonally.
+			# Each card hits the first item it meets (any type) and vanishes,
+			# trailing a small purple wake.
+			_cast_three_lines(_CARD_TEX, 40.0, 8.0, _break_once_handler(), Color(1, 1, 1),
+				_RYAG_HIT_GROUPS, 150.0, Color(0.62, 0.24, 0.95))
+			_play_skill_sfx(SkinSkills.DODGE)
+		"web_shot":
+			# Комок белых партиклов (без облачка) — ломает первый задетый предмет
+			# и исчезает. 3 заряда, см. _try_fire_ability.
+			var bolt := Node2D.new()
+			bolt.add_child(_make_skill_trail(Color(1, 1, 1), -dir))
+			_spawn_skill_projectile(dir, 540.0, bolt, 30.0, _RYAG_HIT_GROUPS, _break_once_handler(), 0.0)
+			_play_skill_sfx(SkinSkills.DODGE)
+		"transformus":
+			# Превращает ПЕРВЫЙ задетый предмет любого типа в пиццу/доллар.
+			# Снаряд — не облачко, а комок «магических» партиклов со следом.
+			var magic := Color(0.70, 0.40, 1.00)
+			var bolt := Node2D.new()
+			bolt.add_child(_make_skill_trail(magic, -dir))
+			_spawn_skill_projectile(dir, 480.0, bolt, 30.0, _RYAG_HIT_GROUPS, _transform_handler(), 0.0)
+			_play_oneshot(_SFX_GLITTER, -6.0)   # charge flight
+		_:
+			_cast_expecto()
+
+# Three projectiles in three rows. `spread` > 0 fans the outer two out diagonally
+# (top goes up-right, bottom down-right), the middle one always flies straight.
+# `trail_col` (alpha > 0) attaches a small coloured particle wake to each.
+func _cast_three_lines(tex: Texture2D, px: float, spin: float, handler: Callable,
+		mod: Color = Color(1, 1, 1), groups: Array = ["obstacle", "fire"], spread: float = 0.0,
+		trail_col: Color = Color(0, 0, 0, 0)) -> void:
+	for off in [-46.0, 0.0, 46.0]:
+		var proj := Node2D.new()
+		proj.set_script(_PROJECTILE_SCRIPT)
+		proj.z_index = 38
+		get_parent().add_child(proj)
+		proj.global_position = global_position + Vector2(0.0, off)
+		proj.set("velocity", Vector2(560.0, spread * signf(off)))
+		proj.set("radius", 30.0)
+		proj.set("life", 2.6)
+		proj.set("spin", spin)
+		proj.set("scan_groups", groups)
+		proj.set("hit_handler", handler)
+		var spr := _make_sprite(tex, px, mod)
+		proj.call("setup", spr)
+		if trail_col.a > 0.0:
+			spr.add_child(_make_skill_trail(trail_col))
+
+# Fire-and-forget SFX: temporary player that frees itself when done.
+func _play_oneshot(stream: AudioStream, vol_db: float = -4.0) -> void:
+	if stream == null:
+		return
+	var a := AudioStreamPlayer.new()
+	a.stream    = stream
+	a.volume_db = vol_db
+	get_parent().add_child(a)
+	a.play()
+	a.finished.connect(a.queue_free)
+
+# Small world-space particle wake that lingers behind a moving projectile.
+func _make_skill_trail(col: Color, back_dir: Vector2 = Vector2(-1, 0)) -> CPUParticles2D:
+	var p := CPUParticles2D.new()
+	p.local_coords         = false   # particles stay in world → real trail
+	p.emitting             = true
+	p.amount               = 20
+	p.lifetime             = 0.42
+	p.direction            = back_dir.normalized()
+	p.spread               = 22.0
+	p.gravity              = Vector2.ZERO
+	p.initial_velocity_min = 12.0
+	p.initial_velocity_max = 40.0
+	p.scale_amount_min     = 2.0
+	p.scale_amount_max     = 4.5
+	var g := Gradient.new()
+	g.set_color(0, Color(col.r, col.g, col.b, 0.9))
+	g.add_point(1.0, Color(col.r, col.g, col.b, 0.0))
+	p.color_ramp = g
+	return p
+
+# Экспекто патронум: white flash + wipe every obstacle on screen.
+func _cast_expecto() -> void:
+	var fl := CanvasLayer.new()
+	fl.layer = 80
+	get_parent().add_child(fl)
+	var cr := ColorRect.new()
+	cr.color = Color(1, 1, 1, 0.0)
+	cr.size  = get_viewport_rect().size
+	fl.add_child(cr)
+	var tw := cr.create_tween()
+	tw.tween_property(cr, "color:a", 0.85, 0.12)
+	tw.tween_property(cr, "color:a", 0.0, 0.55)
+	tw.tween_callback(fl.queue_free)
+	for grp in _RYAG_HIT_GROUPS:
+		for node in get_tree().get_nodes_in_group(grp):
+			if is_instance_valid(node):
+				_kill_item(node)
+	_play_skill_sfx(SkinSkills.TRANSFORM)
+
+# Hit handlers (return true → consume the projectile, false → pierce on).
+func _break_handler() -> Callable:
+	return func(node):
+		if not is_instance_valid(node):
+			return false
+		_vfx_resist_break((node as Node2D).global_position)
+		_kill_item(node)
+		return false
+
+# Break the first item hit, then consume the projectile (Рыгалити).
+func _break_once_handler() -> Callable:
+	return func(node):
+		if not is_instance_valid(node):
+			return false
+		_vfx_resist_break((node as Node2D).global_position)
+		_kill_item(node)
+		return true
+
+func _transform_handler() -> Callable:
+	return func(node):
+		if not is_instance_valid(node):
+			return false
+		var pos : Vector2 = (node as Node2D).global_position
+		# Inherit the original item's speed so the transformed pizza/dollar keeps
+		# drifting at the same pace instead of snapping to a fixed speed.
+		var spd := 250.0
+		if node.get("speed") != null:
+			spd = float(node.get("speed"))
+		if node.has_method("on_hit"):
+			node.on_hit()
+		else:
+			node.queue_free()
+		_spawn_transformed(pos, spd)
+		_vfx_particles(SkinSkills.TRANSFORM)
+		return true
+
+func _slow_handler() -> Callable:
+	return func(node):
+		if not is_instance_valid(node):
+			return false
+		if node.get("speed") != null:
+			node.set("speed", float(node.get("speed")) * 0.35)
+		if node.has_node("Sprite2D"):
+			(node.get_node("Sprite2D") as Sprite2D).modulate = Color(0.7, 0.85, 1.0)
+		return false
+
+# Spawn a pizza or dollar where an obstacle was (Трансформус).
+func _spawn_transformed(pos: Vector2, speed: float = 250.0) -> void:
+	var as_pizza := randf() < 0.5
+	var item := _ITEM_SCENE.instantiate()
+	item.speed      = speed
+	item.is_eatable = as_pizza
+	item.damage     = 0
+	item.rotates    = true
+	item.pulses     = as_pizza
+	if not as_pizza:
+		item.item_group = "dollar"
+	var sprite := item.get_node("Sprite2D") as Sprite2D
+	sprite.texture = _PIZZA_TEX if as_pizza else _DOLLAR_TEX
+	sprite.scale   = Vector2.ONE * (0.09 if as_pizza else 0.36)
+	get_parent().add_child(item)
+	item.global_position = pos
+	_play_oneshot(_SFX_POOF, -3.0)   # poof: item → pizza/dollar
+
+# ── Skill VFX / SFX ──────────────────────────────────────────────────────────
+
+func _play_skill_sfx(skill_type: String) -> void:
+	match skill_type:
+		SkinSkills.DODGE:
+			_skill_audio.stream    = _SKILL_SFX_DODGE
+			_skill_audio.volume_db = -8.0
+		SkinSkills.ADAPT:
+			_skill_audio.stream    = BANANA_SOUND
+			_skill_audio.volume_db = -14.0
+		SkinSkills.COUNTER:
+			_skill_audio.stream    = _SKILL_SFX_COUNTER
+			_skill_audio.volume_db = -4.0
+		SkinSkills.TRANSFORM:
+			_skill_audio.stream    = _SKILL_SFX_TRANSFORM
+			_skill_audio.volume_db = -8.0
+	_skill_audio.play()
+
+func _vfx_particles(skill_type: String) -> void:
+	var p                      := CPUParticles2D.new()
+	p.emitting                  = true
+	p.one_shot                  = true
+	p.explosiveness             = 0.85
+	p.amount                    = 14
+	p.lifetime                  = 0.45
+	p.direction                 = Vector2.ZERO
+	p.spread                    = 180.0
+	p.gravity                   = Vector2(0, -40)
+	p.initial_velocity_min      = 55.0
+	p.initial_velocity_max      = 110.0
+	p.scale_amount_min          = 3.0
+	p.scale_amount_max          = 7.0
+	p.emission_shape            = CPUParticles2D.EMISSION_SHAPE_SPHERE
+	p.emission_sphere_radius    = 10.0
+	var base_col : Color
+	match skill_type:
+		SkinSkills.DODGE:      base_col = Color(0.25, 0.75, 1.00)
+		SkinSkills.ADAPT:      base_col = Color(1.00, 0.85, 0.20)
+		SkinSkills.COUNTER:    base_col = Color(1.00, 0.45, 0.10)
+		SkinSkills.TRANSFORM:  base_col = Color(0.30, 1.00, 0.50)
+		_:                     base_col = Color(1.00, 1.00, 1.00)
+	p.color = base_col
+	var g := Gradient.new()
+	g.set_color(0, Color(base_col.r, base_col.g, base_col.b, 1.0))
+	g.add_point(1.0, Color(base_col.r, base_col.g, base_col.b, 0.0))
+	p.color_ramp = g
+	get_parent().add_child(p)
+	p.global_position = global_position
+	var tw := p.create_tween()
+	tw.tween_interval(p.lifetime + 0.1)
+	tw.tween_callback(p.queue_free)
+
+func _vfx_dodge_flash() -> void:
+	var tw := create_tween()
+	tw.tween_property(_sprite, "modulate", Color(0.40, 0.80, 1.00), 0.05)
+	tw.tween_property(_sprite, "modulate", Color(1.00, 1.00, 1.00), 0.18)
+
+func _vfx_unique_trigger() -> void:
+	var skin := SkinRegistry.get_skin(SaveData.active_skin)
+	var rc   = SkinRegistry.RARITY_COLORS[skin.get("rarity", 0)]
+	var tw   := create_tween()
+	tw.tween_property(_sprite, "modulate", Color(rc.r * 1.8, rc.g * 1.8, rc.b * 1.8), 0.07)
+	tw.tween_property(_sprite, "modulate", Color(1.0, 1.0, 1.0), 0.35)
+	var p                     := CPUParticles2D.new()
+	p.emitting                 = true
+	p.one_shot                 = true
+	p.explosiveness            = 0.9
+	p.amount                   = 24
+	p.lifetime                 = 0.6
+	p.direction                = Vector2.ZERO
+	p.spread                   = 180.0
+	p.gravity                  = Vector2(0, -30)
+	p.initial_velocity_min     = 70.0
+	p.initial_velocity_max     = 150.0
+	p.scale_amount_min         = 4.0
+	p.scale_amount_max         = 9.0
+	p.emission_shape           = CPUParticles2D.EMISSION_SHAPE_SPHERE
+	p.emission_sphere_radius   = 16.0
+	p.color                    = rc
+	var g := Gradient.new()
+	g.set_color(0, Color(rc.r, rc.g, rc.b, 1.0))
+	g.add_point(1.0, Color(rc.r, rc.g, rc.b, 0.0))
+	p.color_ramp               = g
+	get_parent().add_child(p)
+	p.global_position = global_position
+	var tw2 := p.create_tween()
+	tw2.tween_interval(p.lifetime + 0.1)
+	tw2.tween_callback(p.queue_free)
+
+func _show_floating_text(text: String, col: Color) -> void:
+	var lbl := Label.new()
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", 13)
+	lbl.text     = text
+	lbl.modulate = col
+	get_parent().add_child(lbl)
+	lbl.global_position = global_position + Vector2(-20.0, -30.0)
+	var tw := lbl.create_tween()
+	tw.tween_property(lbl, "global_position:y", lbl.global_position.y - 45.0, 0.75) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(lbl, "modulate:a", 0.0, 0.75).set_ease(Tween.EASE_IN)
+	tw.tween_callback(lbl.queue_free)
+
+# ── Wizard magic ──────────────────────────────────────────────────────────────
+
+func _activate_wizard_magic() -> void:
+	_wizard_bonus_type   = randi() % 3
+	_wizard_bonus_active = true
+	_wizard_bonus_timer  = 5.0
+	_vfx_unique_trigger()
+	_play_skill_sfx(SkinSkills.TRANSFORM)
+	_wizard_start_aura()
+	wizard_state_changed.emit(0, true, _wizard_bonus_type, _wizard_bonus_timer)
+	match _wizard_bonus_type:
+		0:
+			if _magnet_remaining <= 0.0:
+				_magnet_remaining = 3.0
+			_show_floating_text("МАГНИТ!", Color(0.30, 0.85, 1.00))
+		1: _show_floating_text("×2 XP!", Color(0.75, 0.50, 1.00))
+		2: _show_floating_text("УСКОРЕНИЕ!", Color(1.00, 0.75, 0.20))
+
+func _wizard_aura_color() -> Color:
+	match _wizard_bonus_type:
+		0: return Color(0.30, 0.85, 1.00)
+		1: return Color(0.75, 0.50, 1.00)
+		2: return Color(1.00, 0.75, 0.20)
+		_: return Color(0.70, 0.40, 1.00)
+
+func _wizard_start_aura() -> void:
+	_wizard_cleanup_aura()
+	var p                      := CPUParticles2D.new()
+	p.emitting                  = true
+	p.one_shot                  = false
+	p.amount                    = 18
+	p.lifetime                  = 0.70
+	p.explosiveness             = 0.0
+	p.randomness                = 0.60
+	p.direction                 = Vector2(0, 1)
+	p.spread                    = 90.0
+	p.gravity                   = Vector2(0, 100)
+	p.initial_velocity_min      = 35.0
+	p.initial_velocity_max      = 85.0
+	p.scale_amount_min          = 2.5
+	p.scale_amount_max          = 5.5
+	p.emission_shape            = CPUParticles2D.EMISSION_SHAPE_SPHERE
+	p.emission_sphere_radius    = 18.0
+	p.z_index                   = -1
+	var c := _wizard_aura_color()
+	p.color = c
+	var g := Gradient.new()
+	g.set_color(0, Color(c.r, c.g, c.b, 0.85))
+	g.add_point(1.0, Color(c.r, c.g, c.b, 0.0))
+	p.color_ramp = g
+	add_child(p)
+	p.position   = Vector2(0, 30)
+	_wizard_aura = p
+
+func _wizard_cleanup_aura() -> void:
+	if is_instance_valid(_wizard_aura):
+		_wizard_aura.emitting = false
+		var tw := _wizard_aura.create_tween()
+		tw.tween_interval(_wizard_aura.lifetime + 0.05)
+		tw.tween_callback(_wizard_aura.queue_free)
+	_wizard_aura = null
+
+# ── Core gameplay ─────────────────────────────────────────────────────────────
+
+func _max_fat_state() -> int:
+	var lvl := SaveData.skin_level
+	if lvl >= 5: return 3
+	if lvl >= 2: return 2
+	return 1
+
+func _eat_pizza() -> void:
+	_pizza_count       += 1
+	_total_pizza_count += 1
+
+	# Wizard: extra XP on boost
+	if _wizard_bonus_active and _wizard_bonus_type == 1:
+		_total_pizza_count += 1
+	# (Legacy wizard «Колдовство» bonus retired — Wizard has no passive now.)
+
+	var new_state := fat_state
+	for i in FAT_THRESHOLDS.size():
+		if _pizza_count >= FAT_THRESHOLDS[i]:
+			new_state = i + 1
+	# The skin-level cap only limits how far EATING can raise fat — it must never
+	# LOWER an already-higher state (e.g. the slots golden pizza over-fattens to
+	# uber; catching a pizza afterwards must not drop you back to the level cap).
+	new_state = maxi(fat_state, mini(new_state, _max_fat_state()))
+	var got_fatter := new_state > fat_state
+	fat_state = new_state
+	stats_changed.emit(fat_state, _pizza_count, _total_pizza_count)
+
+	if got_fatter:
+		_fat_audio.play()
+		play_fat_morph()   # spin into a point, re-emerge in the new fat sprite
+		# Joker passive «Знаешь, откуда эти шрамы?»: 5 s of invulnerability, shown
+		# as the Casey mask worn on the head.
+		if _scars_passive:
+			_activate_scars()
+	else:
+		# Звук поедания — случайный из двух; в мини-игре питчуется по размеру.
+		_audio.stream = _skin_eat_sfx[randi() % _skin_eat_sfx.size()]
+		_audio.pitch_scale = _eat_pitch()
+		_audio.play()
+		# Анимация: открытый рот на EAT_ANIM_TIME, потом обратно
+		_eating    = true
+		_eat_timer = EAT_ANIM_TIME
+		_sprite.texture = _skin_eat_tex[fat_state]
+
+func set_dev_immortal(v: bool) -> void:
+	_dev_immortal = v
+
+func _take_hit(damage: int = 1) -> void:
+	if fat_state == 0:
+		# Dev immortality: skip death entirely, just brief invincibility + flash.
+		if _dev_immortal:
+			_audio.stream = _skin_hit_sfx
+			_audio.play()
+			_flash_hit()
+			_spawn_hit_bubble()
+			_invincible = true
+			await get_tree().create_timer(1.0).timeout
+			_invincible = false
+			return
+		# Harry Potter second chance
+		if _harry_second_chance_ready and SaveData.active_skin == "harry_potter":
+			_harry_second_chance_ready = false
+			fat_state    = 1
+			_pizza_count = 0
+			# Re-apply through the helper so scale + x-offset are recomputed for
+			# the new texture. Just swapping `_sprite.texture` leaves the previous
+			# state's scale/offset in place, which drifts the sprite off its
+			# CollisionShape2D when texture widths differ across fat states.
+			_apply_skin_to_sprite()
+			_vfx_unique_trigger()
+			_play_skill_sfx(SkinSkills.TRANSFORM)
+			_show_floating_text("ВТОРОЙ ШАНС!", Color(1.00, 0.85, 0.15))
+			_flash_hit()
+			_spawn_hit_bubble()
+			stats_changed.emit(fat_state, _pizza_count, _total_pizza_count)
+			unique_ability_changed.emit(false)
+			_invincible = true
+			await get_tree().create_timer(1.5).timeout
+			_invincible = false
+			return
+		_die()
+		return
+
+	# Dracula immortality: fire before applying damage that would reach 0
+	var new_fat := fat_state - damage
+	if new_fat <= 0 and _dracula_immortal_ready and SaveData.active_skin == "dracula":
+		_dracula_immortal_ready = false
+		fat_state    = 1
+		_pizza_count = 0
+		# Re-apply through the helper so scale + x-offset are recomputed for
+		# the new texture. Just swapping `_sprite.texture` leaves the previous
+		# state's scale/offset in place, which drifts the sprite off its
+		# CollisionShape2D when texture widths differ across fat states.
+		_apply_skin_to_sprite()
+		_vfx_unique_trigger()
+		_play_skill_sfx(SkinSkills.TRANSFORM)
+		_show_floating_text("БЕЗ ПОТЕРИ ЖИРА!", Color(0.70, 0.15, 1.00))
+		_flash_hit()
+		_spawn_hit_bubble()
+		stats_changed.emit(fat_state, _pizza_count, _total_pizza_count)
+		unique_ability_changed.emit(false)
+		_invincible = true
+		await get_tree().create_timer(1.5).timeout
+		_invincible = false
+		return
+
+	fat_state    = maxi(0, fat_state - damage)
+	_pizza_count = 0 if fat_state == 0 else FAT_THRESHOLDS[fat_state - 1]
+	# See note in the Harry-Potter branch — recompute scale + x-offset for
+	# the new fat state, otherwise the slim sprite ends up offset from its
+	# collision shape because textures have different widths per state.
+	_apply_skin_to_sprite()
+	_audio.stream   = _skin_hit_sfx
+	_audio.play()
+	_flash_hit()
+	_spawn_hit_bubble()
+	stats_changed.emit(fat_state, _pizza_count, _total_pizza_count)
+	_invincible = true
+	await get_tree().create_timer(1.5).timeout
+	_invincible = false
+
+func _pulse_fat() -> void:
+	var tw := create_tween()
+	tw.tween_property(_sprite, "scale", _base_scale * 1.35, 0.12) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_sprite, "scale", _base_scale,        0.22) \
+		.set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+
+	# Дрожание во время раздувания (параллельный tween, только по x)
+	var shake_tw := create_tween()
+	for i in 5:
+		shake_tw.tween_property(_sprite, "position:x", 4.0 if i % 2 == 0 else -4.0, 0.024)
+	shake_tw.tween_property(_sprite, "position:x", 0.0, 0.024)
+
+func _flash_hit() -> void:
+	var tween := create_tween()
+	tween.set_loops(5)
+	tween.tween_property(_sprite, "modulate", Color(1.0, 0.25, 0.25), 0.12)
+	tween.tween_property(_sprite, "modulate", Color(1.0, 1.0, 1.0),   0.12)
+
+# Random sticker (AHHH / DANG / SLAKEBAKE …) pops above Normaldo's head on
+# damage. Fades in with a slight back-easing scale-up, holds briefly, then
+# fades out and self-frees. Slightly randomised X offset and tilt so back-to-
+# back hits don't stack into a single static sprite.
+func _spawn_hit_bubble() -> void:
+	if _HIT_BUBBLE_TEXTURES.is_empty():
+		return
+	_pop_sticker(_HIT_BUBBLE_TEXTURES[randi() % _HIT_BUBBLE_TEXTURES.size()])
+
+# Show a named comic reaction (e.g. "oops", "pow") over Normaldo's head.
+func show_reaction(reaction: String) -> void:
+	var tex = REACTIONS.get(reaction)
+	if tex != null:
+		_pop_sticker(tex)
+
+func _pop_sticker(tex: Texture2D) -> void:
+	if tex == null:
+		return
+	var bubble := Sprite2D.new()
+	bubble.texture        = tex
+	bubble.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	bubble.position       = _HIT_BUBBLE_OFFSET + Vector2(randf_range(-12.0, 12.0), 0.0)
+	bubble.scale          = Vector2.ONE * _HIT_BUBBLE_START_SC
+	bubble.rotation       = randf_range(-0.15, 0.15)
+	bubble.modulate       = Color(1.0, 1.0, 1.0, 0.0)
+	bubble.z_index        = 6
+	add_child(bubble)
+
+	var tw := create_tween()
+	tw.tween_property(bubble, "modulate:a", 1.0, _HIT_BUBBLE_IN_TIME)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(bubble, "scale", Vector2.ONE * _HIT_BUBBLE_PEAK_SC, _HIT_BUBBLE_IN_TIME)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(_HIT_BUBBLE_HOLD_TIME)
+	tw.tween_property(bubble, "modulate:a", 0.0, _HIT_BUBBLE_OUT_TIME)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(bubble, "scale", Vector2.ONE * _HIT_BUBBLE_START_SC, _HIT_BUBBLE_OUT_TIME)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tw.tween_callback(func():
+		if is_instance_valid(bubble):
+			bubble.queue_free()
+	)
+
+func _ensure_attract_sparks(item: Node2D) -> void:
+	if item.has_node("AttractSparks"):
+		return
+	var s                      := CPUParticles2D.new()
+	s.name                      = "AttractSparks"
+	s.z_index                   = 0
+	s.emitting                  = true
+	s.amount                    = 14
+	s.lifetime                  = 0.50
+	s.explosiveness             = 0.0
+	s.direction                 = Vector2.ZERO
+	s.spread                    = 180.0
+	s.gravity                   = Vector2(0, -30)
+	s.initial_velocity_min      = 30.0
+	s.initial_velocity_max      = 65.0
+	s.scale_amount_min          = 3.0
+	s.scale_amount_max          = 6.0
+	s.emission_shape            = CPUParticles2D.EMISSION_SHAPE_SPHERE
+	s.emission_sphere_radius    = 8.0
+	s.color                     = Color(0.4, 0.8, 1.0)
+	var g                       := Gradient.new()
+	g.set_color(0, Color(1.0, 1.0, 1.0, 1.0))
+	g.add_point(0.3, Color(0.5, 0.9, 1.0, 1.0))
+	g.add_point(0.7, Color(0.1, 0.4, 1.0, 0.7))
+	g.add_point(1.0, Color(0.05, 0.1, 0.8, 0.0))
+	s.color_ramp                = g
+	item.add_child(s)
+	item.move_child(s, 0)  # первый в дереве = рисуется раньше Sprite2D = за предметом
+
+func _cleanup_attract_sparks() -> void:
+	var spawner := get_parent().get_node_or_null("Spawner")
+	if not spawner:
+		return
+	for child in spawner.get_children():
+		var s := child.get_node_or_null("AttractSparks")
+		if s:
+			s.emitting = false
+			var tw := s.create_tween()
+			tw.tween_interval(s.lifetime)
+			tw.tween_callback(s.queue_free)
+
+func _collect_dollar() -> void:
+	_dollars += 1
+	_dollar_audio.play()
+	dollars_changed.emit(_dollars)
+
+# ── Joker passive «Знаешь, откуда эти шрамы?» (Casey mask) ────────────────────
+# Worn on the head for 5 s (invulnerable). The mask falls off when the timer
+# ends OR the moment Normaldo ploughs into something (one-hit shield).
+func _activate_scars() -> void:
+	# Repeatable, but only once per 60 s (hidden recharge gate).
+	if not is_skill_ready("scars_recharge"):
+		return
+	_scars_active = true
+	_invincible   = true
+	_scars_token += 1
+	var tok := _scars_token
+	start_skill_cd("passive:scars", 5.0)    # mask badge = the 5 s invuln window
+	start_skill_cd("scars_recharge", 60.0)  # 60 s before it can trigger again
+	_show_floating_text("НЕУЯЗВИМ!", Color(0.65, 0.25, 1.0))
+	if not is_instance_valid(_scars_mask):
+		_spawn_scars_mask()
+	get_tree().create_timer(5.0).timeout.connect(func():
+		if is_instance_valid(self) and _scars_active and _scars_token == tok:
+			_end_scars())
+
+func _spawn_scars_mask() -> void:
+	# Child of the head sprite so it inherits the fat-morph spin + follows drags.
+	var m := Sprite2D.new()
+	m.texture        = _CASEY_TEX
+	m.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	m.z_index        = 6
+	var msc := (_sprite.texture.get_size().x * 0.98) / _CASEY_TEX.get_size().x
+	m.scale    = Vector2(msc, msc)
+	m.position = Vector2(0.0, -1.0)
+	m.modulate = Color(1, 1, 1, 0.0)
+	_sprite.add_child(m)
+	_scars_mask = m
+	var tw := m.create_tween()
+	tw.tween_property(m, "modulate:a", 1.0, 0.14)
+
+func _end_scars() -> void:
+	if not _scars_active:
+		return
+	_scars_active = false
+	_scars_token += 1
+	_invincible   = false
+	_skill_cd.erase("passive:scars")   # badge vanishes
+	_drop_scars_mask()
+
+# Detach the mask from the head and let it tumble off the screen.
+func _drop_scars_mask() -> void:
+	if not is_instance_valid(_scars_mask):
+		return
+	var m := _scars_mask
+	_scars_mask = null
+	var gp    := m.global_position
+	var grot  := m.global_rotation
+	var gscl  := m.global_scale
+	_sprite.remove_child(m)
+	get_parent().add_child(m)
+	m.global_position = gp
+	m.global_rotation = grot
+	m.scale   = gscl
+	m.z_index = 20
+	var tw := m.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(m, "global_position", gp + Vector2(-24.0, 160.0), 0.75) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_property(m, "rotation", grot + 1.9, 0.75)
+	tw.tween_property(m, "modulate:a", 0.0, 0.35).set_delay(0.42)
+	tw.finished.connect(m.queue_free)
+
+# Pirate «Сокровище» jackpot: pop the x3 graffiti above the caught dollar.
+func _show_x3_popup(pos: Vector2) -> void:
+	var spr := Sprite2D.new()
+	spr.texture        = _X3_TEX
+	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	spr.z_index        = 60
+	var tsz := _X3_TEX.get_size()
+	var sc  := 56.0 / maxf(tsz.x, tsz.y)
+	spr.scale = Vector2(sc, sc) * 0.4
+	get_parent().add_child(spr)
+	spr.global_position = pos + Vector2(0, -24)
+	var tw := spr.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(spr, "scale", Vector2(sc, sc), 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(spr, "position:y", spr.position.y - 26.0, 0.7)
+	tw.chain().tween_property(spr, "modulate:a", 0.0, 0.4)
+	tw.chain().tween_callback(spr.queue_free)
+
+func _die() -> void:
+	_dead = true
+	_touching = false
+	_gauge.hide_gauge()
+	_sprite.modulate = Color(0.8, 0.0, 0.0, 0.5)
+	var death_stream = load("res://assets/audio/death.mp3")
+	if death_stream:
+		_audio.stream = death_stream
+		_audio.play()
+	var music := get_parent().get_node_or_null("Music") as AudioStreamPlayer
+	if music and music.has_method("fade_out"):
+		music.fade_out()
+	Analytics.event("death", {
+		"cause_group":    _last_hit_group,
+		"cause_specific": _last_hit_name,
+		"lane_y":         int(position.y),
+		"fat_level":      int(fat_state),
+		"pizza_count":    int(_total_pizza_count),
+	})
+	died.emit(_total_pizza_count + _skill_bonus_xp, position)
+
+# Maps a colliding obstacle to one of the cause buckets used by analytics.
+# Order matters — more specific groups win over the catch-all "obstacle".
+func _classify_hit_group(area: Area2D) -> String:
+	for grp in ["molotov", "fire", "glove", "snake", "bomb", "slowing"]:
+		if area.is_in_group(grp):
+			return grp
+	return "obstacle"
+
+# ── Collision dispatch ────────────────────────────────────────────────────────
+
+func _on_area_entered(area: Area2D) -> void:
+	if _dead: return
+
+	if area.is_in_group("mutagen"):
+		# FatBoss owns the freeze/mini-game; we just consume the pickup and signal.
+		area.queue_free()
+		mutagen_caught.emit()
+		return
+	if area.is_in_group("slot_machine"):
+		area.queue_free()
+		slot_machine_caught.emit()
+		return
+
+	# ЖИРОБОСС mini-game: the giant doesn't eat into the run score in real time.
+	# Good items are tallied by fat_boss.gd (and credited at the end); bad items
+	# shatter against the head. Routed here so the size/score logic stays untouched.
+	if _fat_boss_active:
+		if area.is_in_group("pizza") or area.is_in_group("dollar"):
+			var kind := "dollar" if area.is_in_group("dollar") else "pizza"
+			fat_boss_loot_collected.emit(kind, area.global_position)
+			area.queue_free()
+			return
+		elif area.is_in_group("obstacle") or area.is_in_group("fire"):
+			if area.has_method("knock_down"):
+				area.knock_down()
+			else:
+				area.queue_free()
+			return
+
+	if area.is_in_group("pizza"):
+		_eat_pizza()
+		area.queue_free()
+	elif area.is_in_group("pizza_pack"):
+		area.explode()
+	elif area.is_in_group("bomb"):
+		area.explode()
+	elif area.is_in_group("dollar"):
+		# Pirate passive «Сокровище»: 50% chance the caught dollar pays ×3.
+		if _treasure_passive and randf() < 0.5:
+			for _i in 3:
+				_collect_dollar()
+			_vfx_particles(SkinSkills.TRANSFORM)
+			_show_x3_popup(area.global_position)
+			_show_floating_text("×3 $!", Color(1.0, 0.85, 0.20))
+		else:
+			_collect_dollar()
+		area.queue_free()
+	elif area.is_in_group("money_bag"):
+		var mult := 2 if (SaveData.active_skin == "pirate") else 1
+		if mult > 1:
+			_vfx_particles(SkinSkills.TRANSFORM)
+			_show_floating_text("×2 МЕШОК!", Color(1.0, 0.75, 0.15))
+		area.burst(mult)
+	elif area.is_in_group("magnet") and _magnet_remaining <= 0.0:
+		_magnet_remaining = 3.0
+		area.activate(self)
+	elif area.is_in_group("compass"):
+		apply_invert(5.0)
+		area.queue_free()
+	elif area.is_in_group("slowing"):
+		# Resist (e.g. wizard's banana) breaks the item with no slow.
+		var stag := _area_tag(area)
+		if stag != "" and _resist_cd_for.has(stag) and is_skill_ready("resist:" + stag):
+			_trigger_resist(stag, area)
+			return
+		_audio.stream = area.get_meta("slow_sound")
+		_audio.play()
+		apply_slow(float(area.get_meta("slow_duration", 4.0)))
+		area.queue_free()
+	elif area.is_in_group("obstacle") or area.is_in_group("fire"):
+		if _scars_active:
+			# The Casey mask absorbs the impact: break the item, mask falls off.
+			_last_hit_group = _classify_hit_group(area)
+			_end_scars()
+			_vfx_resist_break(area.global_position)
+			_kill_item(area)
+		elif not _invincible:
+			_handle_obstacle(area)
+
+func _handle_obstacle(area: Area2D) -> void:
+	# Cache the cause for analytics — _die() reads it. Prefer the most specific
+	# group (snake/glove/molotov/fire) and fall back to the scene-file name.
+	_last_hit_group = _classify_hit_group(area)
+	_last_hit_name  = area.scene_file_path.get_file().get_basename() if area.scene_file_path != "" else area.name
+
+	# Resist: if this skin has an off-cooldown resist for the item, break it
+	# instead of taking the hit (each resist cools down independently).
+	var tag := _area_tag(area)
+	if tag != "" and _resist_cd_for.has(tag) and is_skill_ready("resist:" + tag):
+		_trigger_resist(tag, area)
+		return
+
+	var dmg := int(area.get("damage")) if area.get("damage") != null else 1
+	_take_hit(dmg)
+	if area.get("slow_on_hit"):
+		apply_slow(float(area.get("slow_duration")))
+	_kill_item(area)

@@ -1,0 +1,19 @@
+[gd_scene load_steps=4 format=3 uid="uid://banana_peel"]
+
+[ext_resource type="Script" path="res://scripts/slowing_item.gd" id="1_slowing"]
+[ext_resource type="Texture2D" path="res://assets/items/banana_peel.png" id="2_banana_tex"]
+[ext_resource type="AudioStream" path="res://assets/audio/banana.mp3" id="3_banana_snd"]
+
+[node name="BananaPeel" type="Area2D"]
+collision_layer = 2
+collision_mask = 0
+script = ExtResource("1_slowing")
+slow_duration = 4.0
+slow_sound = ExtResource("3_banana_snd")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_banana_tex")
+scale = Vector2(0.13, 0.13)
+texture_filter = 1

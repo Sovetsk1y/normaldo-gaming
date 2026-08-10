@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Runtime permission on API 33+; harmless declaration below that. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Exact alarms (iOS parity). On API 31+ the OS may still withhold it; the
+         scheduler degrades to inexact-idle when canScheduleExactAlarms() is false. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Re-arm pending alarms after a reboot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <application>
+        <!-- Godot 4 v2 plugin registration: the runtime scans for meta-data
+             keyed `org.godotengine.plugin.v2.<PluginName>` and loads the named
+             class. The suffix MUST match getPluginName(). -->
+        <meta-data
+            android:name="org.godotengine.plugin.v2.NotifPluginAndroid"
+            android:value="com.normaldo.notif.NotifPluginAndroid" />
+
+        <!-- FCM message receiver. Server sends data-only payloads, so this fires
+             for foreground + background; we build the notification ourselves. -->
+        <service
+            android:name="com.normaldo.notif.NormaldoFcmService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name="com.normaldo.notif.NotifAlarmReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <!-- ACTION_FIRE is delivered as an explicit (component) intent, so it
+                 needs no filter. Only BOOT_COMPLETED arrives as a broadcast. -->
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>

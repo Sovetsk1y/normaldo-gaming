@@ -1,0 +1,101 @@
+#!/usr/bin/env python
+# Compiles src/*.{cpp,mm} into libnotif_plugin.<arch>-<ios|simulator>.<target>.a
+# against godot-cpp 4.2 GDExtension bindings.
+#
+# build.sh invokes this three times (arm64 device + arm64 simulator +
+# x86_64 simulator) and then merges each slice with godot-cpp's matching
+# static archive before packing the result into notif_plugin.xcframework.
+#
+# Required args:
+#   arch=arm64|x86_64
+#   godot_cpp=<path to godot-cpp checkout>
+# Optional:
+#   simulator=yes|no              (default no)
+#   target=template_debug|template_release  (default template_release)
+#   target_path=<dir>             (default bin/)
+
+import os
+import subprocess
+
+opts = Variables([], ARGUMENTS)
+env = DefaultEnvironment()
+
+opts.Add(EnumVariable("target", "Compilation target",
+        "template_release", ["template_debug", "template_release"]))
+opts.Add(EnumVariable("arch", "CPU architecture",
+        "", ["", "arm64", "x86_64"]))
+opts.Add(BoolVariable("simulator", "Build against iphonesimulator SDK", "no"))
+opts.Add(PathVariable("godot_cpp", "Path to godot-cpp checkout (branch 4.2)",
+        None, PathVariable.PathIsDir))
+opts.Add(PathVariable("target_path", "Output directory for the .a file",
+        "bin/", PathVariable.PathAccept))
+opts.Update(env)
+
+if env["arch"] == "":
+    print("ERROR: arch= is required (arm64 or x86_64)")
+    Exit(1)
+
+if "godot_cpp" not in env or not env["godot_cpp"]:
+    print("ERROR: godot_cpp=<path-to-godot-cpp> is required")
+    Exit(1)
+
+env["CC"] = "clang"
+env["CXX"] = "clang++"
+
+# ObjC++ module imports for .mm. ARC is required (NotifPluginDelegate uses
+# __bridge_retained / __bridge_transfer).
+env.Append(CCFLAGS=["-fmodules", "-fcxx-modules", "-fobjc-arc"])
+
+if env["simulator"]:
+    sdk_name = "iphonesimulator"
+    env.Append(CCFLAGS=["-mios-simulator-version-min=12.0"])
+    env.Append(LINKFLAGS=["-mios-simulator-version-min=12.0"])
+else:
+    sdk_name = "iphoneos"
+    env.Append(CCFLAGS=["-miphoneos-version-min=12.0"])
+    env.Append(LINKFLAGS=["-miphoneos-version-min=12.0"])
+
+try:
+    sdk_path = subprocess.check_output(
+        ["xcrun", "--sdk", sdk_name, "--show-sdk-path"]
+    ).strip().decode("utf-8")
+except (subprocess.CalledProcessError, OSError) as e:
+    print("ERROR: xcrun --sdk %s --show-sdk-path failed: %s" % (sdk_name, e))
+    Exit(1)
+
+env.Append(CCFLAGS=[
+    "-fmessage-length=0", "-fno-strict-aliasing",
+    "-fpascal-strings", "-fblocks",
+    "-fno-exceptions",
+    "-Wall", "-Werror=return-type",
+])
+env.Append(CCFLAGS=["-arch", env["arch"], "-isysroot", sdk_path, "-stdlib=libc++"])
+env.Append(LINKFLAGS=["-arch", env["arch"], "-isysroot", sdk_path])
+
+env.Prepend(CFLAGS=["-std=gnu11"])
+# GDExtension uses a stable C ABI, so we DON'T mirror Godot's internal
+# defines (DEBUG_METHODS_ENABLED, NEED_LONG_INT, GLES3_ENABLED, …). The
+# only thing that matters is the headers below and matching godot-cpp's
+# own build for the same target.
+env.Prepend(CXXFLAGS=["-std=gnu++17"])
+
+# godot-cpp ships its headers in two trees: hand-written in include/, and
+# generated-from-extension_api.json in gen/include/. We need both, plus
+# gdextension/ for gdextension_interface.h.
+env.Append(CPPPATH=[
+    "src",
+    os.path.join(env["godot_cpp"], "include"),
+    os.path.join(env["godot_cpp"], "gen", "include"),
+    os.path.join(env["godot_cpp"], "gdextension"),
+])
+
+sources = Glob("src/*.cpp") + Glob("src/*.mm") + Glob("src/*.m")
+
+lib_platform = env["arch"] + "-" + ("simulator" if env["simulator"] else "ios")
+lib_name = "libnotif_plugin." + lib_platform + "." + env["target"] + ".a"
+library = env.StaticLibrary(
+    target=os.path.join(env["target_path"], lib_name),
+    source=sources,
+)
+Default(library)
+Help(opts.GenerateHelpText(env))
