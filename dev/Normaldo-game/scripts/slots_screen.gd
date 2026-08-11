@@ -1085,18 +1085,11 @@ func _show_next_level_reward(rewards: Array, i: int, final_progress: float) -> v
 func _show_level_up_popup_slots(new_level: int, reward_d: int, reward_t: int, on_close: Callable) -> void:
 	var vp           := get_viewport().get_visible_rect().size
 	var popup_w      := 240.0
-	var has_unlock   : bool   = new_level == 2 or new_level == 5
-	var unlock_title : String = ""
-	var unlock_desc  : String = ""
-	var unlock_fat_idx : int  = 0
-	if new_level == 2:
-		unlock_title   = "+ ЖИР"
-		unlock_desc    = "Новое состояние и +1 жизнь"
-		unlock_fat_idx = 2
-	elif new_level == 5:
-		unlock_title   = "+ УБЕР ЖИР"
-		unlock_desc    = "Финальная стадия и +1 жизнь"
-		unlock_fat_idx = 3
+	var unlock : Dictionary   = SkinSkills.level_unlock_info(SaveData.active_skin, new_level)
+	var has_unlock   : bool   = not unlock.is_empty()
+	var unlock_title : String = str(unlock.get("title", ""))
+	var unlock_desc  : String = str(unlock.get("desc",  ""))
+	var unlock_fat_idx : int  = int(unlock.get("fat_idx", -1))
 
 	const UNLOCK_H : float = 56.0
 	var popup_h := 62.0
@@ -1189,8 +1182,8 @@ func _show_level_up_popup_slots(new_level: int, reward_d: int, reward_t: int, on
 		ul_stripe.position = Vector2(ox + 10.0, cur_y)
 		popup.add_child(ul_stripe)
 
-		var fat_sz  : float    = UNLOCK_H - 12.0
-		var fat_tex : Texture2D = SkinRegistry.get_avatar_texture(SaveData.active_skin, unlock_fat_idx)
+		var fat_sz  : float    = (UNLOCK_H - 12.0) if unlock_fat_idx >= 0 else 0.0
+		var fat_tex : Texture2D = SkinRegistry.get_avatar_texture(SaveData.active_skin, unlock_fat_idx) if unlock_fat_idx >= 0 else null
 		if fat_tex != null:
 			var fat_icon := TextureRect.new()
 			fat_icon.texture        = fat_tex

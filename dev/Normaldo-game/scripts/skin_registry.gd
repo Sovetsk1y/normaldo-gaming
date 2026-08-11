@@ -7,6 +7,17 @@ const RARE      := 2
 const EPIC      := 3
 const LEGENDARY := 4
 
+# Combat class — how the skin fights. Purely descriptive for now: the shop
+# detail screen shows it under the ability list so the player knows whether the
+# skin wants to keep its distance or trade hits. "" = unset (nothing rendered).
+const RANGED := "ranged"
+const MELEE  := "melee"
+const COMBAT_NAMES : Dictionary = { RANGED: "Дальний бой", MELEE: "Ближний бой" }
+const COMBAT_DESCS : Dictionary = {
+	RANGED: "Работает на дистанции: активка летит в сторону тапа и сносит предмет до того, как он доедет.",
+	MELEE:  "Работает вплотную: держит удар и ломает предметы в упор.",
+}
+
 # Ordered list of all skins.
 # tex_dir: folder under res://assets/normaldo/<id>/ containing state1..4 + state1_eat..4_eat
 # audio_dir: folder under res://assets/audio/skins/<id>/  containing eat1, eat2, hit, fat (optional)
@@ -16,6 +27,7 @@ const SKINS : Array = [
 		"id":        "classic",
 		"name_ru":   "НОРМАЛЬДО",
 		"rarity":    CLASSIC,
+		"combat":    RANGED,
 		"price":     0,
 		"tex_dir":   "",
 		"audio_dir": "",
@@ -154,6 +166,15 @@ func get_avatar_texture(skin_id: String, fat_state: int) -> Texture2D:
 	if tex == null:
 		return _CLASSIC_AVATAR_TEX[idx]
 	return tex
+
+# Russian name of the skin's combat class, or "" when the skin doesn't declare one.
+func get_combat_name(id: String) -> String:
+	var c : String = get_skin(id).get("combat", "")
+	return COMBAT_NAMES.get(c, "")
+
+func get_combat_desc(id: String) -> String:
+	var c : String = get_skin(id).get("combat", "")
+	return COMBAT_DESCS.get(c, "")
 
 func get_skin(id: String) -> Dictionary:
 	for s in SKINS:

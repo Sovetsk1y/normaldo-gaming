@@ -37,6 +37,7 @@ const TRANSFORM := "transform"
 const RYAGALITY := "ryagality"   # double-tap belch cloud (incl. variants)
 const SPELL     := "spell"       # epic/legendary special active
 
+const CD_RYAG_CLASSIC: float = 3.0    # НОРМАЛЬДО — стартовый скин рыгает часто
 const CD_RYAG_COMMON : float = 10.0
 const CD_RYAG_RARE   : float = 8.0
 const CD_SPELL_EPIC  : float = 8.0
@@ -47,15 +48,57 @@ const CD_RESIST_EL   : float = 8.0    # epic / legendary resist cooldown
 const CLOUD_GREEN : Color = Color(0.35, 1.0, 0.45)   # default РЫГАЛИТИ colour
 const _RYAG_DESC  : String = "Двойной тап — могучая отрыжка летит в сторону тапа и сносит всё на пути"
 
+# ── Level perks ───────────────────────────────────────────────────────────────
+# Прокачка скина открывает не только жиры. Каждая запись в `levels` — это
+# «что даёт уровень N», и она может нести любую комбинацию из:
+#
+#   fat_max    : int    — максимальный жир, доступный с этого уровня (0..3)
+#   immune     : Array  — теги предметов, которые с этого уровня не действуют
+#                         НАВСЕГДА (в отличие от резиста — без кулдауна)
+#   pizza_mult : int    — множитель на каждую съеденную пиццу
+#
+# Денежная часть уровней (доллары/жетоны) живёт в save_data.SKIN_LEVEL_REWARDS —
+# здесь только геймплейные перки.
+#
+# Скины без своей таблицы используют DEFAULT_LEVELS: жир 2 с ур.2, жир 3 с ур.5.
+# `popup_desc` — короткая строка для попапа «УРОВЕНЬ N!», `desc` — длинная для
+# панели «Описание» в магазине.
+const DEFAULT_LEVELS : Dictionary = {
+	2: { "id": "fat_2", "label": "ЖИР", "fat_max": 2,
+		"desc": "Открывает третье жировое состояние — ещё один пропущенный удар.",
+		"popup_desc": "Новое состояние и +1 жизнь" },
+	5: { "id": "fat_3", "label": "УБЕР ЖИР", "fat_max": 3,
+		"desc": "Открывает четвёртое жировое состояние — ещё один пропущенный удар.",
+		"popup_desc": "Финальная стадия и +1 жизнь" },
+}
+
 # ── Per-skin data ─────────────────────────────────────────────────────────────
 # resists: Array of { item, [items], cd }   ·   ability: РЫГАЛИТИ / SPELL / {}
 # unique : passive dict  { id, label, short, desc }  — {} if none
+# levels : override for DEFAULT_LEVELS (см. выше)
 const DATA : Dictionary = {
-	# ── Classic / Common: РЫГАЛИТИ 10 s, green ────────────────────────────────
+	# ── Classic: дальний бой, РЫГАЛИТИ 3 s, перки на чётных уровнях ───────────
 	"classic": {
 		"skills": [], "resists": [],
-		"ability": { "type": RYAGALITY, "cd": CD_RYAG_COMMON, "color": CLOUD_GREEN, "label": "РЫГАЛИТИ", "desc": _RYAG_DESC },
+		"ability": { "type": RYAGALITY, "cd": CD_RYAG_CLASSIC, "color": CLOUD_GREEN, "label": "РЫГАЛИТИ", "desc": _RYAG_DESC },
 		"unique": {},
+		"levels": {
+			2:  { "id": "fat_4", "label": "ЧЕТЫРЕ ЖИРА", "fat_max": 3,
+				"desc": "Открывает сразу все четыре жировых состояния — до «убера» включительно.",
+				"popup_desc": "Все состояния и +2 жизни" },
+			4:  { "id": "immune_banana", "label": "ИММУНИТЕТ К БАНАНУ", "immune": ["banana"],
+				"desc": "Банановая кожура больше не тормозит — Нормальдо давит её на ходу.",
+				"popup_desc": "Банан больше не тормозит" },
+			6:  { "id": "immune_beer", "label": "ИММУНИТЕТ К ПИВУ", "immune": ["beer"],
+				"desc": "Пиво больше не тормозит — сколько ни пей, шаг не сбивается.",
+				"popup_desc": "Пиво больше не тормозит" },
+			8:  { "id": "pizza_x2", "label": "ПОЕДАНИЕ ПИЦЦЫ ×2", "pizza_mult": 2,
+				"desc": "Каждый кусок пиццы засчитывается вдвое — и в жир, и в опыт.",
+				"popup_desc": "Каждый кусок считается вдвое" },
+			10: { "id": "immune_loser_ticket", "label": "ИММУНИТЕТ К ЧЕКУ ЛУЗЕРА", "immune": ["loser_ticket"],
+				"desc": "Чек лузера больше не обнуляет набранное за забег — рви его смело.",
+				"popup_desc": "Чек больше не обнуляет забег" },
+		},
 	},
 	"viking": {
 		"skills": [], "resists": [ { "item": "trash", "cd": CD_RESIST_CR } ],
@@ -162,3 +205,76 @@ func get_ability(skin_id: String) -> Dictionary:
 
 func get_passive(skin_id: String) -> Dictionary:
 	return DATA.get(skin_id, {}).get("unique", {})
+
+# ── Level perks ───────────────────────────────────────────────────────────────
+
+# { level:int -> perk dict } for this skin (DEFAULT_LEVELS when it has no table).
+func get_levels(skin_id: String) -> Dictionary:
+	return DATA.get(skin_id, {}).get("levels", DEFAULT_LEVELS)
+
+# The perk a single level grants, or {} if that level is money-only.
+func get_level_perk(skin_id: String, level: int) -> Dictionary:
+	return get_levels(skin_id).get(level, {})
+
+# Everything unlocked at or below `level`, folded into one dict.
+# fat_max ─ highest fat state the skin may eat its way up to
+# immune  ─ { item_tag: true } permanent (cooldown-free) immunities
+# pizza_mult ─ how much each eaten pizza counts for
+func get_unlocked(skin_id: String, level: int) -> Dictionary:
+	var out := { "fat_max": 1, "immune": {}, "pizza_mult": 1 }
+	var levels := get_levels(skin_id)
+	for lvl in levels:
+		if int(lvl) > level:
+			continue
+		var perk : Dictionary = levels[lvl]
+		out["fat_max"]    = maxi(int(out["fat_max"]),    int(perk.get("fat_max", 1)))
+		out["pizza_mult"] = maxi(int(out["pizza_mult"]), int(perk.get("pizza_mult", 1)))
+		for tag in perk.get("immune", []):
+			out["immune"][str(tag)] = true
+	return out
+
+func max_fat_for_level(skin_id: String, level: int) -> int:
+	return int(get_unlocked(skin_id, level)["fat_max"])
+
+# Level at which `fat_idx` becomes eatable. Fat 0/1 are free from level 1;
+# returns 99 if this skin never unlocks that state.
+func fat_unlock_level(skin_id: String, fat_idx: int) -> int:
+	if fat_idx <= 1:
+		return 1
+	var best := 99
+	var levels := get_levels(skin_id)
+	for lvl in levels:
+		if int(levels[lvl].get("fat_max", 1)) >= fat_idx:
+			best = mini(best, int(lvl))
+	return best
+
+# { level -> fat state it unlocks } — only the levels that raise the cap, so the
+# shop can stamp "НОВЫЙ ЖИР!" on exactly those reward cards.
+func fat_unlock_levels(skin_id: String) -> Dictionary:
+	var out : Dictionary = {}
+	var levels := get_levels(skin_id)
+	var seen := 1
+	for lvl in _sorted_levels(skin_id):
+		var cap := int(levels[lvl].get("fat_max", 1))
+		if cap > seen:
+			out[lvl] = cap
+			seen = cap
+	return out
+
+# What the «УРОВЕНЬ N!» popup should announce for this level-up.
+# {} when the level is money-only. `fat_idx` >= 0 → draw that fat sprite.
+func level_unlock_info(skin_id: String, level: int) -> Dictionary:
+	var perk := get_level_perk(skin_id, level)
+	if perk.is_empty():
+		return {}
+	var fats := fat_unlock_levels(skin_id)
+	return {
+		"title":   "+ " + str(perk.get("label", "")),
+		"desc":    str(perk.get("popup_desc", perk.get("desc", ""))),
+		"fat_idx": int(fats[level]) if fats.has(level) else -1,
+	}
+
+func _sorted_levels(skin_id: String) -> Array:
+	var keys : Array = get_levels(skin_id).keys()
+	keys.sort()
+	return keys

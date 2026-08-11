@@ -304,6 +304,14 @@ const COLA_SPEED_MULT     : float = 1.55
 var _slow_immune_remaining : float = 0.0
 var _speed_boost_remaining : float = 0.0
 
+# ── Перки уровней скина ───────────────────────────────────────────────────────
+# Прокачка скина выдаёт постоянные перки (skin_skills.get_unlocked). В отличие
+# от резистов они БЕЗ кулдауна: предмет просто не работает по Нормальдо.
+#   _lvl_immune     — { item_tag: true }, гасит замедление и чек лузера
+#   _lvl_pizza_mult — во сколько раз считается каждая съеденная пицца
+var _lvl_immune     : Dictionary = {}
+var _lvl_pizza_mult : int        = 1
+
 # ── Учёт добычи мини-игр ──────────────────────────────────────────────────────
 # Пока учёт включён, каждая съеденная пицца и каждый доллар попадают ещё и в
 # _loot_tally. В конце мини-игры бросается множитель ×1…×5 и разница
@@ -840,6 +848,8 @@ func _load_skin(skin_id: String) -> void:
 		var fp := aud_dir + "fat.mp3"
 		_skin_fat_sfx = load(fp) if ResourceLoader.exists(fp) else _CLASSIC_FAT_SFX
 
+	_refresh_level_perks()
+
 # ── Skill speed helpers ───────────────────────────────────────────────────────
 
 func _effective_fat_speed(state: int) -> float:
@@ -1066,6 +1076,11 @@ func apply_speed_boost(duration: float = COLA_DURATION) -> void:
 # Чек лузера: доллары, набранные за забег, сгорают. Прогресс жира и опыт не
 # трогаем — предмет бьёт по кошельку, а не по забегу.
 func apply_loser_ticket() -> void:
+	# Level perk «иммунитет к чеку лузера» (НОРМАЛЬДО, ур.10) — чек рвётся впустую.
+	if _lvl_immune_to("loser_ticket"):
+		_vfx_dodge_flash()
+		_show_floating_text("НЕ СЕГОДНЯ", Color(0.45, 1.00, 0.55))
+		return
 	if _dollars <= 0:
 		_show_floating_text("И ТАК НОЛЬ", Color(0.70, 0.70, 0.70))
 		return
@@ -1333,6 +1348,7 @@ func _build_skin_runtime() -> void:
 		for tag in r.get("items", [r.get("item", "")]):
 			if str(tag) != "":
 				_resist_cd_for[str(tag)] = cd
+	_refresh_level_perks()
 	_ability_cfg      = SkinSkills.get_ability(sid)
 	_active_max_charges = maxi(1, int(_ability_cfg.get("charges", 1)))
 	_active_charges   = _active_max_charges
@@ -1344,6 +1360,18 @@ func _build_skin_runtime() -> void:
 	# Retired legacy uniques (Dracula immortality / Wizard magic) — the new model
 	# gives Dracula «Бомж-жор» and Wizard no passive.
 	_dracula_immortal_ready = false
+
+# Pull the permanent perks the active skin has unlocked with its level. Called
+# from _build_skin_runtime (run start) and _load_skin (menu preview / skin swap)
+# so the values are never stale when a collision arrives.
+func _refresh_level_perks() -> void:
+	var unlocked := SkinSkills.get_unlocked(SaveData.active_skin, SaveData.skin_level)
+	_lvl_immune     = unlocked["immune"]
+	_lvl_pizza_mult = maxi(1, int(unlocked["pizza_mult"]))
+
+# True if a level perk makes this item tag permanently harmless.
+func _lvl_immune_to(tag: String) -> bool:
+	return tag != "" and _lvl_immune.has(tag)
 
 # A resist fired: break the item instead of taking the hit, start its cooldown.
 func _trigger_resist(tag: String, area: Area2D) -> void:
@@ -1804,16 +1832,16 @@ func _wizard_cleanup_aura() -> void:
 # ── Core gameplay ─────────────────────────────────────────────────────────────
 
 func _max_fat_state() -> int:
-	var lvl := SaveData.skin_level
-	if lvl >= 5: return 3
-	if lvl >= 2: return 2
-	return 1
+	return SkinSkills.max_fat_for_level(SaveData.active_skin, SaveData.skin_level)
 
 func _eat_pizza() -> void:
-	_pizza_count       += 1
-	_total_pizza_count += 1
+	# Level perk «поедание пиццы ×N» — один кусок считается за несколько и в жир,
+	# и в опыт, и в учёт добычи мини-игр.
+	var n := _lvl_pizza_mult
+	_pizza_count       += n
+	_total_pizza_count += n
 	if _loot_tally_active:
-		_loot_pizza_tally += 1
+		_loot_pizza_tally += n
 
 	# Wizard: extra XP on boost
 	if _wizard_bonus_active and _wizard_bonus_type == 1:
@@ -2267,8 +2295,14 @@ func _on_area_entered(area: Area2D) -> void:
 		apply_invert(5.0)
 		area.queue_free()
 	elif area.is_in_group("slowing"):
-		# Resist (e.g. wizard's banana) breaks the item with no slow.
 		var stag := _area_tag(area)
+		# Level perk immunity (НОРМАЛЬДО: банан с ур.4, пиво с ур.6) — предмет
+		# просто перестаёт работать, без кулдауна и без резист-значка.
+		if _lvl_immune_to(stag):
+			_vfx_dodge_flash()
+			_kill_item(area)
+			return
+		# Resist (e.g. wizard's banana) breaks the item with no slow.
 		if stag != "" and _resist_cd_for.has(stag) and is_skill_ready("resist:" + stag):
 			_trigger_resist(stag, area)
 			return

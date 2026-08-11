@@ -5,9 +5,30 @@ const SAVE_PATH := "user://save.json"
 # Total XP required to be AT each level (index = level - 1)
 const LEVEL_XP := [0, 2400, 5600, 10400, 16800, 24800, 34800, 46800, 60800, 76800]
 
-# Rewards on reaching each level (index = level number, index 0–1 unused)
+# Rewards on reaching each level (index = level number, index 0 unused).
+# Index 1 is the level a skin STARTS at, so its reward can't come from a
+# level-up — it is granted once when the skin joins the collection
+# (see _grant_first_level_rewards). The default table leaves it at 0.
 const LEVEL_DOLLAR_REWARD := [0, 0, 200, 400, 600, 800, 1000, 1200, 1500, 2000, 4000]
 const LEVEL_TOKEN_REWARD  := [0, 0,  1,   1,   2,   2,   2,   3,   3,   3,   5]
+
+# Per-skin overrides. НОРМАЛЬДО платит на нечётных уровнях, а на чётных выдаёт
+# геймплейные перки (skin_skills.DATA.classic.levels) — за десять уровней это
+# ровно 10 000 $ и 10 жетонов, то есть любой скин плюс его полная прокачка.
+const SKIN_LEVEL_REWARDS : Dictionary = {
+	"classic": {
+		"dollars": [0, 500, 0, 1000, 0, 1500, 0, 2000, 0, 5000, 0],
+		"tokens":  [0,   1, 0,    2, 0,    2, 0,    2, 0,    3, 0],
+	},
+}
+
+func dollar_reward_for(skin_id: String, level: int) -> int:
+	var t : Array = SKIN_LEVEL_REWARDS.get(skin_id, {}).get("dollars", LEVEL_DOLLAR_REWARD)
+	return int(t[level]) if level >= 0 and level < t.size() else 0
+
+func token_reward_for(skin_id: String, level: int) -> int:
+	var t : Array = SKIN_LEVEL_REWARDS.get(skin_id, {}).get("tokens", LEVEL_TOKEN_REWARD)
+	return int(t[level]) if level >= 0 and level < t.size() else 0
 
 const MASTERY_XP_PER_TOKEN := 200
 
@@ -74,6 +95,7 @@ signal data_changed
 
 func _ready() -> void:
 	_load()
+	_grant_first_level_rewards()
 	apply_audio_volumes()
 	# Local fallback so the menu shows a real nick from frame 1, even if the
 	# Firebase sign-up hasn't completed yet (or there's no network). When the
@@ -119,16 +141,44 @@ func set_music_volume(v: float) -> void:
 # Returns the stored progress dict for a skin, creating defaults if absent.
 func _skin_entry(id: String) -> Dictionary:
 	if not skin_progress.has(id):
-		skin_progress[id] = {"xp": 0, "level": 1, "mastery": 0}
+		skin_progress[id] = {"xp": 0, "level": 1, "mastery": 0, "lvl1": false}
 	return skin_progress[id]
 
 # Flush live vars back into skin_progress before any save or skin switch.
+# `lvl1` isn't mirrored into a live var — carry the stored flag over so the
+# level-1 reward isn't handed out twice after a skin switch.
 func _flush_active() -> void:
+	var prev : Dictionary = skin_progress.get(active_skin, {})
 	skin_progress[active_skin] = {
 		"xp":      skin_xp,
 		"level":   skin_level,
 		"mastery": _mastery_tokens_given,
+		"lvl1":    bool(prev.get("lvl1", false)),
 	}
+
+# Level 1 is where every skin starts, so no level-up ever fires for it. Pay out
+# its reward the first time we see the skin owned — on a fresh install that's
+# НОРМАЛЬДО's 500 $ / 1 жетон, on an existing save it's a one-off catch-up.
+func _grant_first_level_rewards() -> void:
+	var granted := false
+	for raw_id in owned_skins:
+		var id := str(raw_id)
+		var entry := _skin_entry(id)
+		if bool(entry.get("lvl1", false)):
+			continue
+		entry["lvl1"] = true
+		granted = true
+		var d := dollar_reward_for(id, 1)
+		var t := token_reward_for(id, 1)
+		if d > 0:
+			dollars += d
+			_emit_currency("dollar", d, "skin_level_up")
+		if t > 0:
+			tokens += t
+			_emit_currency("token", t, "skin_level_up")
+	if granted:
+		_save()
+		data_changed.emit()
 
 # Adds pizzas as XP. Returns Array of Dicts {level, dollars, tokens}.
 # level == 0 means mastery token batch (no level-up, just tokens).
@@ -142,8 +192,8 @@ func add_xp(amount: int, source: String = "run_pizzas") -> Array:
 		if skin_xp < LEVEL_XP[skin_level]:
 			break
 		skin_level += 1
-		var d = LEVEL_DOLLAR_REWARD[skin_level]
-		var t = LEVEL_TOKEN_REWARD[skin_level]
+		var d := dollar_reward_for(active_skin, skin_level)
+		var t := token_reward_for(active_skin, skin_level)
 		dollars += d
 		tokens  += t
 		_emit_skin_level_up(skin_level)
@@ -216,6 +266,7 @@ func buy_skin(id: String) -> bool:
 	dollars -= price
 	_emit_currency("dollar", -price, "skin_purchase")
 	owned_skins.append(id)
+	_grant_first_level_rewards()   # pays out the new skin's level-1 reward
 	if has_node("/root/Analytics"):
 		Analytics.event("skin_unlocked", {
 			"skin_id":     str(id),
@@ -248,6 +299,7 @@ func dev_reset_owned_skins() -> void:
 	_mastery_tokens_given  = 0
 	chosen_avatar_skin     = ""
 	chosen_avatar_fat      = -1
+	_grant_first_level_rewards()   # classic starts over → re-issues its lvl-1 reward
 	_save()
 	data_changed.emit()
 
@@ -388,6 +440,7 @@ func _load() -> void:
 				"xp":      int(v.get("xp",      0)),
 				"level":   int(v.get("level",   1)),
 				"mastery": int(v.get("mastery", 0)),
+				"lvl1":    bool(v.get("lvl1",   false)),
 			}
 	elif d.has("skin_xp"):
 		# Migrate old flat format: put saved values under the active skin
@@ -395,6 +448,7 @@ func _load() -> void:
 			"xp":      int(d.get("skin_xp",              0)),
 			"level":   int(d.get("skin_level",           1)),
 			"mastery": int(d.get("mastery_tokens_given", 0)),
+			"lvl1":    false,
 		}
 
 	slot_xp_mult     = float(d.get("slot_xp_mult",     1.0))

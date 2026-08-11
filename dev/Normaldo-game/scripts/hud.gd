@@ -457,9 +457,7 @@ func _max_fat_state_for_skin(skin_id: String) -> int:
 	var lvl  := 1
 	if entry != null:
 		lvl = int(entry.get("level", 1))
-	if lvl >= 5: return 3
-	if lvl >= 2: return 2
-	return 1
+	return SkinSkills.max_fat_for_level(skin_id, lvl)
 
 func _avatar_texture(skin_id: String, fat_state: int) -> Texture2D:
 	var idx := clampi(fat_state, 0, 3)
@@ -3821,18 +3819,14 @@ const _RESIST_NAME : Dictionary = {
 var _circle_cache : Texture2D = null
 var _lock_cache   : Texture2D = null
 
-# Fat-state unlock rules — mirror normaldo._max_fat_state (skin-level gated).
-# Fat 0 (skinny) / 1 (slim) are always available; fat 2 (жир) unlocks at level 2,
-# fat 3 (убер) at level 5.
-func _fat_unlock_level(fat_idx: int) -> int:
-	if fat_idx >= 3: return 5
-	if fat_idx >= 2: return 2
-	return 1
+# Fat-state unlock rules — mirror normaldo._max_fat_state. The table lives in
+# skin_skills (per skin): by default fat 2 (жир) unlocks at level 2 and fat 3
+# (убер) at level 5, but НОРМАЛЬДО opens all four at level 2.
+func _fat_unlock_level(skin_id: String, fat_idx: int) -> int:
+	return SkinSkills.fat_unlock_level(skin_id, fat_idx)
 
-func _avail_max_fat(skin_level: int) -> int:
-	if skin_level >= 5: return 3
-	if skin_level >= 2: return 2
-	return 1
+func _avail_max_fat(skin_id: String, skin_level: int) -> int:
+	return SkinSkills.max_fat_for_level(skin_id, skin_level)
 
 # Procedural white padlock (body + shackle + keyhole), modulated where drawn.
 func _lock_tex() -> Texture2D:
@@ -3905,9 +3899,15 @@ func _ability_items(skin_id: String) -> Array:
 	const RING_RESIST := Color(0.88, 0.18, 0.16)
 	const RING_PASS   := Color(0.30, 0.55, 1.00)
 	const RING_ACTIVE := Color(0.35, 1.00, 0.45)
+	const RING_LEVEL  := Color(1.00, 0.80, 0.25)
 	const BELCH       := Color(0.35, 1.00, 0.45)
 	var smoke := load("res://assets/bosses/ninja_foot/smoke.png") as Texture2D
 	var items : Array = []
+	var combat := SkinRegistry.get_combat_name(skin_id)
+	if not combat.is_empty():
+		items.append({ "ring": RING_LEVEL, "tex": null, "mod": Color(1, 1, 1), "star": "⌖",
+			"kind": "КЛАСС", "kind_col": RING_LEVEL,
+			"title": combat, "desc": SkinRegistry.get_combat_desc(skin_id) })
 	for r in SkinSkills.get_resists(skin_id):
 		var item_tags : Array = r.get("items", [r["item"]])
 		var names : Array = []
@@ -3931,6 +3931,25 @@ func _ability_items(skin_id: String) -> Array:
 		items.append({ "ring": RING_ACTIVE, "tex": null, "mod": Color(1, 1, 1), "star": "✦",
 			"kind": "АКТИВНАЯ", "kind_col": RING_ACTIVE,
 			"title": ab.get("label", ""), "desc": ab.get("desc", "") })
+	# Level perks last — the badge carries the level number, and everything the
+	# skin hasn't reached yet is dimmed so the list doubles as a roadmap.
+	var cur_lvl := SaveData.get_skin_level_for(skin_id)
+	var levels  := SkinSkills.get_levels(skin_id)
+	var lvl_keys : Array = levels.keys()
+	lvl_keys.sort()
+	for lvl in lvl_keys:
+		var perk : Dictionary = levels[lvl]
+		# Pure fat unlocks already have the feed widget and the «НОВЫЙ ЖИР!»
+		# reward card — repeating them here would just crowd the column.
+		if perk.get("immune", []).is_empty() and int(perk.get("pizza_mult", 1)) <= 1:
+			continue
+		var open : bool = int(lvl) <= cur_lvl
+		var dim  : float = 1.0 if open else 0.45
+		items.append({ "ring": Color(RING_LEVEL.r, RING_LEVEL.g, RING_LEVEL.b, dim),
+			"tex": null, "mod": Color(1, 1, 1, dim), "star": str(lvl),
+			"kind": ("УР. %d" % int(lvl)) if open else ("УР. %d — ЗАКРЫТО" % int(lvl)),
+			"kind_col": Color(RING_LEVEL.r, RING_LEVEL.g, RING_LEVEL.b, dim),
+			"title": perk.get("label", ""), "desc": perk.get("desc", "") })
 	return items
 
 # Fill the Описание VBox with a row per ability: its badge + title + description.
@@ -4263,12 +4282,22 @@ func _show_skin_detail(skin_data: Dictionary, from_slots: bool, shop_overlay: Co
 	var lw := vp.x * 0.27
 	_detail_panel(overlay, lx, body_y, lw, body_h, "Описание")
 	# Description column — a VBox we fill with badge+text rows when the abilities
-	# block is tapped (see _fill_desc). Starts with a hint.
+	# block is tapped (see _fill_desc). Starts with a hint. It lives inside a
+	# ScrollContainer because a fully-levelled skin lists class + ability +
+	# resists + passive + level perks, which overflows a short screen.
+	var desc_scroll := ScrollContainer.new()
+	desc_scroll.size     = Vector2(lw - 20.0, body_h - 44.0)
+	desc_scroll.position = Vector2(lx + 10.0, body_y + 34.0)
+	desc_scroll.clip_contents          = true
+	desc_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	desc_scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
+	overlay.add_child(desc_scroll)
 	var desc_root := VBoxContainer.new()
 	desc_root.add_theme_constant_override("separation", 8)
-	desc_root.size = Vector2(lw - 20.0, body_h - 44.0); desc_root.position = Vector2(lx + 10.0, body_y + 34.0)
+	desc_root.custom_minimum_size  = Vector2(lw - 20.0, 0.0)
+	desc_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	desc_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	overlay.add_child(desc_root)
+	desc_scroll.add_child(desc_root)
 	var hint := Label.new()
 	hint.add_theme_font_override("font", UI_FONT); hint.add_theme_font_size_override("font_size", 10)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD; hint.modulate = Color(0.7, 0.7, 0.75)
@@ -4397,7 +4426,8 @@ func _build_rewards_column(parent: Control, x: float, y: float, w: float, h: flo
 	scroll.add_child(vbox)
 
 	var cur_lvl := SaveData.get_skin_level_for(skin_id)
-	var fat_unlock := { 2: 2, 5: 3 }   # level → fat state it unlocks (НОВЫЙ ЖИР)
+	# level → fat state it unlocks (НОВЫЙ ЖИР); per skin, see skin_skills.
+	var fat_unlock := SkinSkills.fat_unlock_levels(skin_id)
 	var cards : Dictionary = {}
 	for lvl in range(1, 11):
 		cards[lvl] = _build_reward_card(vbox, lvl, w, skin_id, cur_lvl, int(fat_unlock.get(lvl, -1)))
@@ -4439,10 +4469,14 @@ func _build_reward_card(vbox: VBoxContainer, lvl: int, cw: float, skin_id: Strin
 	const CH := 86.0
 	const PAD_L := 8.0
 	const PAD_R := 18.0   # bigger right padding (room for the lvl badge / asymmetric look)
-	var d_rwd : int = SaveData.LEVEL_DOLLAR_REWARD[lvl] if lvl < SaveData.LEVEL_DOLLAR_REWARD.size() else 0
-	var t_rwd : int = SaveData.LEVEL_TOKEN_REWARD[lvl] if lvl < SaveData.LEVEL_TOKEN_REWARD.size() else 0
+	var d_rwd : int = SaveData.dollar_reward_for(skin_id, lvl)
+	var t_rwd : int = SaveData.token_reward_for(skin_id, lvl)
 	var claimed := lvl <= cur_lvl
 	var is_next := lvl == cur_lvl + 1   # the level the skin is progressing TOWARD
+	# Gameplay perk this level grants (immunity / pizza ×2 / …). Fat unlocks get
+	# their own «НОВЫЙ ЖИР!» treatment below, so they're not repeated as text.
+	var perk : Dictionary = SkinSkills.get_level_perk(skin_id, lvl)
+	var perk_label : String = "" if fat_idx >= 0 else str(perk.get("label", ""))
 
 	var card := Control.new()
 	card.custom_minimum_size = Vector2(cw, CH)
@@ -4480,6 +4514,20 @@ func _build_reward_card(vbox: VBoxContainer, lvl: int, cw: float, skin_id: Strin
 		nf.position = Vector2(74.0, 8.0); nf.size = Vector2(pw - 78.0, 20.0)
 		panel.add_child(nf)
 		_reward_pair(panel, Vector2(76.0, 36.0), pw - 82.0, TOKEN_TEXTURE, t_rwd, DOLLAR_TEXTURE, d_rwd, 32.0)
+	elif not perk_label.is_empty():
+		# Perk level (иммунитет / пицца ×2 / …) — the name IS the reward, so it
+		# gets the whole card. Currency, if any, sits under it.
+		var has_cur : bool = d_rwd > 0 or t_rwd > 0
+		var pl := _strong_label(perk_label, 13, Color(1.0, 0.92, 0.55), 3)
+		pl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		pl.autowrap_mode = TextServer.AUTOWRAP_WORD
+		pl.position = Vector2(8.0, 10.0 if has_cur else 0.0)
+		pl.size     = Vector2(pw - 16.0, 34.0 if has_cur else CH)
+		if not has_cur:
+			pl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		panel.add_child(pl)
+		if has_cur:
+			_reward_pair(panel, Vector2(8.0, 44.0), pw - 16.0, TOKEN_TEXTURE, t_rwd, DOLLAR_TEXTURE, d_rwd, 28.0)
 	else:
 		_reward_pair(panel, Vector2(8.0, row_y), pw - 16.0, TOKEN_TEXTURE, t_rwd, DOLLAR_TEXTURE, d_rwd, icon_sz)
 
@@ -4546,6 +4594,9 @@ func _detail_panel(parent: Control, x: float, y: float, w: float, h: float, titl
 
 func _skin_desc_text(skin_id: String) -> String:
 	var lines : Array = []
+	var combat := SkinRegistry.get_combat_name(skin_id)
+	if not combat.is_empty():
+		lines.append("● %s" % combat)
 	var ab := SkinSkills.get_ability(skin_id)
 	if not ab.is_empty():
 		lines.append("● %s\n%s" % [ab.get("label", ""), ab.get("desc", "")])
@@ -4595,7 +4646,7 @@ func _build_feed_widget(overlay: Control, cx: float, cw: float, body_y: float, s
 		"skin": skin_id, "fat": 0, "max": 3, "dragging": false, "maxed": false,
 		"avatar": null, "finger": null, "pizza": null, "name_lbl": null,
 		"reset": null, "pizza_home": Vector2.ZERO, "overlay": overlay,
-		"avail": _avail_max_fat(SaveData.get_skin_level_for(skin_id)),
+		"avail": _avail_max_fat(skin_id, SaveData.get_skin_level_for(skin_id)),
 		"desc": desc_root, "rewards": rewards_ctx, "lock": null,
 	}
 	const AV  := 64.0
@@ -4787,7 +4838,7 @@ func _on_fat_lock_tapped(st: Dictionary) -> void:
 	if fi <= int(st["avail"]):
 		return   # this fat is already available — nothing locked to explain
 	_play_btn_sfx()
-	var ul := _fat_unlock_level(fi)
+	var ul := _fat_unlock_level(str(st["skin"]), fi)
 	_fill_desc_fat_lock(st["desc"], fi, ul)
 	_reward_focus_level(st["rewards"], ul)
 
@@ -4936,9 +4987,9 @@ func _show_skin_levels_popup(parent_overlay: Control, skin_id: String = "") -> v
 	# Each card opens its own popup → use that skin's level, not the active one.
 	var target_skin : String = skin_id if not skin_id.is_empty() else SaveData.active_skin
 	var cur_lvl  : int = SaveData.get_skin_level_for(target_skin)
-	# Levels that unlock a bigger fat-state sprite. Matches Normaldo._max_fat_state():
-	# lvl >= 2 → fat state 2 (texture index 2), lvl >= 5 → fat state 3 (texture index 3).
-	var fat_unlock_at : Dictionary = {2: 2, 5: 3}
+	# Levels that unlock a bigger fat-state sprite — per skin, mirrors
+	# Normaldo._max_fat_state() via skin_skills.
+	var fat_unlock_at : Dictionary = SkinSkills.fat_unlock_levels(target_skin)
 
 	# Reserve a fixed-width slot at the right edge for the fat-state sprite so
 	# rows without a sprite still line up with rows that have one.
@@ -4946,7 +4997,7 @@ func _show_skin_levels_popup(parent_overlay: Control, skin_id: String = "") -> v
 	var fat_slot_w   : float = fat_sz + 12.0
 	var fat_slot_x   : float = panel_x + panel_w - fat_slot_w
 
-	for lvl in range(2, 11):
+	for lvl in range(1, 11):
 		var ry : float = rows_top + (lvl - 1) * row_h
 		var is_cur    : bool = lvl == cur_lvl + 1
 		var is_claimed: bool = lvl <= cur_lvl
@@ -4982,8 +5033,8 @@ func _show_skin_levels_popup(parent_overlay: Control, skin_id: String = "") -> v
 		lvl_lbl.position             = Vector2(panel_x + 14.0, ry)
 		root.add_child(lvl_lbl)
 
-		var d_rwd : int = SaveData.LEVEL_DOLLAR_REWARD[lvl] if lvl < SaveData.LEVEL_DOLLAR_REWARD.size() else 0
-		var t_rwd : int = SaveData.LEVEL_TOKEN_REWARD[lvl] if lvl < SaveData.LEVEL_TOKEN_REWARD.size() else 0
+		var d_rwd : int = SaveData.dollar_reward_for(target_skin, lvl)
+		var t_rwd : int = SaveData.token_reward_for(target_skin, lvl)
 		var rwd_text : String = ""
 		if d_rwd > 0 and t_rwd > 0:
 			rwd_text = "+%d $   +%d" % [d_rwd, t_rwd]
@@ -4991,6 +5042,9 @@ func _show_skin_levels_popup(parent_overlay: Control, skin_id: String = "") -> v
 			rwd_text = "+%d $" % d_rwd
 		elif t_rwd > 0:
 			rwd_text = "+%d" % t_rwd
+		# Money-free levels carry a gameplay perk instead — name it in the row.
+		if rwd_text.is_empty() and not fat_unlock_at.has(lvl):
+			rwd_text = str(SkinSkills.get_level_perk(target_skin, lvl).get("label", ""))
 
 		# Reward block — token icon hugs the right of the resource column, with
 		# the dollar/token text right-aligned to its left. The fat sprite gets
@@ -7102,18 +7156,11 @@ func _spawn_fireworks() -> void:
 func _show_level_reward_popup(new_level: int, reward_d: int, reward_t: int) -> void:
 	var vp         := get_viewport().get_visible_rect().size
 	var popup_w    := 240.0
-	var has_unlock  : bool   = new_level == 2 or new_level == 5
-	var unlock_title : String = ""
-	var unlock_desc  : String = ""
-	var unlock_fat_idx : int  = 0
-	if new_level == 2:
-		unlock_title   = "+ ЖИР"
-		unlock_desc    = "Новое состояние и +1 жизнь"
-		unlock_fat_idx = 2
-	elif new_level == 5:
-		unlock_title   = "+ УБЕР ЖИР"
-		unlock_desc    = "Финальная стадия и +1 жизнь"
-		unlock_fat_idx = 3
+	var unlock : Dictionary  = SkinSkills.level_unlock_info(SaveData.active_skin, new_level)
+	var has_unlock  : bool   = not unlock.is_empty()
+	var unlock_title : String = str(unlock.get("title", ""))
+	var unlock_desc  : String = str(unlock.get("desc",  ""))
+	var unlock_fat_idx : int  = int(unlock.get("fat_idx", -1))
 
 	const UNLOCK_H : float = 56.0
 	var popup_h := 62.0
@@ -7212,9 +7259,10 @@ func _show_level_reward_popup(new_level: int, reward_d: int, reward_t: int) -> v
 		popup.add_child(ul_stripe)
 
 		# Fat sprite — pulled from the active skin so non-classic skins
-		# show their own silhouette at the unlocked tier.
-		var fat_sz  : float    = UNLOCK_H - 12.0
-		var fat_tex : Texture2D = SkinRegistry.get_avatar_texture(SaveData.active_skin, unlock_fat_idx)
+		# show their own silhouette at the unlocked tier. Perks that aren't fat
+		# unlocks (immunities, пицца ×2) have no sprite: the text takes the row.
+		var fat_sz  : float    = (UNLOCK_H - 12.0) if unlock_fat_idx >= 0 else 0.0
+		var fat_tex : Texture2D = SkinRegistry.get_avatar_texture(SaveData.active_skin, unlock_fat_idx) if unlock_fat_idx >= 0 else null
 		if fat_tex != null:
 			var fat_icon := TextureRect.new()
 			fat_icon.texture         = fat_tex
@@ -7363,8 +7411,8 @@ func _run_xp_animation(xp_before: int, level_before: int, xp_gained: int) -> voi
 			await _fill_xp_segment(p_start, 1.0)
 			cur_xp = next_level_xp
 			_update_xp_sub_label(cur_xp, cur_level)
-			var reward_d = SaveData.LEVEL_DOLLAR_REWARD[next_level]
-			var reward_t = SaveData.LEVEL_TOKEN_REWARD[next_level]
+			var reward_d = SaveData.dollar_reward_for(SaveData.active_skin, next_level)
+			var reward_t = SaveData.token_reward_for(SaveData.active_skin, next_level)
 			await _flash_level_up_bar(next_level, reward_d, reward_t)
 			cur_level = next_level
 			if _go_fill_rect and is_instance_valid(_go_fill_rect):
@@ -7424,12 +7472,21 @@ func _on_chest_press_up() -> void:
 func _show_chest_tooltip() -> void:
 	var is_mastery := SaveData.skin_level >= 10
 	var next_lvl   := mini(SaveData.skin_level + 1, 10)
-	var next_d     = SaveData.LEVEL_DOLLAR_REWARD[next_lvl] if not is_mastery else 0
-	var next_t     = SaveData.LEVEL_TOKEN_REWARD[next_lvl]  if not is_mastery else 1
-	var has_unlock := next_lvl == 2 or next_lvl == 5
+	var sid        := SaveData.active_skin
+	var next_d     = SaveData.dollar_reward_for(sid, next_lvl) if not is_mastery else 0
+	var next_t     = SaveData.token_reward_for(sid, next_lvl)  if not is_mastery else 1
+	# What the next level opens up — fat tiers and any other perk come from the
+	# skin's own level table, so НОРМАЛЬДО's immunities show up here too.
+	var next_perk  : Dictionary = SkinSkills.get_level_perk(sid, next_lvl) if not is_mastery else {}
+	var fat_at     : Dictionary = SkinSkills.fat_unlock_levels(sid)
+	var has_unlock := not is_mastery and not next_perk.is_empty()
 	var unlock_text := ""
-	if next_lvl == 2: unlock_text = "+ ОТКРЫВАЕТ FAT  (+1 ЖИЗНЬ)"
-	if next_lvl == 5: unlock_text = "+ ОТКРЫВАЕТ UBER FAT  (+1 ЖИЗНЬ)"
+	if has_unlock:
+		if fat_at.has(next_lvl):
+			unlock_text = "+ ОТКРЫВАЕТ %s  (+1 ЖИЗНЬ)" % _FAT_NAMES[clampi(int(fat_at[next_lvl]), 0, 3)]
+		else:
+			unlock_text = "+ %s" % str(next_perk.get("label", ""))
+		has_unlock = not unlock_text.is_empty()
 
 	var vp    := get_viewport().get_visible_rect().size
 	var tip_w := 180.0
@@ -7538,10 +7595,7 @@ func _show_chest_tooltip() -> void:
 	tw.tween_property(_chest_tooltip, "modulate:a", 1.0, 0.15)
 
 func _max_unlocked_fat() -> int:
-	var lvl := SaveData.skin_level
-	if lvl >= 5: return 3
-	if lvl >= 2: return 2
-	return 1
+	return SkinSkills.max_fat_for_level(SaveData.active_skin, SaveData.skin_level)
 
 # Returns the active skin's fat-state texture for index i (0..3), falling
 # back to the classic sheet if the skin doesn't have one at that index.

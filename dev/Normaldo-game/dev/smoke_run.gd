@@ -26,6 +26,13 @@ func _initialize() -> void:
 	await process_frame
 	await process_frame
 
+	# Пин уровня скина: перки НОРМАЛЬДО (иммунитет к чеку лузера с ур.10,
+	# пицца ×2 с ур.8) меняют то, что проверяют ассерты ниже. Без пина результат
+	# зависел бы от того, до какого уровня докачан локальный сейв.
+	var save_node : Node = get_root().get_node_or_null("SaveData")
+	if save_node:
+		save_node.skin_level = 1
+
 	var normaldo : Node = game.get_node_or_null("Normaldo")
 	var spawner  : Node = game.get_node_or_null("Spawner")
 	var bg       : Node = game.get_node_or_null("Background")
