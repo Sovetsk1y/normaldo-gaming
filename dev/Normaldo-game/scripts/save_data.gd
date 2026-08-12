@@ -142,8 +142,13 @@ func add_xp(amount: int, source: String = "run_pizzas") -> Array:
 		if skin_xp < LEVEL_XP[skin_level]:
 			break
 		skin_level += 1
-		var d = LEVEL_DOLLAR_REWARD[skin_level]
-		var t = LEVEL_TOKEN_REWARD[skin_level]
+		# Награда теперь СВОЯ у каждого скина (см. skin_progression.gd): дешёвые
+		# платят меньше, а на чётных уровнях вместо денег приходят жир и
+		# иммунитеты. Прежние общие массивы LEVEL_*_REWARD остались только для
+		# совместимости старых сейвов и здесь больше не читаются.
+		var rw : Dictionary = SkinProgression.reward_for(active_skin, skin_level)
+		var d : int = int(rw.get("dollars", 0)) if rw.get("kind", "") == "money" else 0
+		var t : int = int(rw.get("tokens",  0)) if rw.get("kind", "") == "money" else 0
 		dollars += d
 		tokens  += t
 		_emit_skin_level_up(skin_level)
@@ -151,7 +156,8 @@ func add_xp(amount: int, source: String = "run_pizzas") -> Array:
 			_emit_currency("dollar", d, "skin_level_up")
 		if t > 0:
 			_emit_currency("token", t, "skin_level_up")
-		rewards.append({"level": skin_level, "dollars": d, "tokens": t})
+		rewards.append({"level": skin_level, "dollars": d, "tokens": t,
+			"label": SkinProgression.reward_label(active_skin, skin_level)})
 
 	if skin_level >= 10:
 		var over  := skin_xp - LEVEL_XP[9]

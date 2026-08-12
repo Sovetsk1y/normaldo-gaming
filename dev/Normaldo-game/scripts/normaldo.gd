@@ -269,7 +269,8 @@ const _RESIST_SFX        := preload("res://assets/audio/resist.mp3")
 
 # key -> [remaining, total]; keys: "resist:<tag>", "active", "passive:<id>"
 var _skill_cd        : Dictionary = {}
-var _resist_cd_for   : Dictionary = {}   # item tag -> cooldown seconds
+var _resist_cd_for   : Dictionary = {}   # item tag -> cooldown seconds (legacy, пуст)
+var _immune_to       : Dictionary = {}   # item tag -> true, постоянные иммунитеты скина
 var _ability_cfg     : Dictionary = {}   # active ability dict ({} = none)
 var _passive_id      : String     = ""
 var _double_ryag     : bool        = false   # glasses: fires Рыгалити twice
@@ -1223,11 +1224,19 @@ func _area_tag(area: Area2D) -> String:
 	var t = area.get("skin_tag")
 	if t != null and str(t) != "": return str(t)
 	if area.has_meta("item_tag"): return str(area.get_meta("item_tag"))
-	# Group-based fallback
-	if area.is_in_group("fire"):  return "fire"
-	if area.is_in_group("glove"): return "glove"
-	if area.is_in_group("snake"): return "snake"
-	if area.is_in_group("bum"):   return "bum"
+	# По группам. Список расширен под иммунитеты из лестницы скинов
+	# (см. skin_progression.gd) — раньше тегов было четыре, и «иммунитет к вору»
+	# было просто не на что навесить.
+	for grp in ["fire", "glove", "snake", "bum", "dog", "thief", "compass", "cone",
+			"handcuffs", "black_ace", "loser_ticket", "ninja", "slowing"]:
+		if area.is_in_group(grp):
+			# Замедляющие делятся на банан и пиво — их различает звук предмета.
+			if grp == "slowing":
+				var snd = area.get_meta("slow_sound", null)
+				if snd != null and str(snd.resource_path).get_file().begins_with("beer"):
+					return "beer"
+				return "banana"
+			return grp
 	# Texture-based fallback for the shared item.tscn negatives (trash / stone).
 	if area.has_node("Sprite2D"):
 		var tex := (area.get_node("Sprite2D") as Sprite2D).texture
@@ -1328,11 +1337,14 @@ func _build_skin_runtime() -> void:
 	var sid := SaveData.active_skin
 	_skill_cd.clear()
 	_resist_cd_for.clear()
-	for r in SkinSkills.get_resists(sid):
-		var cd := float(r.get("cd", 8.0))
-		for tag in r.get("items", [r.get("item", "")]):
-			if str(tag) != "":
-				_resist_cd_for[str(tag)] = cd
+	_immune_to.clear()
+	# Иммунитеты приходят из ЛЕСТНИЦЫ УРОВНЕЙ и они ПОСТОЯННЫЕ — прежние резисты
+	# с откатом ушли вместе со старой моделью скинов. Откат 0 в _resist_cd_for
+	# означает «всегда готов»: is_skill_ready() для него всегда true, поэтому
+	# остальной код ломать не пришлось.
+	for tag in SkinProgression.immunities(sid, SaveData.skin_level):
+		if str(tag) != "":
+			_immune_to[str(tag)] = true
 	_ability_cfg      = SkinSkills.get_ability(sid)
 	_active_max_charges = maxi(1, int(_ability_cfg.get("charges", 1)))
 	_active_charges   = _active_max_charges
@@ -1344,6 +1356,16 @@ func _build_skin_runtime() -> void:
 	# Retired legacy uniques (Dracula immortality / Wizard magic) — the new model
 	# gives Dracula «Бомж-жор» and Wizard no passive.
 	_dracula_immortal_ready = false
+
+# Сработал ПОСТОЯННЫЙ иммунитет: предмет разбивается, урона нет, отката нет.
+# Отличается от резиста именно этим — резист был ресурсом, иммунитет это
+# свойство прокачанного скина, и мигать кулдауном ему незачем.
+func _break_immune(tag: String, area: Object) -> void:
+	_last_hit_group = tag
+	if area is Node2D:
+		_vfx_resist_break((area as Node2D).global_position)
+	_play_oneshot(_RESIST_SFX)
+	_kill_item(area)
 
 # A resist fired: break the item instead of taking the hit, start its cooldown.
 func _trigger_resist(tag: String, area: Area2D) -> void:
@@ -1803,11 +1825,11 @@ func _wizard_cleanup_aura() -> void:
 
 # ── Core gameplay ─────────────────────────────────────────────────────────────
 
+# Потолок жира задаёт лестница скина: 4-е состояние открывает награда 2-го
+# уровня (см. skin_progression.gd). Раньше пороги были зашиты здесь и одинаковы
+# для всех скинов.
 func _max_fat_state() -> int:
-	var lvl := SaveData.skin_level
-	if lvl >= 5: return 3
-	if lvl >= 2: return 2
-	return 1
+	return SkinProgression.max_fat_state(SaveData.active_skin, SaveData.skin_level)
 
 func _eat_pizza() -> void:
 	_pizza_count       += 1
@@ -2267,8 +2289,11 @@ func _on_area_entered(area: Area2D) -> void:
 		apply_invert(5.0)
 		area.queue_free()
 	elif area.is_in_group("slowing"):
-		# Resist (e.g. wizard's banana) breaks the item with no slow.
+		# Иммунитет (например, банан у Кусса) — предмет ломается, замедления нет.
 		var stag := _area_tag(area)
+		if stag != "" and _immune_to.has(stag):
+			_break_immune(stag, area)
+			return
 		if stag != "" and _resist_cd_for.has(stag) and is_skill_ready("resist:" + stag):
 			_trigger_resist(stag, area)
 			return
@@ -2292,9 +2317,12 @@ func _handle_obstacle(area: Area2D) -> void:
 	_last_hit_group = _classify_hit_group(area)
 	_last_hit_name  = area.scene_file_path.get_file().get_basename() if area.scene_file_path != "" else area.name
 
-	# Resist: if this skin has an off-cooldown resist for the item, break it
-	# instead of taking the hit (each resist cools down independently).
+	# Иммунитет скина: предмет просто разбивается, урона нет и отката нет.
 	var tag := _area_tag(area)
+	if tag != "" and _immune_to.has(tag):
+		_break_immune(tag, area)
+		return
+	# Legacy-резист с откатом (в новой модели скинов не используется).
 	if tag != "" and _resist_cd_for.has(tag) and is_skill_ready("resist:" + tag):
 		_trigger_resist(tag, area)
 		return
