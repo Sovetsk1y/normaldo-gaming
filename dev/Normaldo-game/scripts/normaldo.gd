@@ -1244,8 +1244,12 @@ func _area_tag(area: Area2D) -> String:
 	# По группам. Список расширен под иммунитеты из лестницы скинов
 	# (см. skin_progression.gd) — раньше тегов было четыре, и «иммунитет к вору»
 	# было просто не на что навесить.
+	# Порядок важен: коктейль и яд лежат ЕЩЁ и в slowing/obstacle, поэтому их
+	# собственные группы обязаны проверяться раньше общих.
 	for grp in ["fire", "glove", "snake", "bum", "dog", "thief", "compass", "cone",
-			"handcuffs", "black_ace", "loser_ticket", "ninja", "slowing"]:
+			"handcuffs", "black_ace", "loser_ticket", "ninja",
+			"safe", "cocktail", "cop", "poison", "bird", "helm", "shaman",
+			"slowing"]:
 		if area.is_in_group(grp):
 			# Замедляющие делятся на банан и пиво — их различает звук предмета.
 			if grp == "slowing":
@@ -2474,4 +2478,11 @@ func _handle_obstacle(area: Area2D) -> void:
 	_take_hit(dmg)
 	if area.get("slow_on_hit"):
 		apply_slow(float(area.get("slow_duration")))
+	# Предметы вроде яда травят сверх урона, шаман вдобавок разворачивает
+	# управление — оба эффекта приходят метаданными от hazard_item.gd.
+	if area.has_meta("slow_duration"):
+		apply_slow(float(area.get_meta("slow_duration")))
+	if area.has_meta("invert_duration"):
+		apply_invert(float(area.get_meta("invert_duration")))
+		_show_floating_text("ПРОКЛЯТИЕ!", Color(0.55, 1.00, 0.45))
 	_kill_item(area)

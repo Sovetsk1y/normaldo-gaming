@@ -24,6 +24,8 @@ const THIEF_SCRIPT         := preload("res://scripts/thief.gd")
 const EFFECT_ITEM_SCRIPT   := preload("res://scripts/effect_item.gd")
 const MAGIC_BOX_SCRIPT     := preload("res://scripts/magic_box.gd")
 const NINJA_SCRIPT         := preload("res://scripts/ninja_item.gd")
+# Семь угроз под резисты скинов: сейф, коктейль, коп, яд, птица, штурвал, шаман.
+const HAZARD_ITEM_SCRIPT   := preload("res://scripts/hazard_item.gd")
 const PIZZA_TEX          := preload("res://assets/items/pizza.png")
 const TRASH_TEX          := preload("res://assets/items/trash_bin.png")
 const STONE_TEX          := preload("res://assets/items/stone.png")
@@ -478,9 +480,35 @@ func _spawn_random_item(dc: Dictionary, speed: float, lanes: Array, vp_w: float)
 		elif h < 0.78: _spawn_scripted(THIEF_SCRIPT, y, vp_w, speed)          # вор
 		elif h < 0.83: _spawn_scripted(ROADSIGN_BUM_SCRIPT, y, vp_w, speed)   # бомж со знаком
 		elif h < 0.87: _spawn_scripted(COMPASS_SCRIPT, y, vp_w, speed)        # компас (реверс)
-		elif h < 0.92: _spawn_effect_item("black_ace", y, vp_w, speed)        # чёрный туз (сжигает жир)
-		elif h < 0.97: _spawn_scripted(NINJA_SCRIPT, y, vp_w, speed)          # ниндзя (сюрикены)
-		else:          _spawn_effect_item("loser_ticket", y, vp_w, speed)     # чек лузера (обнуляет доллары)
+		elif h < 0.90: _spawn_effect_item("black_ace", y, vp_w, speed)        # чёрный туз (сжигает жир)
+		elif h < 0.94: _spawn_scripted(NINJA_SCRIPT, y, vp_w, speed)          # ниндзя (сюрикены)
+		elif h < 0.96: _spawn_effect_item("loser_ticket", y, vp_w, speed)     # чек лузера (обнуляет доллары)
+		else:          _spawn_hazard(_pick_hazard(), y, vp_w, speed)          # сейф/коктейль/коп/яд/птица/штурвал/шаман
+
+# Тяжёлые и «сюжетные» угрозы приходят не раньше указанной фазы: сейф с копом
+# на первой минуте задавили бы новичка, а шаман с реверсом управления читается
+# только тогда, когда игрок уже уверенно ведёт голову.
+const HAZARD_FROM_PHASE : Dictionary = {
+	"cocktail": 0, "poison": 1, "bird": 1, "helm": 2, "safe": 2, "cop": 3, "shaman": 3,
+}
+
+func _pick_hazard() -> String:
+	var pool : Array = []
+	for k in HAZARD_FROM_PHASE:
+		if _phase >= int(HAZARD_FROM_PHASE[k]):
+			pool.append(k)
+	if pool.is_empty():
+		return "cocktail"
+	return pool[randi() % pool.size()]
+
+func _spawn_hazard(kind: String, y: float, vp_w: float, speed: float) -> void:
+	var node := Area2D.new()
+	node.set_script(HAZARD_ITEM_SCRIPT)
+	node.set("kind", kind)
+	node.set("speed", speed)
+	node.position = Vector2(vp_w + 90.0, y)
+	_mark_base_span(y)
+	add_child(node)
 
 # Предмет-эффект: скрипт один, вид задаётся полем `kind` (см. effect_item.gd).
 func _spawn_effect_item(kind: String, y: float, vp_w: float, speed: float) -> void:
@@ -1267,7 +1295,8 @@ func _spawn_bonus_item(speed: float, vp_w: float, lanes: Array) -> void:
 	elif roll < 0.93: _spawn_scripted(MAGIC_BOX_SCRIPT, y, vp_w, speed)
 	elif roll < 0.96: _spawn_effect_item("black_ace",    y, vp_w, speed)
 	elif roll < 0.98: _spawn_scripted(NINJA_SCRIPT,      y, vp_w, speed)
-	elif roll < 0.995: _spawn_effect_item("loser_ticket", y, vp_w, speed)
+	elif roll < 0.975: _spawn_effect_item("loser_ticket", y, vp_w, speed)
+	elif roll < 0.995: _spawn_hazard(_pick_hazard(), y, vp_w, speed)
 	else:              _spawn_effect_item("casino_chip",  y, vp_w, speed)
 
 # ── Scene helpers ─────────────────────────────────────────────────────────────

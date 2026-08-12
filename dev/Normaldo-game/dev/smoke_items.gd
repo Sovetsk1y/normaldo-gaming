@@ -32,6 +32,8 @@ func _initialize() -> void:
 	_test_spans()
 	print("── Песочные часы ──")
 	await _test_slow_mo()
+	print("── Угрозы под резисты скинов ──")
+	await _test_hazards()
 
 	print("")
 	if _fails == 0:
@@ -180,6 +182,73 @@ func _test_slow_mo() -> void:
 	if is_instance_valid(item):
 		_check(absf(float(item.get("speed")) - 250.0) < 0.5,
 			"скорость предмета восстановлена: %.1f" % float(item.get("speed")))
+
+	host.queue_free()
+
+const HAZARD := preload("res://scripts/hazard_item.gd")
+
+# Семь предметов, ради которых резисты 4–10 уровней перестали быть пустыми
+# обещаниями. Проверяем, что каждый собирается, попадает в СВОЮ группу (иначе
+# резист скина его не узнает) и что коп действительно роняет наручники.
+func _test_hazards() -> void:
+	var host := Node2D.new()
+	get_root().add_child(host)
+	var spawner := Node2D.new()
+	spawner.set_script(SPAWNER)
+	host.add_child(spawner)
+	await process_frame
+
+	var kinds := ["safe", "cocktail", "cop", "poison", "bird", "helm", "shaman"]
+	var made : Array = []
+	for k in kinds:
+		var n := Area2D.new()
+		n.set_script(HAZARD)
+		n.set("kind", k)
+		n.set("speed", 250.0)
+		# Правее края: у копа есть окно «не зовём подмогу за экраном», а быстрая
+		# птица за пару секунд успевает улететь и освободиться.
+		n.position = Vector2(1400.0, 200.0)
+		spawner.add_child(n)
+		made.append(n)
+	await process_frame
+
+	for i in kinds.size():
+		var n : Area2D = made[i]
+		var own := n.is_in_group(kinds[i])
+		# Коктейль замедляет, остальные бьют — группы разные.
+		var cls := n.is_in_group("slowing") if kinds[i] == "cocktail" else n.is_in_group("obstacle")
+		_check(own and cls, "«%s» в своей группе и в правильном классе" % kinds[i])
+
+	# Побочные эффекты приходят метаданными.
+	_check(made[1].has_meta("slow_duration"), "коктейль замедляет")
+	_check(made[3].has_meta("slow_duration"), "яд травит")
+	_check(made[6].has_meta("invert_duration"), "шаман разворачивает управление")
+	_check(int(made[0].get("damage")) == 2, "сейф бьёт на 2")
+
+	# Птица идёт синусоидой — проверяем ДО долгого ожидания, она улетает быстрее
+	# всех остальных и успевает освободиться.
+	var by := float(made[4].position.y)
+	var t0 := 0.0
+	while t0 < 0.5:
+		await process_frame
+		t0 += 1.0 / 60.0
+	_check(is_instance_valid(made[4]) and absf(float(made[4].position.y) - by) > 1.0,
+		"птица летит по синусоиде")
+
+	# Коп зовёт подмогу: через период на поле появляются наручники.
+	var before := 0
+	for c in spawner.get_children():
+		if c.is_in_group("handcuffs"):
+			before += 1
+	var t := 0.0
+	while t < 3.2:
+		await process_frame
+		t += 1.0 / 60.0
+	var after := 0
+	for c in spawner.get_children():
+		if c.is_in_group("handcuffs"):
+			after += 1
+	_check(after > before, "коп вызвал подмогу: наручников %d → %d" % [before, after])
 
 	host.queue_free()
 
