@@ -19,6 +19,14 @@ var hit_handler : Callable
 var _spr  : Node2D     = null
 var _hit  : Dictionary = {}
 
+# Покадровая анимация снаряда. Архивы скинов принесли раскадровки (батаранг 6
+# кадров, паутина 8, магический шар 4), и крутить их вращением спрайта было бы
+# обманом — кадры рисованные, а не повёрнутые.
+var frames : Array = []          # Array[Texture2D]
+var fps    : float = 14.0
+var _frame_t : float = 0.0
+var _frame_i : int   = 0
+
 func setup(spr: Node2D) -> void:
 	_spr = spr
 	if spr != null:
@@ -57,6 +65,12 @@ func _on_area_entered(area: Area2D) -> void:
 		queue_free()
 
 func _process(delta: float) -> void:
+	if frames.size() > 1 and _spr is Sprite2D:
+		_frame_t += delta * fps
+		var i := int(_frame_t) % frames.size()
+		if i != _frame_i:
+			_frame_i = i
+			(_spr as Sprite2D).texture = frames[i]
 	position += velocity * delta
 	life     -= delta
 	if _spr != null and spin != 0.0:

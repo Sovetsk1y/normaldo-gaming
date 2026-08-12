@@ -47,6 +47,7 @@ const UI_FONT := preload("res://assets/fonts/RussoOne-Regular.ttf")
 # Active skin resources — populated in _load_skin()
 var _skin_tex     : Array = []
 var _skin_eat_tex : Array = []
+var _skin_spell_tex : Array = []   # поза каста на каждое состояние жира
 var _skin_eat_sfx : Array = []
 var _skin_hit_sfx : AudioStream = null
 var _skin_fat_sfx : AudioStream = null
@@ -266,11 +267,14 @@ const _ITEM_SCENE        := preload("res://scenes/item.tscn")
 const _PIZZA_TEX         := preload("res://assets/items/pizza.png")
 const _DOLLAR_TEX        := preload("res://assets/items/dollar.png")
 const _RESIST_SFX        := preload("res://assets/audio/resist.mp3")
+const _PUNCH_TEX         := preload("res://assets/items/boxing_glove.png")
+const _GLOVE_TEX         := preload("res://assets/items/boxing_glove.png")
+const _SHOVEL_TEX        := preload("res://assets/items/shuriken.png")
+const _BIRD_TEX          := preload("res://assets/skills/halloween/blackbird.png")
 
 # key -> [remaining, total]; keys: "resist:<tag>", "active", "passive:<id>"
 var _skill_cd        : Dictionary = {}
-var _resist_cd_for   : Dictionary = {}   # item tag -> cooldown seconds (legacy, пуст)
-var _immune_to       : Dictionary = {}   # item tag -> true, постоянные иммунитеты скина
+var _resist_cd_for   : Dictionary = {}   # item tag -> cooldown seconds (открыт уровнем)
 var _ability_cfg     : Dictionary = {}   # active ability dict ({} = none)
 var _passive_id      : String     = ""
 var _double_ryag     : bool        = false   # glasses: fires Рыгалити twice
@@ -815,14 +819,27 @@ func _load_skin(skin_id: String) -> void:
 	var aud_dir : String = skin.get("audio_dir", "")
 
 	if tex_dir.is_empty():
-		_skin_tex     = _CLASSIC_TEX.duplicate()
-		_skin_eat_tex = _CLASSIC_EAT_TEX.duplicate()
+		_skin_tex       = _CLASSIC_TEX.duplicate()
+		_skin_eat_tex   = _CLASSIC_EAT_TEX.duplicate()
+		_skin_spell_tex = [null, null, null, null]
 	else:
 		_skin_tex     = []
 		_skin_eat_tex = []
+		_skin_spell_tex = []
 		for i in 4:
 			_skin_tex.append(    load(tex_dir + "state%d.png"     % (i + 1)))
 			_skin_eat_tex.append(load(tex_dir + "state%d_eat.png" % (i + 1)))
+			# Поза каста есть не у всех скинов — только у тех, чьи архивы уже
+			# приехали. Нет файла → в массиве null, и поза просто не играется.
+			# У Спайдера каст нарисован направленным (_spell_l / _spell_r) и
+			# ненаправленного варианта на части состояний нет — берём правый.
+			var sp := ""
+			for suffix in ["_spell", "_spell_r", "_spell_l"]:
+				var cand := tex_dir + "state%d%s.png" % [i + 1, suffix]
+				if ResourceLoader.exists(cand):
+					sp = cand
+					break
+			_skin_spell_tex.append(load(sp) if sp != "" else null)
 
 	if aud_dir.is_empty():
 		_skin_eat_sfx = _CLASSIC_EAT_SFX.duplicate()
@@ -1337,14 +1354,14 @@ func _build_skin_runtime() -> void:
 	var sid := SaveData.active_skin
 	_skill_cd.clear()
 	_resist_cd_for.clear()
-	_immune_to.clear()
-	# Иммунитеты приходят из ЛЕСТНИЦЫ УРОВНЕЙ и они ПОСТОЯННЫЕ — прежние резисты
-	# с откатом ушли вместе со старой моделью скинов. Откат 0 в _resist_cd_for
-	# означает «всегда готов»: is_skill_ready() для него всегда true, поэтому
-	# остальной код ломать не пришлось.
-	for tag in SkinProgression.immunities(sid, SaveData.skin_level):
-		if str(tag) != "":
-			_immune_to[str(tag)] = true
+	# Резисты открывает ЛЕСТНИЦА УРОВНЕЙ: get_resists собирает их из прогрессии
+	# для текущего уровня скина (см. skin_skills.resists_at). Механика прежняя —
+	# предмет разбивается вместо удара, затем защита уходит на перезарядку.
+	for r in SkinSkills.get_resists(sid):
+		var cd := float(r.get("cd", 8.0))
+		for tag in r.get("items", [r.get("item", "")]):
+			if str(tag) != "":
+				_resist_cd_for[str(tag)] = cd
 	_ability_cfg      = SkinSkills.get_ability(sid)
 	_active_max_charges = maxi(1, int(_ability_cfg.get("charges", 1)))
 	_active_charges   = _active_max_charges
@@ -1356,16 +1373,6 @@ func _build_skin_runtime() -> void:
 	# Retired legacy uniques (Dracula immortality / Wizard magic) — the new model
 	# gives Dracula «Бомж-жор» and Wizard no passive.
 	_dracula_immortal_ready = false
-
-# Сработал ПОСТОЯННЫЙ иммунитет: предмет разбивается, урона нет, отката нет.
-# Отличается от резиста именно этим — резист был ресурсом, иммунитет это
-# свойство прокачанного скина, и мигать кулдауном ему незачем.
-func _break_immune(tag: String, area: Object) -> void:
-	_last_hit_group = tag
-	if area is Node2D:
-		_vfx_resist_break((area as Node2D).global_position)
-	_play_oneshot(_RESIST_SFX)
-	_kill_item(area)
 
 # A resist fired: break the item instead of taking the hit, start its cooldown.
 func _trigger_resist(tag: String, area: Area2D) -> void:
@@ -1436,6 +1443,7 @@ func _try_fire_ability(target: Vector2) -> void:
 			if is_instance_valid(self):
 				_fire_rygality(dir, _ability_cfg.get("color", Color(0.35, 1.0, 0.45)))
 	else:
+		_show_spell_pose()
 		_cast_spell(str(_ability_cfg.get("id", "")), dir)
 	# Consume a charge; start the cooldown only when they're all gone.
 	_active_charges -= 1
@@ -1487,10 +1495,105 @@ func _fire_rygality(dir: Vector2, col: Color) -> void:
 	_skill_audio.volume_db = -7.0
 	_skill_audio.play()
 
+# Поза каста: на время SPELL_POSE_TIME голова принимает нарисованную для этого
+# позу вместо обычной. Владеет спрайтом ненадолго и уступает его обратно
+# _update_mouth, поэтому с анимацией поедания не дерётся.
+const SPELL_POSE_TIME : float = 0.34
+var _spell_pose_token : int = 0
+
+func _show_spell_pose() -> void:
+	if _morphing or fat_state >= _skin_spell_tex.size():
+		return
+	var tex = _skin_spell_tex[fat_state]
+	if tex == null:
+		return
+	_spell_pose_token += 1
+	var tok := _spell_pose_token
+	_sprite.texture = tex
+	await get_tree().create_timer(SPELL_POSE_TIME).timeout
+	if is_instance_valid(self) and tok == _spell_pose_token and not _morphing:
+		_update_mouth()
+
+# Спрайт снаряда из раскадровки: кадры лежат в assets/skills/<скин>/<имя>N.png.
+func _make_anim_sprite(dir_path: String, prefix: String, count: int, px: float) -> Sprite2D:
+	var frames : Array = []
+	for i in range(1, count + 1):
+		var p := "%s%s%d.png" % [dir_path, prefix, i]
+		if ResourceLoader.exists(p):
+			frames.append(load(p))
+	if frames.is_empty():
+		return _make_sprite(_WHEEL_TEX, px)
+	var spr := _make_sprite(frames[0], px)
+	spr.set_meta("frames", frames)
+	return spr
+
+# Ближний бой: удар «вплотную» — не летящий снаряд, а короткий рывок вперёд с
+# большим радиусом и очень маленькой жизнью. Иначе мили-спелл ничем не
+# отличался бы от дальнего, просто с меньшей дальностью.
+func _cast_melee(spr: Node2D, dir: Vector2, reach: float) -> void:
+	var proj := _spawn_skill_projectile(dir, reach * 3.0, spr, 64.0,
+		_RYAG_HIT_GROUPS, _break_handler(), 0.0, 0.30)
+	if proj != null:
+		proj.global_position = global_position + dir * 34.0
+
 func _cast_spell(spell_id: String, dir: Vector2) -> void:
 	match spell_id:
-		"expecto_patronum":
+		"expecto_patronum", "light_flash":
+			# Вспышка Гарри обнуляет весь экран разом.
 			_cast_expecto()
+		"explosive_fist":
+			# Викинг: кулак взрывается вплотную перед собой.
+			_cast_melee(_make_sprite(_PUNCH_TEX, 74.0), dir, 90.0)
+			_vfx_particles(SkinSkills.TRANSFORM)
+			_play_skill_sfx(SkinSkills.COUNTER)
+		"glove_punch":
+			# Тайсон: короткий хук той же перчаткой, что летает по трубе.
+			_cast_melee(_make_sprite(_GLOVE_TEX, 70.0), dir, 80.0)
+			_play_skill_sfx(SkinSkills.COUNTER)
+		"shovel_throw":
+			# Кусс: одна цель. На 10-м уровне уходит вторая лопатка следом.
+			_throw_shovel(dir)
+			if SkinProgression.has_perk(SaveData.active_skin, SaveData.skin_level, "kuss_double_shot"):
+				await get_tree().create_timer(0.14).timeout
+				if is_instance_valid(self):
+					_throw_shovel(dir)
+		"black_birds":
+			# Тыква: стая срывается веером в разные стороны от головы.
+			for a in [-0.42, 0.0, 0.42]:
+				var b := _make_sprite(_BIRD_TEX, 46.0)
+				_spawn_skill_projectile(dir.rotated(a), 470.0, b, 26.0,
+					_RYAG_HIT_GROUPS, _break_once_handler(), 0.0)
+			_play_skill_sfx(SkinSkills.DODGE)
+		"bat_shuriken":
+			# Бэтмен: батаранг крутится покадрово (6 кадров из архива).
+			var bat := _make_anim_sprite("res://assets/skills/batman/", "batarang", 6, 52.0)
+			var pb := _spawn_skill_projectile(dir, 560.0, bat, 28.0,
+				_RYAG_HIT_GROUPS, _break_once_handler(), 0.0)
+			_arm_frames(pb, bat, 18.0)
+			_play_skill_sfx(SkinSkills.DODGE)
+		"wand_shot":
+			# Маг: магический шар, 4 кадра пульсации.
+			var ball := _make_anim_sprite("res://assets/skills/wizard/", "magicball", 4, 44.0)
+			var pw := _spawn_skill_projectile(dir, 520.0, ball, 26.0,
+				_RYAG_HIT_GROUPS, _break_once_handler(), 0.0)
+			_arm_frames(pw, ball, 16.0)
+			_play_oneshot(_SFX_GLITTER, -6.0)
+		"web_pull":
+			# Спайдер: паутина цепляет предмет и ТЯНЕТ его к себе, а не ломает —
+			# в этом вся разница с остальными дальними спеллами.
+			var web := _make_anim_sprite("res://assets/skills/spider_man/", "web", 8, 50.0)
+			var ps := _spawn_skill_projectile(dir, 600.0, web, 28.0,
+				["obstacle", "pizza", "dollar"], _pull_handler(), 0.0)
+			_arm_frames(ps, web, 20.0)
+			_play_skill_sfx(SkinSkills.DODGE)
+		"card_deck":
+			_cast_three_lines(_CARD_TEX, 40.0, 8.0, _break_once_handler(), Color(1, 1, 1),
+				_RYAG_HIT_GROUPS, 150.0, Color(0.62, 0.24, 0.95))
+			_play_skill_sfx(SkinSkills.DODGE)
+		"invisibility":
+			_cast_invisibility(float(_ability_cfg.get("duration", 2.0)))
+		"haste":
+			apply_speed_boost(float(_ability_cfg.get("duration", 2.0)))
 		"helm_throw":
 			# Штурвал пробивает любые предметы на линии и НЕ ломается (pierce).
 			var spr := _make_sprite(_WHEEL_TEX, 56.0)
@@ -1521,6 +1624,49 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 		_:
 			_cast_expecto()
 
+# Передать кадры анимации уже созданному снаряду.
+func _arm_frames(proj: Node2D, spr: Sprite2D, fps: float) -> void:
+	if proj == null or spr == null or not spr.has_meta("frames"):
+		return
+	proj.set("frames", spr.get_meta("frames"))
+	proj.set("fps", fps)
+
+func _throw_shovel(dir: Vector2) -> void:
+	var sh := _make_sprite(_SHOVEL_TEX, 52.0)
+	_spawn_skill_projectile(dir, 540.0, sh, 26.0, _RYAG_HIT_GROUPS, _break_once_handler(), 11.0)
+	_play_skill_sfx(SkinSkills.DODGE)
+
+# Паутина не ломает добычу, а подтягивает её к голове — поэтому у неё свой
+# обработчик, а не _break_once_handler.
+func _pull_handler() -> Callable:
+	return func(node: Node) -> bool:
+		if not is_instance_valid(node) or not (node is Node2D):
+			return false
+		var n := node as Node2D
+		if n.has_method("set_process"):
+			n.set_process(false)
+		var tw := n.create_tween()
+		tw.tween_property(n, "global_position", global_position, 0.22) \
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		tw.tween_callback(func() -> void:
+			if is_instance_valid(n):
+				n.set_process(true))
+		return true
+
+# Невидимость Дракулы: препятствия пролетают сквозь, голова полупрозрачна.
+func _cast_invisibility(duration: float) -> void:
+	_invincible = true
+	var tw := create_tween()
+	tw.tween_property(_sprite, "modulate:a", 0.25, 0.12)
+	_show_floating_text("НЕВИДИМОСТЬ", Color(0.65, 0.25, 1.0))
+	_play_skill_sfx(SkinSkills.TRANSFORM)
+	await get_tree().create_timer(duration).timeout
+	if not is_instance_valid(self):
+		return
+	var tw2 := create_tween()
+	tw2.tween_property(_sprite, "modulate:a", 1.0, 0.18)
+	_invincible = false
+
 # Three projectiles in three rows. `spread` > 0 fans the outer two out diagonally
 # (top goes up-right, bottom down-right), the middle one always flies straight.
 # `trail_col` (alpha > 0) attaches a small coloured particle wake to each.
@@ -1528,7 +1674,10 @@ func _cast_three_lines(tex: Texture2D, px: float, spin: float, handler: Callable
 		mod: Color = Color(1, 1, 1), groups: Array = ["obstacle", "fire"], spread: float = 0.0,
 		trail_col: Color = Color(0, 0, 0, 0)) -> void:
 	for off in [-46.0, 0.0, 46.0]:
-		var proj := Node2D.new()
+		# Area2D, а не Node2D: скрипт снаряда наследует Area2D, и set_script на
+		# Node2D молча не применялся — три карты Джокера падали на setup() и не
+		# вылетали вовсе. Баг был и до переработки скинов.
+		var proj := Area2D.new()
 		proj.set_script(_PROJECTILE_SCRIPT)
 		proj.z_index = 38
 		get_parent().add_child(proj)
@@ -2289,11 +2438,8 @@ func _on_area_entered(area: Area2D) -> void:
 		apply_invert(5.0)
 		area.queue_free()
 	elif area.is_in_group("slowing"):
-		# Иммунитет (например, банан у Кусса) — предмет ломается, замедления нет.
+		# Резист (например, банан у Кусса) — предмет ломается, замедления нет.
 		var stag := _area_tag(area)
-		if stag != "" and _immune_to.has(stag):
-			_break_immune(stag, area)
-			return
 		if stag != "" and _resist_cd_for.has(stag) and is_skill_ready("resist:" + stag):
 			_trigger_resist(stag, area)
 			return
@@ -2317,12 +2463,9 @@ func _handle_obstacle(area: Area2D) -> void:
 	_last_hit_group = _classify_hit_group(area)
 	_last_hit_name  = area.scene_file_path.get_file().get_basename() if area.scene_file_path != "" else area.name
 
-	# Иммунитет скина: предмет просто разбивается, урона нет и отката нет.
+	# Резист, открытый уровнем скина: если не на откате — предмет разбивается
+	# вместо удара, и защита уходит на перезарядку.
 	var tag := _area_tag(area)
-	if tag != "" and _immune_to.has(tag):
-		_break_immune(tag, area)
-		return
-	# Legacy-резист с откатом (в новой модели скинов не используется).
 	if tag != "" and _resist_cd_for.has(tag) and is_skill_ready("resist:" + tag):
 		_trigger_resist(tag, area)
 		return

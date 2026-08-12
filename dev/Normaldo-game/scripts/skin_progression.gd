@@ -22,7 +22,8 @@ extends Node
 # Виды наград (`kind`):
 #   "money"    — dollars / tokens
 #   "fat"      — открывает состояние жира `fat` (0..3)
-#   "immunity" — постоянный иммунитет к предмету `item` (см. ITEM_NAMES)
+#   "immunity" — открывает РЕЗИСТ к предмету `item`: предмет разбивается
+#                вместо удара, затем откат (см. skin_skills.resist_cd)
 #   "perk"     — уникальная способность 10-го уровня, `perk` = id
 #
 # См. /Концепция/Скины.md
@@ -168,7 +169,7 @@ func max_fat_state(skin_id: String, level: int) -> int:
 			best = maxi(best, int(r.get("fat", 1)))
 	return best
 
-# Все иммунитеты, открытые к этому уровню.
+# Теги предметов, к которым скин получил резист к этому уровню.
 func immunities(skin_id: String, level: int) -> Array:
 	var out : Array = []
 	for lv in range(2, level + 1):

@@ -12,9 +12,14 @@ extends Node
 #   RANGED — запускает снаряд в сторону тапа
 #   BUFF   — не бьёт вовсе, включает состояние на себе
 #
-# ИММУНИТЕТЫ здесь больше НЕ живут. Раньше это были «резисты» с откатом,
-# теперь их выдаёт прогрессия уровней и они постоянные — см.
-# skin_progression.gd. Скин-специфичных резистов не осталось ни у кого.
+# ИММУНИТЕТЫ — это те же РЕЗИСТЫ с откатом, что и раньше: предмет разбивается
+# вместо удара, потом защита уходит на перезарядку. Изменился только источник —
+# раньше набор резистов был зашит в скин, теперь его ОТКРЫВАЮТ УРОВНИ
+# (см. skin_progression.gd). Скин 4-го уровня получает первый резист, 6-го —
+# второй, 8-го — третий.
+#
+# Откат зависит от редкости: у обычных дольше, у эпических и легендарных короче
+# — это часть их ценности.
 #
 # См. /Концепция/Скины.md
 
@@ -34,6 +39,8 @@ const RYAGALITY := "ryagality"   # базовая отрыжка (остаётс
 const SPELL     := "spell"
 
 const CD_RYAG_COMMON : float = 10.0
+const CD_RESIST_CR   : float = 10.0   # обычные / редкие
+const CD_RESIST_EL   : float = 8.0    # эпические / легендарные
 const CLOUD_GREEN : Color = Color(0.35, 1.0, 0.45)
 const _RYAG_DESC  : String = "Двойной тап — могучая отрыжка летит в сторону тапа и сносит всё на пути"
 
@@ -158,10 +165,25 @@ func get_skills(skin_id: String) -> Array:
 func get_unique(skin_id: String) -> Dictionary:
 	return DATA.get(skin_id, {}).get("unique", {})
 
-# Резистов у скинов больше нет — иммунитеты выдаёт прогрессия уровней.
-# Метод оставлен, чтобы старые потребители (hud.gd) не падали.
-func get_resists(_skin_id: String) -> Array:
-	return []
+# Резисты, ОТКРЫТЫЕ скину на его текущем уровне. Собираются из лестницы
+# прогрессии, поэтому и HUD-бейджи, и логика урона в normaldo.gd видят один и
+# тот же список без отдельной синхронизации.
+func get_resists(skin_id: String) -> Array:
+	var lvl : int = SaveData.skin_level if skin_id == SaveData.active_skin else 10
+	return resists_at(skin_id, lvl)
+
+func resists_at(skin_id: String, level: int) -> Array:
+	var cd := resist_cd(skin_id)
+	var out : Array = []
+	for tag in SkinProgression.immunities(skin_id, level):
+		if String(tag) != "":
+			out.append({ "item": String(tag), "cd": cd })
+	return out
+
+# Откат резиста по редкости скина.
+func resist_cd(skin_id: String) -> float:
+	var rarity : int = int(SkinRegistry.get_skin(skin_id).get("rarity", 1))
+	return CD_RESIST_EL if rarity >= SkinRegistry.EPIC else CD_RESIST_CR
 
 func get_ability(skin_id: String) -> Dictionary:
 	return DATA.get(skin_id, {}).get("ability", {})
