@@ -7049,7 +7049,15 @@ func _show_game_over(total_pizzas: int, level_rewards: Array, xp_before: int, le
 	# pizza→XP animation so the run earnings visibly arrive in the wallet.
 	_spawn_dollar_fly_to_balance(_dollars_this_run)
 
-	# DEV XP buttons — right edge of screen
+	# Дев-кнопки экрана смерти были единственными, что не спрашивало DevFlags, —
+	# в релизной сборке «+1000 XP» и «СБРОС УР.» уезжали к игроку. Теперь они под
+	# тем же рубильником, что и остальной дев-инструмент.
+	if DevFlags.ENABLED:
+		_build_go_dev_xp_btns(vp, panel_y, _pm)
+
+# Быстрая прокачка скина прямо с экрана смерти: четыре кнопки опыта и сброс
+# уровня. Нужны, чтобы за минуту прогнать скин по всей лестнице наград.
+func _build_go_dev_xp_btns(vp: Vector2, panel_y: float, _pm: int) -> void:
 	var xp_amounts := [1, 10, 100, 1000]
 	var xp_btn_w   := 68.0
 	var xp_btn_h   := 24.0
