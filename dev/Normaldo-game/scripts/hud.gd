@@ -457,9 +457,7 @@ func _max_fat_state_for_skin(skin_id: String) -> int:
 	var lvl  := 1
 	if entry != null:
 		lvl = int(entry.get("level", 1))
-	if lvl >= 5: return 3
-	if lvl >= 2: return 2
-	return 1
+	return SkinProgression.max_fat_state(skin_id, lvl)
 
 func _avatar_texture(skin_id: String, fat_state: int) -> Texture2D:
 	var idx := clampi(fat_state, 0, 3)
@@ -2966,8 +2964,12 @@ func _show_skin_info_popup(skin_data: Dictionary, parent_overlay: Control) -> vo
 	const SKILL_ROW_H := 56.0
 	const BADGE_SZ   := 22.0
 	const IMG_SZ_SK  := 18.0
-	var fat_unlock   := [1, 1, 2, 5]
-	var fat_names    := ["СКИННИ", "СЛИМ", "ЖИР", "УБЕР"]
+	# Уровень открытия каждого состояния жира считается по лестнице скина, а не
+	# хардкодом [1,1,2,5]: три первых доступны сразу, четвёртое даёт 2-й уровень.
+	var fat_unlock : Array = []
+	for fi in 4:
+		fat_unlock.append(_fat_unlock_level(fi, skin_id))
+	var fat_names    := _FAT_NAMES
 
 	var n_skills := skills.size()
 	var has_uniq := not unique.is_empty()
@@ -3838,18 +3840,19 @@ const _RESIST_NAME : Dictionary = {
 var _circle_cache : Texture2D = null
 var _lock_cache   : Texture2D = null
 
-# Fat-state unlock rules — mirror normaldo._max_fat_state (skin-level gated).
-# Fat 0 (skinny) / 1 (slim) are always available; fat 2 (жир) unlocks at level 2,
-# fat 3 (убер) at level 5.
-func _fat_unlock_level(fat_idx: int) -> int:
-	if fat_idx >= 3: return 5
-	if fat_idx >= 2: return 2
-	return 1
+# Состояния жира берём из лестницы скина, а не из хардкода «2 и 5»: по ТЗ три
+# первых состояния доступны сразу, а четвёртое открывает награда 2-го уровня —
+# и открыть его может любой уровень, если лестницу поменяют.
+func _fat_unlock_level(fat_idx: int, skin_id: String) -> int:
+	if fat_idx <= SkinProgression.max_fat_state(skin_id, 1):
+		return 1
+	for lv in range(2, 11):
+		if SkinProgression.max_fat_state(skin_id, lv) >= fat_idx:
+			return lv
+	return 10
 
-func _avail_max_fat(skin_level: int) -> int:
-	if skin_level >= 5: return 3
-	if skin_level >= 2: return 2
-	return 1
+func _avail_max_fat(skin_id: String, skin_level: int) -> int:
+	return SkinProgression.max_fat_state(skin_id, skin_level)
 
 # Procedural white padlock (body + shackle + keyhole), modulated where drawn.
 func _lock_tex() -> Texture2D:
@@ -4450,13 +4453,15 @@ func _build_rewards_column(parent: Control, x: float, y: float, w: float, h: flo
 	scroll.add_child(vbox)
 
 	var cur_lvl := SaveData.get_skin_level_for(skin_id)
-	var fat_unlock := { 2: 2, 5: 3 }   # level → fat state it unlocks (НОВЫЙ ЖИР)
+	# Список идёт со 2-го уровня: на 1-м награды нет, скин уже куплен. Карточка
+	# «за уровень 1» показывала бы пустоту. Уровни, которые он открывает (жир,
+	# резисты, венец), берутся из лестницы скина, а не из хардкода.
 	var cards : Dictionary = {}
-	for lvl in range(1, 11):
-		cards[lvl] = _build_reward_card(vbox, lvl, w, skin_id, cur_lvl, int(fat_unlock.get(lvl, -1)))
+	for lvl in range(2, 11):
+		cards[lvl] = _build_reward_card(vbox, lvl, w, skin_id, cur_lvl)
 	# Start scrolled so the NEXT-level (yellow) card sits near the top — but a touch
 	# lower so its lvl-badge (which overhangs the top) isn't clipped.
-	var next_idx : int = clampi(cur_lvl, 0, 9)   # level (cur+1) → 0-based index cur
+	var next_idx : int = clampi(cur_lvl - 1, 0, 8)   # уровень (cur+1) → индекс cur-1
 	scroll.set_deferred("scroll_vertical", maxi(0, int(next_idx * (86.0 + 10.0) - 16.0)))
 	ctx["scroll"] = scroll
 	ctx["cards"]  = cards
@@ -4474,7 +4479,7 @@ func _reward_focus_level(ctx: Dictionary, lvl: int) -> void:
 		return
 	var step  : float = ctx.get("step", 96.0)
 	var view_h: float = ctx.get("view_h", 200.0)
-	var card_top : float = (lvl - 1) * step
+	var card_top : float = (lvl - 2) * step   # список начинается со 2-го уровня
 	var target : int = maxi(0, int(card_top - (view_h - 86.0) * 0.5))
 	var stw = scroll.create_tween()
 	stw.tween_property(scroll, "scroll_vertical", target, 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
@@ -4486,14 +4491,20 @@ func _reward_focus_level(ctx: Dictionary, lvl: int) -> void:
 			ctw.tween_property(card, "scale", Vector2(1.12, 1.12), 0.18).set_trans(Tween.TRANS_SINE)
 			ctw.tween_property(card, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_SINE)
 
-# One reward card: coloured rounded panel + coin/dollar rewards + lvl badge.
+# Одна карточка награды. Награды теперь ЧЕТЫРЁХ видов (см. skin_progression.gd),
+# и раньше карточка умела рисовать только деньги: жир был захардкожен парой
+# уровней, а резистов и венца не существовало вовсе — уровни 4, 6, 8 и 10
+# показывали монеты, которых там нет.
 func _build_reward_card(vbox: VBoxContainer, lvl: int, cw: float, skin_id: String,
-		cur_lvl: int, fat_idx: int) -> Control:
+		cur_lvl: int) -> Control:
 	const CH := 86.0
 	const PAD_L := 8.0
 	const PAD_R := 18.0   # bigger right padding (room for the lvl badge / asymmetric look)
-	var d_rwd : int = SaveData.LEVEL_DOLLAR_REWARD[lvl] if lvl < SaveData.LEVEL_DOLLAR_REWARD.size() else 0
-	var t_rwd : int = SaveData.LEVEL_TOKEN_REWARD[lvl] if lvl < SaveData.LEVEL_TOKEN_REWARD.size() else 0
+	var rw   : Dictionary = SkinProgression.reward_for(skin_id, lvl)
+	var kind : String     = String(rw.get("kind", ""))
+	var money : Vector2i  = SkinProgression.money_for(skin_id, lvl)
+	var d_rwd : int = money.x
+	var t_rwd : int = money.y
 	var claimed := lvl <= cur_lvl
 	var is_next := lvl == cur_lvl + 1   # the level the skin is progressing TOWARD
 
@@ -4523,18 +4534,33 @@ func _build_reward_card(vbox: VBoxContainer, lvl: int, cw: float, skin_id: Strin
 	# Lowered a touch so the icon+count block reads centred (count sits below icon).
 	var row_y := (CH - icon_sz) * 0.5 + 5.0
 
-	if fat_idx >= 0 and not claimed:
-		# Bigger sprite of the fat state that unlocks at this level.
-		const FAV := 66.0
-		var av := _make_icon(_avatar_texture(skin_id, fat_idx), FAV)
-		av.position = Vector2(6.0, (CH - FAV) * 0.5); av.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		panel.add_child(av)
-		var nf := _strong_label("НОВЫЙ ЖИР!", 14, Color(1, 1, 1), 3)
-		nf.position = Vector2(74.0, 8.0); nf.size = Vector2(pw - 78.0, 20.0)
-		panel.add_child(nf)
-		_reward_pair(panel, Vector2(76.0, 36.0), pw - 82.0, TOKEN_TEXTURE, t_rwd, DOLLAR_TEXTURE, d_rwd, 32.0)
-	else:
-		_reward_pair(panel, Vector2(8.0, row_y), pw - 16.0, TOKEN_TEXTURE, t_rwd, DOLLAR_TEXTURE, d_rwd, icon_sz)
+	match kind:
+		"fat":
+			# Крупный спрайт того состояния жира, которое открывает этот уровень.
+			const FAV := 66.0
+			var av := _make_icon(_avatar_texture(skin_id, int(rw.get("fat", 3))), FAV)
+			av.position = Vector2(8.0, (CH - FAV) * 0.5); av.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			panel.add_child(av)
+			_reward_caption(panel, pw, "НОВЫЙ ЖИР!", "Открывает %d-е состояние" % (int(rw.get("fat", 3)) + 1))
+		"immunity":
+			var tag : String = String(rw.get("item", ""))
+			var bc := Control.new()
+			bc.position = Vector2(10.0, (CH - 52.0) * 0.5); bc.size = Vector2(52.0, 52.0)
+			bc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			panel.add_child(bc)
+			_ability_badge(bc, 0.0, 0.0, 52.0, Color(0.88, 0.18, 0.16),
+				_RESIST_TEX.get(tag), Color(1, 1, 1), "")
+			_reward_caption(panel, pw, "НОВЫЙ РЕЗИСТ!",
+				"%s — разбиваешь без вреда" % SkinProgression.item_name(tag).to_upper())
+		"perk":
+			var pc := Control.new()
+			pc.position = Vector2(10.0, (CH - 52.0) * 0.5); pc.size = Vector2(52.0, 52.0)
+			pc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			panel.add_child(pc)
+			_ability_badge(pc, 0.0, 0.0, 52.0, Color(1.00, 0.80, 0.15), null, Color(1, 1, 1), "★")
+			_reward_caption(panel, pw, String(rw.get("label", "")), String(rw.get("desc", "")))
+		_:
+			_reward_pair(panel, Vector2(8.0, row_y), pw - 16.0, TOKEN_TEXTURE, t_rwd, DOLLAR_TEXTURE, d_rwd, icon_sz)
 
 	if claimed:
 		panel.modulate = Color(1, 1, 1, 0.55)
@@ -4564,6 +4590,21 @@ func _build_reward_card(vbox: VBoxContainer, lvl: int, cw: float, skin_id: Strin
 	bl.size = badge.size; bl.position = Vector2.ZERO
 	badge.add_child(bl)
 	return card
+
+# Заголовок + пояснение справа от иконки награды. Общий для жира, резиста и
+# венца: у всех трёх карточка это «картинка слева, два текста справа», и три
+# копии этой раскладки разъезжались бы при первой же правке отступов.
+func _reward_caption(panel: Control, pw: float, title: String, sub: String) -> void:
+	const TX := 74.0
+	var t := _strong_label(title, 14, Color(1, 1, 1), 3)
+	t.position = Vector2(TX, 16.0); t.size = Vector2(pw - TX - 10.0, 20.0)
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(t)
+	var d := _strong_label(sub, 10, Color(0.92, 0.92, 0.96), 2)
+	d.autowrap_mode = TextServer.AUTOWRAP_WORD
+	d.position = Vector2(TX, 38.0); d.size = Vector2(pw - TX - 10.0, 40.0)
+	d.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(d)
 
 # Two reward icons (icon + "x{n}" beneath) spread across `w` starting at `pos`.
 func _reward_pair(parent: Control, pos: Vector2, w: float, tex_a: Texture2D, n_a: int,
@@ -4648,7 +4689,7 @@ func _build_feed_widget(overlay: Control, cx: float, cw: float, body_y: float, s
 		"skin": skin_id, "fat": 0, "max": 3, "dragging": false, "maxed": false,
 		"avatar": null, "finger": null, "pizza": null, "name_lbl": null,
 		"reset": null, "pizza_home": Vector2.ZERO, "overlay": overlay,
-		"avail": _avail_max_fat(SaveData.get_skin_level_for(skin_id)),
+		"avail": _avail_max_fat(skin_id, SaveData.get_skin_level_for(skin_id)),
 		"desc": desc_root, "rewards": rewards_ctx, "lock": null,
 	}
 	const AV  := 64.0
@@ -4840,7 +4881,7 @@ func _on_fat_lock_tapped(st: Dictionary) -> void:
 	if fi <= int(st["avail"]):
 		return   # this fat is already available — nothing locked to explain
 	_play_btn_sfx()
-	var ul := _fat_unlock_level(fi)
+	var ul := _fat_unlock_level(fi, String(st["skin"]))
 	_fill_desc_fat_lock(st["desc"], fi, ul)
 	_reward_focus_level(st["rewards"], ul)
 
@@ -4989,12 +5030,9 @@ func _show_skin_levels_popup(parent_overlay: Control, skin_id: String = "") -> v
 	# Each card opens its own popup → use that skin's level, not the active one.
 	var target_skin : String = skin_id if not skin_id.is_empty() else SaveData.active_skin
 	var cur_lvl  : int = SaveData.get_skin_level_for(target_skin)
-	# Levels that unlock a bigger fat-state sprite. Matches Normaldo._max_fat_state():
-	# lvl >= 2 → fat state 2 (texture index 2), lvl >= 5 → fat state 3 (texture index 3).
-	var fat_unlock_at : Dictionary = {2: 2, 5: 3}
 
-	# Reserve a fixed-width slot at the right edge for the fat-state sprite so
-	# rows without a sprite still line up with rows that have one.
+	# Reserve a fixed-width slot at the right edge for the reward picture (жир,
+	# резист, венец) so rows without one still line up with rows that have one.
 	var fat_sz       : float = row_h - 6.0
 	var fat_slot_w   : float = fat_sz + 12.0
 	var fat_slot_x   : float = panel_x + panel_w - fat_slot_w
@@ -5035,15 +5073,41 @@ func _show_skin_levels_popup(parent_overlay: Control, skin_id: String = "") -> v
 		lvl_lbl.position             = Vector2(panel_x + 14.0, ry)
 		root.add_child(lvl_lbl)
 
-		var d_rwd : int = SaveData.LEVEL_DOLLAR_REWARD[lvl] if lvl < SaveData.LEVEL_DOLLAR_REWARD.size() else 0
-		var t_rwd : int = SaveData.LEVEL_TOKEN_REWARD[lvl] if lvl < SaveData.LEVEL_TOKEN_REWARD.size() else 0
-		var rwd_text : String = ""
-		if d_rwd > 0 and t_rwd > 0:
-			rwd_text = "+%d $   +%d" % [d_rwd, t_rwd]
-		elif d_rwd > 0:
-			rwd_text = "+%d $" % d_rwd
-		elif t_rwd > 0:
-			rwd_text = "+%d" % t_rwd
+		# Награда берётся из лестницы КОНКРЕТНОГО скина: раньше здесь стояли две
+		# общие таблицы из save_data.gd, и список показывал деньги на уровнях,
+		# где скин на самом деле получает жир, резист или венец.
+		var rw    : Dictionary = SkinProgression.reward_for(target_skin, lvl)
+		var kind  : String     = String(rw.get("kind", ""))
+		var money : Vector2i   = SkinProgression.money_for(target_skin, lvl)
+		var d_rwd : int = money.x
+		var t_rwd : int = money.y
+		# Картинка в правом слоте: своя для каждого вида награды.
+		var slot_tex  : Texture2D = null
+		var slot_star : String    = ""
+		var rwd_text  : String    = ""
+		var rwd_col   : Color     = Color(1.0, 0.88, 0.40)
+		match kind:
+			"fat":
+				var fi : int = int(rw.get("fat", 3))
+				slot_tex = SkinRegistry.get_avatar_texture(target_skin, fi)
+				rwd_text = "НОВЫЙ ЖИР"
+				rwd_col  = Color(0.60, 1.00, 0.60)
+			"immunity":
+				var tag : String = String(rw.get("item", ""))
+				slot_tex = _RESIST_TEX.get(tag)
+				rwd_text = "РЕЗИСТ: %s" % SkinProgression.item_name(tag).to_upper()
+				rwd_col  = Color(1.00, 0.55, 0.50)
+			"perk":
+				slot_star = "★"
+				rwd_text  = String(rw.get("label", ""))
+				rwd_col   = Color(1.00, 0.80, 0.20)
+			_:
+				if d_rwd > 0 and t_rwd > 0:
+					rwd_text = "+%d $   +%d" % [d_rwd, t_rwd]
+				elif d_rwd > 0:
+					rwd_text = "+%d $" % d_rwd
+				elif t_rwd > 0:
+					rwd_text = "+%d" % t_rwd
 
 		# Reward block — token icon hugs the right of the resource column, with
 		# the dollar/token text right-aligned to its left. The fat sprite gets
@@ -5056,7 +5120,7 @@ func _show_skin_levels_popup(parent_overlay: Control, skin_id: String = "") -> v
 		rwd_lbl.add_theme_font_size_override("font_size", 12)
 		_apply_menu_caption_fx(rwd_lbl)
 		rwd_lbl.text                 = rwd_text
-		rwd_lbl.modulate             = Color(1.0, 0.88, 0.40) * row_mod
+		rwd_lbl.modulate             = rwd_col * row_mod
 		rwd_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		rwd_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 		var rwd_w : float = (tkn_x - 4.0) - (panel_x + 80.0)
@@ -5069,24 +5133,36 @@ func _show_skin_levels_popup(parent_overlay: Control, skin_id: String = "") -> v
 			tkn.modulate = row_mod
 			root.add_child(tkn)
 
-		# Fat-state sprite at the levels where a new fat tier unlocks — pinned
-		# to the right edge so the player reads "this level → that body".
-		if fat_unlock_at.has(lvl):
-			var fat_idx : int = fat_unlock_at[lvl]
-			var fat_tex : Texture2D = SkinRegistry.get_avatar_texture(target_skin, fat_idx)
-			if fat_tex != null:
-				var fat_icon := TextureRect.new()
-				fat_icon.texture           = fat_tex
-				fat_icon.expand_mode       = TextureRect.EXPAND_IGNORE_SIZE
-				fat_icon.stretch_mode      = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-				fat_icon.size              = Vector2(fat_sz, fat_sz)
-				fat_icon.position          = Vector2(fat_slot_x + 4.0, ry + (row_h - fat_sz) * 0.5)
-				fat_icon.mouse_filter      = Control.MOUSE_FILTER_IGNORE
-				if is_claimed:
-					fat_icon.modulate = Color(1.0, 1.0, 1.0, 0.55)
-				elif not is_cur and lvl > cur_lvl:
-					fat_icon.modulate = Color(1.0, 1.0, 1.0, 0.45)
-				root.add_child(fat_icon)
+		# Картинка награды у правого края: спрайт жира, иконка предмета-резиста
+		# или звезда венца — «этот уровень → вот это».
+		var slot_mod : Color = Color.WHITE
+		if is_claimed:
+			slot_mod = Color(1.0, 1.0, 1.0, 0.55)
+		elif not is_cur and lvl > cur_lvl:
+			slot_mod = Color(1.0, 1.0, 1.0, 0.45)
+		if slot_tex != null:
+			var fat_icon := TextureRect.new()
+			fat_icon.texture           = slot_tex
+			fat_icon.expand_mode       = TextureRect.EXPAND_IGNORE_SIZE
+			fat_icon.stretch_mode      = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			fat_icon.size              = Vector2(fat_sz, fat_sz)
+			fat_icon.position          = Vector2(fat_slot_x + 4.0, ry + (row_h - fat_sz) * 0.5)
+			fat_icon.mouse_filter      = Control.MOUSE_FILTER_IGNORE
+			fat_icon.modulate          = slot_mod
+			root.add_child(fat_icon)
+		elif slot_star != "":
+			var star := Label.new()
+			star.add_theme_font_override("font", UI_FONT)
+			star.add_theme_font_size_override("font_size", 18)
+			_apply_menu_caption_fx(star)
+			star.text                 = slot_star
+			star.modulate             = Color(1.0, 0.85, 0.25) * slot_mod
+			star.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			star.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+			star.size                 = Vector2(fat_sz, row_h)
+			star.position             = Vector2(fat_slot_x + 4.0, ry)
+			star.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+			root.add_child(star)
 
 # Renders a single skill row inside the scrollable skills area: a label with
 # the first letter coloured (RichTextLabel + BBCode), an item-icon row, and
@@ -7155,18 +7231,38 @@ func _spawn_fireworks() -> void:
 func _show_level_reward_popup(new_level: int, reward_d: int, reward_t: int) -> void:
 	var vp         := get_viewport().get_visible_rect().size
 	var popup_w    := 240.0
-	var has_unlock  : bool   = new_level == 2 or new_level == 5
+	# Что именно открыл уровень — берём из лестницы АКТИВНОГО скина. Раньше тут
+	# было «2 → ЖИР, 5 → УБЕР ЖИР» хардкодом: на всех остальных уровнях, где
+	# скин получает резист или венец, попап молчал.
+	var skin_id : String     = SaveData.active_skin
+	var rw      : Dictionary = SkinProgression.reward_for(skin_id, new_level)
+	var kind    : String     = String(rw.get("kind", ""))
+	var has_unlock   : bool  = kind == "fat" or kind == "immunity" or kind == "perk"
 	var unlock_title : String = ""
 	var unlock_desc  : String = ""
-	var unlock_fat_idx : int  = 0
-	if new_level == 2:
-		unlock_title   = "+ ЖИР"
-		unlock_desc    = "Новое состояние и +1 жизнь"
-		unlock_fat_idx = 2
-	elif new_level == 5:
-		unlock_title   = "+ УБЕР ЖИР"
-		unlock_desc    = "Финальная стадия и +1 жизнь"
-		unlock_fat_idx = 3
+	var unlock_tex   : Texture2D = null
+	var unlock_star  : String = ""
+	var unlock_col   : Color  = Color(0.55, 1.00, 0.65)
+	var unlock_bg    : Color  = Color(0.10, 0.26, 0.12, 0.92)
+	match kind:
+		"fat":
+			var fi : int = int(rw.get("fat", 3))
+			unlock_title = "+ %s" % _FAT_NAMES[clampi(fi, 0, 3)]
+			unlock_desc  = "Новое состояние и +1 жизнь"
+			unlock_tex   = SkinRegistry.get_avatar_texture(skin_id, fi)
+		"immunity":
+			var tag : String = String(rw.get("item", ""))
+			unlock_title = "+ РЕЗИСТ"
+			unlock_desc  = "%s разбивается без вреда" % SkinProgression.item_name(tag).to_upper()
+			unlock_tex   = _RESIST_TEX.get(tag)
+			unlock_col   = Color(1.00, 0.62, 0.55)
+			unlock_bg    = Color(0.28, 0.10, 0.10, 0.92)
+		"perk":
+			unlock_title = String(rw.get("label", ""))
+			unlock_desc  = String(rw.get("desc", ""))
+			unlock_star  = "★"
+			unlock_col   = Color(1.00, 0.85, 0.30)
+			unlock_bg    = Color(0.26, 0.20, 0.05, 0.92)
 
 	const UNLOCK_H : float = 56.0
 	var popup_h := 62.0
@@ -7250,27 +7346,26 @@ func _show_level_reward_popup(new_level: int, reward_d: int, reward_t: int) -> v
 		cur_y += 32.0
 
 	if has_unlock:
-		# Unlock card: tinted background, fat-state sprite on the left, title
+		# Unlock card: tinted background, reward picture on the left, title
 		# + short explanation on the right.
 		var ul_bg := ColorRect.new()
-		ul_bg.color    = Color(0.10, 0.26, 0.12, 0.92)
+		ul_bg.color    = unlock_bg
 		ul_bg.size     = Vector2(popup_w - 20.0, UNLOCK_H)
 		ul_bg.position = Vector2(ox + 10.0, cur_y)
 		popup.add_child(ul_bg)
 
 		var ul_stripe := ColorRect.new()
-		ul_stripe.color    = Color(0.55, 1.00, 0.55, 0.80)
+		ul_stripe.color    = Color(unlock_col.r, unlock_col.g, unlock_col.b, 0.80)
 		ul_stripe.size     = Vector2(popup_w - 20.0, 2.0)
 		ul_stripe.position = Vector2(ox + 10.0, cur_y)
 		popup.add_child(ul_stripe)
 
-		# Fat sprite — pulled from the active skin so non-classic skins
-		# show their own silhouette at the unlocked tier.
-		var fat_sz  : float    = UNLOCK_H - 12.0
-		var fat_tex : Texture2D = SkinRegistry.get_avatar_texture(SaveData.active_skin, unlock_fat_idx)
-		if fat_tex != null:
+		# Картинка награды: спрайт жира активного скина, предмет резиста или
+		# звезда венца — чтобы попап показывал ровно то, что открылось.
+		var fat_sz : float = UNLOCK_H - 12.0
+		if unlock_tex != null:
 			var fat_icon := TextureRect.new()
-			fat_icon.texture         = fat_tex
+			fat_icon.texture         = unlock_tex
 			fat_icon.expand_mode     = TextureRect.EXPAND_IGNORE_SIZE
 			fat_icon.stretch_mode    = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 			fat_icon.texture_filter  = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -7278,6 +7373,18 @@ func _show_level_reward_popup(new_level: int, reward_d: int, reward_t: int) -> v
 			fat_icon.position        = Vector2(ox + 18.0, cur_y + 6.0)
 			fat_icon.mouse_filter    = Control.MOUSE_FILTER_IGNORE
 			popup.add_child(fat_icon)
+		elif unlock_star != "":
+			var star := Label.new()
+			star.add_theme_font_override("font", UI_FONT)
+			star.add_theme_font_size_override("font_size", 24)
+			_apply_menu_caption_fx(star)
+			star.text                 = unlock_star
+			star.modulate             = unlock_col
+			star.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			star.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+			star.size                 = Vector2(fat_sz, fat_sz)
+			star.position             = Vector2(ox + 18.0, cur_y + 6.0)
+			popup.add_child(star)
 
 		var text_x : float = ox + 18.0 + fat_sz + 12.0
 		var text_w : float = popup_w - 20.0 - (text_x - (ox + 10.0)) - 10.0
@@ -7287,7 +7394,7 @@ func _show_level_reward_popup(new_level: int, reward_d: int, reward_t: int) -> v
 		ul_title.add_theme_font_size_override("font_size", 14)
 		_apply_menu_caption_fx(ul_title)
 		ul_title.text                 = unlock_title
-		ul_title.modulate             = Color(0.55, 1.00, 0.65)
+		ul_title.modulate             = unlock_col
 		ul_title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 		ul_title.size                 = Vector2(text_w, 18.0)
 		ul_title.position             = Vector2(text_x, cur_y + 6.0)
@@ -7416,8 +7523,12 @@ func _run_xp_animation(xp_before: int, level_before: int, xp_gained: int) -> voi
 			await _fill_xp_segment(p_start, 1.0)
 			cur_xp = next_level_xp
 			_update_xp_sub_label(cur_xp, cur_level)
-			var reward_d = SaveData.LEVEL_DOLLAR_REWARD[next_level]
-			var reward_t = SaveData.LEVEL_TOKEN_REWARD[next_level]
+			# Деньги за уровень свои у каждого скина (skin_progression.gd) —
+			# именно их начисляет SaveData.add_xp, и анимация баланса обязана
+			# показывать ту же сумму, а не общую таблицу.
+			var money : Vector2i = SkinProgression.money_for(SaveData.active_skin, next_level)
+			var reward_d : int = money.x
+			var reward_t : int = money.y
 			await _flash_level_up_bar(next_level, reward_d, reward_t)
 			cur_level = next_level
 			if _go_fill_rect and is_instance_valid(_go_fill_rect):
@@ -7477,12 +7588,30 @@ func _on_chest_press_up() -> void:
 func _show_chest_tooltip() -> void:
 	var is_mastery := SaveData.skin_level >= 10
 	var next_lvl   := mini(SaveData.skin_level + 1, 10)
-	var next_d     = SaveData.LEVEL_DOLLAR_REWARD[next_lvl] if not is_mastery else 0
-	var next_t     = SaveData.LEVEL_TOKEN_REWARD[next_lvl]  if not is_mastery else 1
-	var has_unlock := next_lvl == 2 or next_lvl == 5
+	# Подсказка сундука обещает ровно то, что лежит в лестнице активного скина:
+	# раньше она называла деньги из общей таблицы и «FAT / UBER FAT» на 2-м и
+	# 5-м уровнях, хотя жир открывает только 2-й, а 4/6/8 дают резисты.
+	var skin_id : String     = SaveData.active_skin
+	var money   : Vector2i   = SkinProgression.money_for(skin_id, next_lvl)
+	var rw      : Dictionary = SkinProgression.reward_for(skin_id, next_lvl)
+	var kind    : String     = String(rw.get("kind", ""))
+	var next_d  : int = money.x if not is_mastery else 0
+	var next_t  : int = money.y if not is_mastery else 1
+	var has_unlock  := not is_mastery and (kind == "fat" or kind == "immunity" or kind == "perk")
 	var unlock_text := ""
-	if next_lvl == 2: unlock_text = "+ ОТКРЫВАЕТ FAT  (+1 ЖИЗНЬ)"
-	if next_lvl == 5: unlock_text = "+ ОТКРЫВАЕТ UBER FAT  (+1 ЖИЗНЬ)"
+	var unlock_col  := Color(0.40, 1.00, 0.50)
+	var unlock_bg   := Color(0.10, 0.26, 0.12, 0.85)
+	match kind:
+		"fat":
+			unlock_text = "+ ЖИР «%s»  (+1 ЖИЗНЬ)" % _FAT_NAMES[clampi(int(rw.get("fat", 3)), 0, 3)]
+		"immunity":
+			unlock_text = "+ РЕЗИСТ: %s" % SkinProgression.item_name(String(rw.get("item", ""))).to_upper()
+			unlock_col  = Color(1.00, 0.62, 0.55)
+			unlock_bg   = Color(0.28, 0.10, 0.10, 0.85)
+		"perk":
+			unlock_text = "★ %s" % String(rw.get("label", ""))
+			unlock_col  = Color(1.00, 0.85, 0.30)
+			unlock_bg   = Color(0.26, 0.20, 0.05, 0.85)
 
 	var vp    := get_viewport().get_visible_rect().size
 	var tip_w := 180.0
@@ -7571,7 +7700,7 @@ func _show_chest_tooltip() -> void:
 
 		if has_unlock:
 			var ul_bg := ColorRect.new()
-			ul_bg.color    = Color(0.10, 0.26, 0.12, 0.85)
+			ul_bg.color    = unlock_bg
 			ul_bg.size     = Vector2(tip_w - 16.0, 20.0)
 			ul_bg.position = Vector2(8.0, cur_y)
 			_chest_tooltip.add_child(ul_bg)
@@ -7581,7 +7710,7 @@ func _show_chest_tooltip() -> void:
 			ul_lbl.text                 = unlock_text
 			ul_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			ul_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-			ul_lbl.modulate             = Color(0.40, 1.00, 0.50)
+			ul_lbl.modulate             = unlock_col
 			ul_lbl.size                 = Vector2(tip_w - 16.0, 20.0)
 			ul_lbl.position             = Vector2(8.0, cur_y)
 			_chest_tooltip.add_child(ul_lbl)
@@ -7591,10 +7720,7 @@ func _show_chest_tooltip() -> void:
 	tw.tween_property(_chest_tooltip, "modulate:a", 1.0, 0.15)
 
 func _max_unlocked_fat() -> int:
-	var lvl := SaveData.skin_level
-	if lvl >= 5: return 3
-	if lvl >= 2: return 2
-	return 1
+	return SkinProgression.max_fat_state(SaveData.active_skin, SaveData.skin_level)
 
 # Returns the active skin's fat-state texture for index i (0..3), falling
 # back to the classic sheet if the skin doesn't have one at that index.

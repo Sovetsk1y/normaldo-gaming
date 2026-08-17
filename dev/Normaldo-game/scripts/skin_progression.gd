@@ -193,6 +193,14 @@ func perk_of(skin_id: String) -> Dictionary:
 	var r := reward_for(skin_id, 10)
 	return r if r.get("kind", "") == "perk" else {}
 
+# Деньги и жетоны награды уровня. Нули, если награда не денежная — так
+# потребителям в UI не нужно каждый раз разбирать `kind`.
+func money_for(skin_id: String, level: int) -> Vector2i:
+	var r := reward_for(skin_id, level)
+	if r.get("kind", "") != "money":
+		return Vector2i.ZERO
+	return Vector2i(int(r.get("dollars", 0)), int(r.get("tokens", 0)))
+
 func item_name(item: String) -> String:
 	return String(ITEM_NAMES.get(item, item))
 

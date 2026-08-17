@@ -26,6 +26,8 @@ func _initialize() -> void:
 	_test_heads(reg)
 	print("── Карточка скина ──")
 	_test_card(skil, save)
+	print("── Карточки наград ──")
+	await _test_reward_cards(reg, save, prog)
 	print("── Касты ──")
 	await _test_casts(reg, save)
 	print("── Паутина Спайдера ──")
@@ -160,6 +162,58 @@ func _test_card(skil: Node, save: Node) -> void:
 		if bool(r.get("unlocked", false)):
 			other_open += 1
 	_check(other_open < 3, "у неактивного скина открыто по ЕГО уровню: %d из 3" % other_open)
+
+# Награды за уровень рисуются в ЧЕТЫРЁХ местах (колонка карточек, список
+# «НАГРАДЫ ЗА УРОВНИ», попап повышения и подсказка сундука), и каждое из них
+# когда-то читало общие таблицы из save_data.gd. Прогоняем все четыре по всем
+# скинам и всем уровням: любой промах по виду награды всплывёт как SCRIPT ERROR.
+func _test_reward_cards(reg: Node, save: Node, prog: Node) -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var hud : Node = game.get_node_or_null("HUD")
+	if hud == null:
+		_check(false, "HUD не найден в сцене")
+		return
+
+	var host := Control.new()
+	host.size = Vector2(720.0, 1280.0)
+	hud.add_child(host)
+	await process_frame
+
+	var built := 0
+	for s in reg.SKINS:
+		var id := String(s["id"])
+		var vbox := VBoxContainer.new()
+		host.add_child(vbox)
+		for lv in range(2, 11):
+			if hud.call("_build_reward_card", vbox, lv, 180.0, id, 5) != null:
+				built += 1
+		hud.call("_show_skin_levels_popup", host, id)
+		vbox.queue_free()
+	await process_frame
+	_check(built == reg.SKINS.size() * 9,
+		"собрано %d карточек наград (%d скинов × 9 уровней)" % [built, reg.SKINS.size()])
+
+	# Попап повышения и подсказка сундука смотрят на АКТИВНЫЙ скин, поэтому
+	# гоняем их отдельно, переключая скин и уровень.
+	hud.set("_menu_overlay", host)
+	hud.set("_chest_anchor", Vector2(360.0, 400.0))
+	for s in reg.SKINS:
+		var id := String(s["id"])
+		save.active_skin = id
+		for lv in range(2, 11):
+			save.skin_level = lv - 1
+			hud.call("_show_chest_tooltip")
+			var money : Vector2i = prog.money_for(id, lv)
+			# Без await: тело попапа доходит до ожидания кнопки — этого хватает,
+			# чтобы выполнить всю разметку награды.
+			hud.call("_show_level_reward_popup", lv, money.x, money.y)
+		await process_frame
+	_check(true, "попап уровня и подсказка сундука отрисованы для всех скинов")
+
+	game.queue_free()
+	await process_frame
 
 func _test_casts(reg: Node, save: Node) -> void:
 	var game : Node = load("res://scenes/game.tscn").instantiate()
