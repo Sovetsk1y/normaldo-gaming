@@ -55,7 +55,6 @@ var _skin_fat_sfx : AudioStream = null
 const SLOW_MULTIPLIER  := 0.30
 const PROXIMITY_RADIUS := 80.0
 const EAT_ANIM_TIME    := 0.25
-const _CLASSIC_TEX_REF := 91.0  # pixel width of classic skin — normalisation reference
 
 # Ручные добавки к масштабу больше не нужны: их заменили замеры голов в
 # skin_metrics.gd. Раньше здесь на глаз стояли 1.10 для Викинга и Тайсона —
@@ -323,14 +322,17 @@ func _apply_skin_to_sprite() -> void:
 	_sprite.scale   = _base_scale
 	_apply_head_offset()
 
-# Масштаб считается так, чтобы ГОЛОВА была одного размера у всех скинов.
-# Раньше нормировали ширину КАДРА, и скины с руками выходили мельче: у Джокера
-# голова занимает 27 % кадра, то есть была почти втрое меньше классической.
-# Замеры голов лежат в skin_metrics.gd.
+# Масштаб считается так, чтобы ГОЛОВА была одного размера у всех скинов, но
+# силуэт целиком не вылезал за коробку MAX_BODY. Раньше нормировали ширину
+# КАДРА, и скины с руками выходили мельче: у Джокера голова занимает 27 % кадра,
+# то есть была почти втрое меньше классической. Одна лишь нормировка головы
+# перегибала в другую сторону — Гарри и Джокер вырастали в два лейна.
+# Вся арифметика и замеры — в skin_metrics.gd.
 func _head_scale() -> Vector2:
-	var tex_w : float = _skin_tex[fat_state].get_size().x
-	var s : float = (_CLASSIC_TEX_REF / tex_w) if tex_w > 0.0 else 1.0
-	s *= SkinMetrics.scale_for(SaveData.active_skin)
+	var tex : Texture2D = _skin_tex[fat_state]
+	if tex == null:
+		return Vector2.ONE
+	var s : float = SkinMetrics.sprite_scale(SaveData.active_skin, fat_state, tex.get_size())
 	return Vector2(s, s)
 
 # Голова в кадре бывает смещена от центра (у Гарри, Мага и Кусса — заметно), а

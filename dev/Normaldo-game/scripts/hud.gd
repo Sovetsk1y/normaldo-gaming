@@ -353,6 +353,73 @@ func _make_icon(tex: Texture2D, sz: float) -> TextureRect:
 	r.size         = Vector2(sz, sz)
 	return r
 
+# ── Аватарка скина ────────────────────────────────────────────────────────────
+# Вписывать спрайт скина в квадрат «по кадру» нельзя: у Джокера голова это 27 %
+# кадра, остальное — разведённые руки, и в списке скинов его голова выходила
+# втрое мельче соседских. Поэтому в коробку сажается ГОЛОВА: она занимает
+# UI_HEAD_FILL коробки у любого скина, а руки и посохи уходят за края и
+# обрезаются (clip_contents у держателя).
+#
+# Держатель — Control с обрезкой, внутри TextureRect со спрайтом. Ссылка на
+# спрайт лежит в мете «head_rect»: там, где аватарка меняется на лету (кормёжка
+# скина, ячейка игрока), меняют именно его.
+const UI_HEAD_FILL : float = 0.72
+
+func _skin_head_icon(skin_id: String, fat: int, box: float) -> Control:
+	var holder := Control.new()
+	holder.size               = Vector2(box, box)
+	holder.custom_minimum_size = holder.size
+	holder.clip_contents      = true
+	holder.mouse_filter       = Control.MOUSE_FILTER_IGNORE
+	var r := TextureRect.new()
+	r.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
+	r.stretch_mode = TextureRect.STRETCH_SCALE
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	holder.add_child(r)
+	holder.set_meta("head_rect", r)
+	_fit_head_rect(r, _avatar_texture(skin_id, fat), skin_id, fat, box)
+	return holder
+
+# Спрайт внутри держателя — для тех, кто меняет аватарку на лету.
+func _head_icon_rect(holder: Control) -> TextureRect:
+	if holder == null or not holder.has_meta("head_rect"):
+		return null
+	return holder.get_meta("head_rect") as TextureRect
+
+# Кладёт текстуру в rect так, чтобы центр головы совпал с центром коробки, а
+# ширина головы составила UI_HEAD_FILL от коробки.
+func _fit_head_rect(r: TextureRect, tex: Texture2D, skin_id: String, fat: int, box: float) -> void:
+	if not is_instance_valid(r):
+		return
+	r.texture = tex
+	# Скин и коробку помним на самом спрайте: смена состояния жира при кормёжке
+	# должна пересаживать голову по замерам НОВОГО состояния.
+	r.set_meta("head_skin", skin_id)
+	r.set_meta("head_box",  box)
+	r.set_meta("head_fat",  fat)
+	if tex == null:
+		return
+	var sz : Vector2 = tex.get_size()
+	if sz.x <= 0.0:
+		return
+	var head_px : float = maxf(1.0, sz.x * SkinMetrics.head_frac_for(skin_id))
+	var k : float = (box * UI_HEAD_FILL) / head_px
+	r.size = sz * k
+	# Центр головы в долях кадра — центр кадра плюс замеренное смещение.
+	var c : Vector2 = Vector2(0.5, 0.5) + SkinMetrics.offset_for(skin_id, fat)
+	r.position     = Vector2(box, box) * 0.5 - Vector2(c.x * r.size.x, c.y * r.size.y)
+	# Вращение при морфе жира должно идти вокруг ГОЛОВЫ, а не вокруг центра
+	# кадра, иначе у скинов с руками голова уезжает по дуге за край коробки.
+	r.pivot_offset = Vector2(c.x * r.size.x, c.y * r.size.y)
+
+# Пересадить уже созданный спрайт на другое состояние жира того же скина.
+func _refit_head_rect(r: TextureRect, tex: Texture2D, fat: int) -> void:
+	if not is_instance_valid(r) or not r.has_meta("head_skin"):
+		if is_instance_valid(r):
+			r.texture = tex
+		return
+	_fit_head_rect(r, tex, String(r.get_meta("head_skin")), fat, float(r.get_meta("head_box")))
+
 # ── ЖИРОБОСС end fly-in targets ───────────────────────────────────────────────
 # Screen-space centre of the top-left pizza / dollar counters, so fat_boss.gd can
 # fly the mini-game's tallied loot into the real run score at the end.
@@ -982,15 +1049,10 @@ func _build_player_cell(vp: Vector2) -> void:
 
 	# Avatar
 	var avatar_info := _current_avatar()
-	var avatar_tex  := _avatar_texture(avatar_info.skin_id, avatar_info.fat)
-	_player_avatar_rect = TextureRect.new()
-	_player_avatar_rect.texture       = avatar_tex
-	_player_avatar_rect.stretch_mode  = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_player_avatar_rect.expand_mode   = TextureRect.EXPAND_IGNORE_SIZE
-	_player_avatar_rect.size          = Vector2(AV_SZ, AV_SZ)
-	_player_avatar_rect.position      = Vector2(PAD, (CELL_H - AV_SZ) * 0.5)
-	_player_avatar_rect.mouse_filter  = Control.MOUSE_FILTER_IGNORE
-	_player_cell_root.add_child(_player_avatar_rect)
+	var av_holder := _skin_head_icon(avatar_info.skin_id, int(avatar_info.fat), AV_SZ)
+	av_holder.position = Vector2(PAD, (CELL_H - AV_SZ) * 0.5)
+	_player_cell_root.add_child(av_holder)
+	_player_avatar_rect = _head_icon_rect(av_holder)
 
 	# Tap-area for avatar (overlapping the rect)
 	var avatar_btn := Button.new()
@@ -1064,7 +1126,9 @@ func _refresh_player_cell() -> void:
 	_layout_player_pencil()
 	if is_instance_valid(_player_avatar_rect):
 		var info := _current_avatar()
-		_player_avatar_rect.texture = _avatar_texture(info.skin_id, info.fat)
+		# Скин мог смениться целиком — пересаживаем голову по замерам нового.
+		_fit_head_rect(_player_avatar_rect, _avatar_texture(info.skin_id, info.fat),
+			String(info.skin_id), int(info.fat), float(_player_avatar_rect.get_meta("head_box", 32.0)))
 
 # Measure rendered width of a nick string in the menu UI font + the requested
 # pixel size. Used to size the nick label to its content so the pencil can
@@ -3034,14 +3098,7 @@ func _show_skin_info_popup(skin_data: Dictionary, parent_overlay: Control) -> vo
 		var sx          := state_start_x + fi * (FAT_SZ + 8.0)
 		var is_unlocked = cur_level >= fat_unlock[fi]
 
-		var st_tex : Texture2D
-		if tex_dir.is_empty():
-			st_tex = FAT_TEXTURES[fi]
-		else:
-			var st_path := tex_dir + "state%d.png" % (fi + 1)
-			st_tex = load(st_path) if ResourceLoader.exists(st_path) else FAT_TEXTURES[fi]
-
-		var st_icon := _make_icon(st_tex, FAT_SZ)
+		var st_icon := _skin_head_icon(skin_id, fi, FAT_SZ)
 		st_icon.position = Vector2(sx, cy)
 		if not is_unlocked:
 			st_icon.modulate = Color(0.22, 0.22, 0.22, 0.55)
@@ -4130,8 +4187,8 @@ func _build_skin_grid_cell(parent: Control, pos: Vector2, w: float, h: float,
 	cell.add_child(stripe)
 
 	const AV := 52.0
-	var av := _make_icon(_skin_first_tex(skin_data), AV)
-	av.position = Vector2((w - AV) * 0.5, 8.0); av.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var av := _skin_head_icon(skin_id, 0, AV)
+	av.position = Vector2((w - AV) * 0.5, 8.0)
 	cell.add_child(av)
 
 	var name_lbl := Label.new()
@@ -4538,8 +4595,8 @@ func _build_reward_card(vbox: VBoxContainer, lvl: int, cw: float, skin_id: Strin
 		"fat":
 			# Крупный спрайт того состояния жира, которое открывает этот уровень.
 			const FAV := 66.0
-			var av := _make_icon(_avatar_texture(skin_id, int(rw.get("fat", 3))), FAV)
-			av.position = Vector2(8.0, (CH - FAV) * 0.5); av.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			var av := _skin_head_icon(skin_id, int(rw.get("fat", 3)), FAV)
+			av.position = Vector2(8.0, (CH - FAV) * 0.5)
 			panel.add_child(av)
 			_reward_caption(panel, pw, "НОВЫЙ ЖИР!", "Открывает %d-е состояние" % (int(rw.get("fat", 3)) + 1))
 		"immunity":
@@ -4687,7 +4744,7 @@ func _build_feed_widget(overlay: Control, cx: float, cw: float, body_y: float, s
 		desc_root: VBoxContainer = null, rewards_ctx: Dictionary = {}) -> void:
 	var st := {
 		"skin": skin_id, "fat": 0, "max": 3, "dragging": false, "maxed": false,
-		"avatar": null, "finger": null, "pizza": null, "name_lbl": null,
+		"avatar": null, "av_rect": null, "finger": null, "pizza": null, "name_lbl": null,
 		"reset": null, "pizza_home": Vector2.ZERO, "overlay": overlay,
 		"avail": _avail_max_fat(skin_id, SaveData.get_skin_level_for(skin_id)),
 		"desc": desc_root, "rewards": rewards_ctx, "lock": null,
@@ -4703,16 +4760,13 @@ func _build_feed_widget(overlay: Control, cx: float, cw: float, body_y: float, s
 	var finger_x : float = clx + AV + GAP
 	var pizza_x  : float = finger_x + FSZ + GAP
 
-	var avatar := TextureRect.new()
-	avatar.texture       = _avatar_texture(skin_id, 0)
-	avatar.stretch_mode  = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	avatar.expand_mode   = TextureRect.EXPAND_IGNORE_SIZE
-	avatar.size          = Vector2(AV, AV)
-	avatar.position      = Vector2(avatar_x, body_y + 8.0)
-	avatar.pivot_offset  = avatar.size * 0.5
-	avatar.mouse_filter  = Control.MOUSE_FILTER_IGNORE
+	# Аватарка — обрезающая коробка (её геометрию ловит перетаскивание пиццы) и
+	# спрайт внутри (ему меняют текстуру при жевании и морфе жира).
+	var avatar := _skin_head_icon(skin_id, 0, AV)
+	avatar.position = Vector2(avatar_x, body_y + 8.0)
 	overlay.add_child(avatar)
-	st["avatar"] = avatar
+	st["avatar"]  = avatar
+	st["av_rect"] = _head_icon_rect(avatar)
 
 	# Padlock overlay — shown on the avatar when the previewed fat is still locked
 	# by the skin level. Tapping it explains the fat-unlock rules.
@@ -4782,8 +4836,8 @@ func _feed_pizza_input(st: Dictionary, ev: InputEvent) -> void:
 	if (ev is InputEventMouseButton and (ev as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT) or ev is InputEventScreenTouch:
 		if ev.pressed:
 			st["dragging"] = true
-			if is_instance_valid(st["avatar"]):
-				st["avatar"].texture = _avatar_eat_texture(st["skin"], st["fat"])   # mouth open
+			if is_instance_valid(st["av_rect"]):
+				st["av_rect"].texture = _avatar_eat_texture(st["skin"], st["fat"])   # mouth open
 			if is_instance_valid(st["finger"]):
 				st["finger"].visible = false
 		else:
@@ -4811,7 +4865,7 @@ func _feed_release(st: Dictionary) -> void:
 			st["fat"] = nf
 			if is_instance_valid(st["name_lbl"]):
 				st["name_lbl"].text = _FAT_NAMES[clampi(nf, 0, 3)]
-			_morph_avatar(st["avatar"], _avatar_texture(st["skin"], nf))   # spin to next fat
+			_morph_avatar(st["av_rect"], _avatar_texture(st["skin"], nf), nf)   # spin to next fat
 			_apply_fat_lock_visual(st)   # dim + padlock if this fat is still locked
 			_play_stream(st["overlay"], _skin_fat_sound(st["skin"]))
 			if nf >= int(st["max"]):
@@ -4821,8 +4875,8 @@ func _feed_release(st: Dictionary) -> void:
 	else:
 		var tw = st["pizza"].create_tween()
 		tw.tween_property(st["pizza"], "position", st["pizza_home"], 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-		if is_instance_valid(st["avatar"]):
-			st["avatar"].texture = _avatar_texture(st["skin"], st["fat"])   # close mouth
+		if is_instance_valid(st["av_rect"]):
+			st["av_rect"].texture = _avatar_texture(st["skin"], st["fat"])   # close mouth
 		if is_instance_valid(st["finger"]):
 			st["finger"].visible = true
 
@@ -4852,8 +4906,8 @@ func _feed_make_reset(st: Dictionary) -> void:
 		st["maxed"] = false; st["fat"] = 0
 		if is_instance_valid(st["name_lbl"]):
 			st["name_lbl"].text = _FAT_NAMES[0]
-		if is_instance_valid(st["avatar"]):
-			_morph_avatar(st["avatar"], _avatar_texture(st["skin"], 0))
+		if is_instance_valid(st["av_rect"]):
+			_morph_avatar(st["av_rect"], _avatar_texture(st["skin"], 0), 0)
 		_apply_fat_lock_visual(st)   # back to fat 0 → clear the padlock/dim
 		if is_instance_valid(st["reset"]):
 			st["reset"].queue_free(); st["reset"] = null
@@ -4922,17 +4976,22 @@ func _fill_desc_fat_lock(desc_root, fat_idx: int, lvl_req: int) -> void:
 	desc_root.add_child(l2)
 
 # Spin-morph a TextureRect (avatar) into a point, swap texture, spin back out.
-func _morph_avatar(rect: TextureRect, new_tex: Texture2D) -> void:
+# Морф жира: спрайт скручивается в точку, меняет текстуру и раскручивается
+# обратно. `fat` нужен, чтобы после смены текстуры пересадить голову по замерам
+# НОВОГО состояния, — иначе у скинов с руками она уезжает из коробки.
+func _morph_avatar(rect: TextureRect, new_tex: Texture2D, fat: int = -1) -> void:
 	if not is_instance_valid(rect):
 		return
-	rect.pivot_offset = rect.size * 0.5
 	var start_rot := rect.rotation
 	var tw := rect.create_tween()
 	tw.tween_property(rect, "scale", Vector2.ZERO, 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tw.parallel().tween_property(rect, "rotation", start_rot + TAU, 0.16)
 	tw.tween_callback(func():
 		if is_instance_valid(rect):
-			rect.texture = new_tex)
+			if fat >= 0:
+				_refit_head_rect(rect, new_tex, fat)
+			else:
+				rect.texture = new_tex)
 	tw.tween_property(rect, "scale", Vector2.ONE, 0.26).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tw.parallel().tween_property(rect, "rotation", start_rot + TAU * 2.0, 0.26)
 	tw.tween_callback(func():
@@ -5083,13 +5142,13 @@ func _show_skin_levels_popup(parent_overlay: Control, skin_id: String = "") -> v
 		var t_rwd : int = money.y
 		# Картинка в правом слоте: своя для каждого вида награды.
 		var slot_tex  : Texture2D = null
+		var slot_fat  : int       = -1   # >= 0 → в слоте аватарка этого состояния
 		var slot_star : String    = ""
 		var rwd_text  : String    = ""
 		var rwd_col   : Color     = Color(1.0, 0.88, 0.40)
 		match kind:
 			"fat":
-				var fi : int = int(rw.get("fat", 3))
-				slot_tex = SkinRegistry.get_avatar_texture(target_skin, fi)
+				slot_fat = int(rw.get("fat", 3))
 				rwd_text = "НОВЫЙ ЖИР"
 				rwd_col  = Color(0.60, 1.00, 0.60)
 			"immunity":
@@ -5140,16 +5199,21 @@ func _show_skin_levels_popup(parent_overlay: Control, skin_id: String = "") -> v
 			slot_mod = Color(1.0, 1.0, 1.0, 0.55)
 		elif not is_cur and lvl > cur_lvl:
 			slot_mod = Color(1.0, 1.0, 1.0, 0.45)
-		if slot_tex != null:
-			var fat_icon := TextureRect.new()
-			fat_icon.texture           = slot_tex
-			fat_icon.expand_mode       = TextureRect.EXPAND_IGNORE_SIZE
-			fat_icon.stretch_mode      = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-			fat_icon.size              = Vector2(fat_sz, fat_sz)
-			fat_icon.position          = Vector2(fat_slot_x + 4.0, ry + (row_h - fat_sz) * 0.5)
-			fat_icon.mouse_filter      = Control.MOUSE_FILTER_IGNORE
-			fat_icon.modulate          = slot_mod
+		if slot_fat >= 0:
+			var fat_icon := _skin_head_icon(target_skin, slot_fat, fat_sz)
+			fat_icon.position = Vector2(fat_slot_x + 4.0, ry + (row_h - fat_sz) * 0.5)
+			fat_icon.modulate = slot_mod
 			root.add_child(fat_icon)
+		elif slot_tex != null:
+			var item_icon := TextureRect.new()
+			item_icon.texture           = slot_tex
+			item_icon.expand_mode       = TextureRect.EXPAND_IGNORE_SIZE
+			item_icon.stretch_mode      = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			item_icon.size              = Vector2(fat_sz, fat_sz)
+			item_icon.position          = Vector2(fat_slot_x + 4.0, ry + (row_h - fat_sz) * 0.5)
+			item_icon.mouse_filter      = Control.MOUSE_FILTER_IGNORE
+			item_icon.modulate          = slot_mod
+			root.add_child(item_icon)
 		elif slot_star != "":
 			var star := Label.new()
 			star.add_theme_font_override("font", UI_FONT)
@@ -6706,15 +6770,9 @@ func _show_game_over(total_pizzas: int, level_rewards: Array, xp_before: int, le
 
 	# ── Skin avatar — the run's character, big and centred under the title ──
 	var av_sz   : float   = 78.0
-	var av_tex  : Texture2D = SkinRegistry.get_avatar_texture(SaveData.active_skin, _max_unlocked_fat())
 	var av_x    : float   = panel_x + (panel_w - av_sz) * 0.5
 	var av_y    : float   = panel_y + 48.0
-	var av_rect := TextureRect.new()
-	av_rect.texture           = av_tex
-	av_rect.expand_mode       = TextureRect.EXPAND_IGNORE_SIZE
-	av_rect.stretch_mode      = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	av_rect.texture_filter    = CanvasItem.TEXTURE_FILTER_NEAREST
-	av_rect.size              = Vector2(av_sz, av_sz)
+	var av_rect := _skin_head_icon(SaveData.active_skin, _max_unlocked_fat(), av_sz)
 	av_rect.position          = Vector2(av_x, av_y)
 	av_rect.process_mode      = _pm
 	add_child(av_rect)
@@ -7241,15 +7299,15 @@ func _show_level_reward_popup(new_level: int, reward_d: int, reward_t: int) -> v
 	var unlock_title : String = ""
 	var unlock_desc  : String = ""
 	var unlock_tex   : Texture2D = null
+	var unlock_fat   : int    = -1   # >= 0 → в карточке аватарка этого состояния
 	var unlock_star  : String = ""
 	var unlock_col   : Color  = Color(0.55, 1.00, 0.65)
 	var unlock_bg    : Color  = Color(0.10, 0.26, 0.12, 0.92)
 	match kind:
 		"fat":
-			var fi : int = int(rw.get("fat", 3))
-			unlock_title = "+ %s" % _FAT_NAMES[clampi(fi, 0, 3)]
+			unlock_fat   = int(rw.get("fat", 3))
+			unlock_title = "+ %s" % _FAT_NAMES[clampi(unlock_fat, 0, 3)]
 			unlock_desc  = "Новое состояние и +1 жизнь"
-			unlock_tex   = SkinRegistry.get_avatar_texture(skin_id, fi)
 		"immunity":
 			var tag : String = String(rw.get("item", ""))
 			unlock_title = "+ РЕЗИСТ"
@@ -7363,16 +7421,20 @@ func _show_level_reward_popup(new_level: int, reward_d: int, reward_t: int) -> v
 		# Картинка награды: спрайт жира активного скина, предмет резиста или
 		# звезда венца — чтобы попап показывал ровно то, что открылось.
 		var fat_sz : float = UNLOCK_H - 12.0
-		if unlock_tex != null:
-			var fat_icon := TextureRect.new()
-			fat_icon.texture         = unlock_tex
-			fat_icon.expand_mode     = TextureRect.EXPAND_IGNORE_SIZE
-			fat_icon.stretch_mode    = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-			fat_icon.texture_filter  = CanvasItem.TEXTURE_FILTER_NEAREST
-			fat_icon.size            = Vector2(fat_sz, fat_sz)
-			fat_icon.position        = Vector2(ox + 18.0, cur_y + 6.0)
-			fat_icon.mouse_filter    = Control.MOUSE_FILTER_IGNORE
+		if unlock_fat >= 0:
+			var fat_icon := _skin_head_icon(skin_id, unlock_fat, fat_sz)
+			fat_icon.position = Vector2(ox + 18.0, cur_y + 6.0)
 			popup.add_child(fat_icon)
+		elif unlock_tex != null:
+			var item_icon := TextureRect.new()
+			item_icon.texture         = unlock_tex
+			item_icon.expand_mode     = TextureRect.EXPAND_IGNORE_SIZE
+			item_icon.stretch_mode    = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			item_icon.texture_filter  = CanvasItem.TEXTURE_FILTER_NEAREST
+			item_icon.size            = Vector2(fat_sz, fat_sz)
+			item_icon.position        = Vector2(ox + 18.0, cur_y + 6.0)
+			item_icon.mouse_filter    = Control.MOUSE_FILTER_IGNORE
+			popup.add_child(item_icon)
 		elif unlock_star != "":
 			var star := Label.new()
 			star.add_theme_font_override("font", UI_FONT)
@@ -8839,13 +8901,8 @@ func _build_skin_avatar_row(parent: Control, cy: float, w: float,
 			stripe_b.position = Vector2(tx, 8.0 + TH_SZ - 2.0)
 			row.add_child(stripe_b)
 
-		var rect := TextureRect.new()
-		rect.texture       = _avatar_texture(sid, fat)
-		rect.stretch_mode  = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		rect.expand_mode   = TextureRect.EXPAND_IGNORE_SIZE
-		rect.size          = Vector2(TH_SZ - 6.0, TH_SZ - 6.0)
+		var rect := _skin_head_icon(sid, fat, TH_SZ - 6.0)
 		rect.position      = Vector2(tx + 3.0, 11.0)
-		rect.mouse_filter  = Control.MOUSE_FILTER_IGNORE
 		if locked:
 			rect.modulate  = Color(0.30, 0.30, 0.35, 0.90)
 		row.add_child(rect)

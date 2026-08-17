@@ -75,33 +75,67 @@ def head_metrics(path):
             ((miny + maxy) / 2.0) / float(H) - 0.5)
 
 
+def body_box(path):
+    """(ширина, высота) ВИДИМОГО силуэта в долях кадра.
+
+    Нужна, чтобы ограничить общий размер скина. Нормировка по голове делает
+    головы одинаковыми, но у скинов с телом и посохом силуэт при этом
+    раздувается вдвое против классики — а бьётся всё равно только голова
+    (хитбокс — круг радиусом 32). Игрок видит тушу, которая ничего не задевает.
+    """
+    im = Image.open(path).convert("RGBA")
+    w, h = im.size
+    bb = im.split()[3].point(lambda v: 255 if v >= ALPHA_MIN else 0).getbbox()
+    if bb is None:
+        return (1.0, 1.0)
+    return ((bb[2] - bb[0]) / float(w), (bb[3] - bb[1]) / float(h))
+
+
+def _states(d, classic=False):
+    """Пути к четырём состояниям жира: у классики своё имя файлов."""
+    out = []
+    for st in range(1, 5):
+        p = os.path.join(SKINS_DIR, "normaldo%d.png" % st) if classic \
+            else os.path.join(d, "state%d.png" % st)
+        out.append(p if os.path.exists(p) else None)
+    return out
+
+
+def _row(sid, states, ref):
+    frac, _, _ = head_metrics(states[0])
+    offs, boxes = [], []
+    for p in states:
+        if p is None:
+            offs.append((0.0, 0.0))
+            boxes.append((1.0, 1.0))
+            continue
+        _, ox, oy = head_metrics(p)
+        offs.append((ox, oy))
+        boxes.append(body_box(p))
+    return (sid, ref / frac, frac, offs, boxes)
+
+
 def build_rows():
     # Классика — эталон: её кадр это ровно голова.
     ref, _, _ = head_metrics(os.path.join(SKINS_DIR, "normaldo1.png"))
-    rows = []
+    # Классика тоже попадает в таблицу: масштаб у неё ×1, но силуэт и доля
+    # головы нужны интерфейсу наравне с остальными.
+    rows = [_row("classic", _states(None, classic=True), ref)]
     for d in sorted(glob.glob(os.path.join(SKINS_DIR, "*") + os.sep)):
         sid = os.path.basename(d.rstrip(os.sep))
-        first = os.path.join(d, "state1.png")
-        if not os.path.exists(first):
+        if not os.path.exists(os.path.join(d, "state1.png")):
             continue
-        frac, _, _ = head_metrics(first)
-        offs = []
-        for st in range(1, 5):
-            p = os.path.join(d, "state%d.png" % st)
-            if os.path.exists(p):
-                _, ox, oy = head_metrics(p)
-                offs.append((ox, oy))
-            else:
-                offs.append((0.0, 0.0))
-        rows.append((sid, ref / frac, offs))
+        rows.append(_row(sid, _states(d), ref))
     return rows
 
 
 def render_table(rows):
     out = []
-    for sid, scale, offs in rows:
+    for sid, scale, frac, offs, boxes in rows:
         pts = ", ".join("Vector2(%.4f, %.4f)" % o for o in offs)
-        out.append('\t"%s": { "scale": %.3f, "off": [%s] },' % (sid, scale, pts))
+        bxs = ", ".join("Vector2(%.4f, %.4f)" % b for b in boxes)
+        out.append('\t"%s": { "scale": %.3f, "head": %.4f, "off": [%s], "box": [%s] },'
+                   % (sid, scale, frac, pts, bxs))
     return "\n".join(out)
 
 
@@ -129,8 +163,9 @@ def main():
                      current, flags=re.S)
     open(OUT, "w", encoding="utf-8").write(updated)
     print("Обновлено %d скинов в %s" % (len(rows), os.path.relpath(OUT, ROOT)))
-    for sid, scale, _ in rows:
-        print("  %-14s ×%.2f" % (sid, scale))
+    for sid, scale, frac, _, boxes in rows:
+        print("  %-14s ×%.2f  голова %.0f %% кадра, силуэт %.0f×%.0f %%"
+              % (sid, scale, frac * 100.0, boxes[0][0] * 100.0, boxes[0][1] * 100.0))
     return 0
 
 

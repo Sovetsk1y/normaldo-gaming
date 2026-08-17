@@ -30,24 +30,69 @@ extends Node
 # См. /Концепция/Скины.md → «Размер головы»
 
 const HEADS : Dictionary = {
-	"batman": { "scale": 2.247, "off": [Vector2(-0.0050, 0.0125), Vector2(0.0050, -0.0225), Vector2(-0.0250, -0.0850), Vector2(0.0075, -0.0575)] },
-	"dracula": { "scale": 1.093, "off": [Vector2(-0.0050, -0.0275), Vector2(-0.0125, -0.0275), Vector2(-0.0625, 0.0050), Vector2(-0.0050, -0.0425)] },
-	"glasses": { "scale": 1.242, "off": [Vector2(0.0200, -0.0075), Vector2(0.0075, 0.0375), Vector2(-0.0075, 0.0000), Vector2(-0.0025, -0.0100)] },
-	"halloween": { "scale": 1.626, "off": [Vector2(-0.0150, 0.0175), Vector2(-0.0150, 0.0175), Vector2(-0.0150, -0.0925), Vector2(-0.0175, -0.0475)] },
-	"harry_potter": { "scale": 2.273, "off": [Vector2(-0.1125, -0.0825), Vector2(-0.1375, 0.0400), Vector2(-0.0875, -0.0650), Vector2(-0.0625, -0.0800)] },
-	"joker": { "scale": 3.704, "off": [Vector2(0.0075, -0.0650), Vector2(-0.0100, -0.0125), Vector2(-0.0200, 0.0075), Vector2(-0.0325, -0.0575)] },
-	"kuss": { "scale": 2.000, "off": [Vector2(0.0225, 0.0275), Vector2(-0.0100, 0.0450), Vector2(-0.1400, -0.0200), Vector2(-0.1150, 0.0100)] },
-	"new_year": { "scale": 1.493, "off": [Vector2(-0.0875, -0.0525), Vector2(-0.0650, 0.0150), Vector2(-0.0525, -0.0225), Vector2(-0.0200, -0.0575)] },
-	"pirate": { "scale": 1.379, "off": [Vector2(0.0100, -0.0250), Vector2(0.0375, -0.0475), Vector2(0.0825, -0.0800), Vector2(0.0400, -0.1325)] },
-	"spider_man": { "scale": 2.247, "off": [Vector2(-0.0050, 0.0625), Vector2(-0.0050, 0.0625), Vector2(-0.0050, 0.0625), Vector2(0.0025, -0.0900)] },
-	"tyson": { "scale": 1.562, "off": [Vector2(-0.0325, 0.0475), Vector2(-0.0350, 0.0750), Vector2(-0.0575, 0.0300), Vector2(-0.0300, 0.0200)] },
-	"viking": { "scale": 1.739, "off": [Vector2(0.0200, 0.0025), Vector2(0.0100, 0.0100), Vector2(-0.0100, -0.0350), Vector2(-0.0125, 0.0075)] },
-	"wizard": { "scale": 1.290, "off": [Vector2(-0.0950, -0.0225), Vector2(-0.1400, -0.0375), Vector2(-0.0575, -0.0500), Vector2(-0.0750, -0.0600)] },
+	"classic": { "scale": 1.000, "head": 1.0000, "off": [Vector2(-0.0025, -0.0801), Vector2(-0.0025, -0.0027), Vector2(-0.0025, -0.0462), Vector2(-0.0025, -0.0766)], "box": [Vector2(1.0000, 1.0000), Vector2(1.0000, 1.0000), Vector2(1.0000, 1.0000), Vector2(1.0000, 1.0000)] },
+	"batman": { "scale": 2.247, "head": 0.4450, "off": [Vector2(-0.0050, 0.0125), Vector2(0.0050, -0.0225), Vector2(-0.0250, -0.0850), Vector2(0.0075, -0.0575)], "box": [Vector2(0.6640, 0.7680), Vector2(0.6220, 0.7020), Vector2(0.7960, 0.4350), Vector2(0.8110, 0.4360)] },
+	"dracula": { "scale": 1.093, "head": 0.9150, "off": [Vector2(-0.0050, -0.0275), Vector2(-0.0125, -0.0275), Vector2(-0.0625, 0.0050), Vector2(-0.0050, -0.0425)], "box": [Vector2(0.9141, 0.8223), Vector2(0.9805, 0.8223), Vector2(0.8711, 0.8789), Vector2(0.9141, 0.8516)] },
+	"glasses": { "scale": 1.242, "head": 0.8050, "off": [Vector2(0.0200, -0.0075), Vector2(0.0075, 0.0375), Vector2(-0.0075, 0.0000), Vector2(-0.0025, -0.0100)], "box": [Vector2(0.8047, 0.6680), Vector2(0.9082, 0.7578), Vector2(0.9590, 0.7012), Vector2(0.9805, 0.9277)] },
+	"halloween": { "scale": 1.626, "head": 0.6150, "off": [Vector2(-0.0150, 0.0175), Vector2(-0.0150, 0.0175), Vector2(-0.0150, -0.0925), Vector2(-0.0175, -0.0475)], "box": [Vector2(0.7400, 0.7880), Vector2(0.7400, 0.7880), Vector2(0.7400, 0.7880), Vector2(0.7980, 0.8800)] },
+	"harry_potter": { "scale": 2.273, "head": 0.4400, "off": [Vector2(-0.1125, -0.0825), Vector2(-0.1375, 0.0400), Vector2(-0.0875, -0.0650), Vector2(-0.0625, -0.0800)], "box": [Vector2(0.8380, 0.7640), Vector2(0.8640, 0.7960), Vector2(0.9640, 0.7260), Vector2(0.9720, 0.8880)] },
+	"joker": { "scale": 3.704, "head": 0.2700, "off": [Vector2(0.0075, -0.0650), Vector2(-0.0100, -0.0125), Vector2(-0.0200, 0.0075), Vector2(-0.0325, -0.0575)], "box": [Vector2(0.5890, 0.4550), Vector2(0.6500, 0.3980), Vector2(0.7130, 0.4870), Vector2(0.6950, 0.4570)] },
+	"kuss": { "scale": 2.000, "head": 0.5000, "off": [Vector2(0.0225, 0.0275), Vector2(-0.0100, 0.0450), Vector2(-0.1400, -0.0200), Vector2(-0.1150, 0.0100)], "box": [Vector2(0.5000, 0.5420), Vector2(0.6260, 0.5840), Vector2(0.8800, 0.5840), Vector2(0.9120, 0.7620)] },
+	"new_year": { "scale": 1.493, "head": 0.6700, "off": [Vector2(-0.0875, -0.0525), Vector2(-0.0650, 0.0150), Vector2(-0.0525, -0.0225), Vector2(-0.0200, -0.0575)], "box": [Vector2(0.6709, 0.7539), Vector2(0.7939, 0.8223), Vector2(0.8213, 0.9102), Vector2(0.9043, 0.9814)] },
+	"pirate": { "scale": 1.379, "head": 0.7250, "off": [Vector2(0.0100, -0.0250), Vector2(0.0375, -0.0475), Vector2(0.0825, -0.0800), Vector2(0.0400, -0.1325)], "box": [Vector2(0.8672, 0.8828), Vector2(0.9121, 0.8389), Vector2(0.9580, 0.8428), Vector2(1.0000, 0.8496)] },
+	"spider_man": { "scale": 2.247, "head": 0.4450, "off": [Vector2(-0.0050, 0.0625), Vector2(-0.0050, 0.0625), Vector2(-0.0050, 0.0625), Vector2(0.0025, -0.0900)], "box": [Vector2(0.6640, 0.7720), Vector2(0.8260, 0.7820), Vector2(0.8320, 0.7760), Vector2(0.9880, 0.7020)] },
+	"tyson": { "scale": 1.562, "head": 0.6400, "off": [Vector2(-0.0325, 0.0475), Vector2(-0.0350, 0.0750), Vector2(-0.0575, 0.0300), Vector2(-0.0300, 0.0200)], "box": [Vector2(0.7320, 0.8220), Vector2(0.7060, 0.7560), Vector2(0.7240, 0.7900), Vector2(0.5557, 0.5671)] },
+	"viking": { "scale": 1.739, "head": 0.5750, "off": [Vector2(0.0200, 0.0025), Vector2(0.0100, 0.0100), Vector2(-0.0100, -0.0350), Vector2(-0.0125, 0.0075)], "box": [Vector2(0.7560, 0.7880), Vector2(0.6260, 0.5980), Vector2(0.7820, 0.8420), Vector2(0.8620, 0.5980)] },
+	"wizard": { "scale": 1.290, "head": 0.7750, "off": [Vector2(-0.0950, -0.0225), Vector2(-0.1400, -0.0375), Vector2(-0.0575, -0.0500), Vector2(-0.0750, -0.0600)], "box": [Vector2(0.7780, 0.8000), Vector2(0.8140, 0.8600), Vector2(0.8220, 0.8340), Vector2(0.9160, 0.7920)] },
 }
+
+# ── Размер на экране ──────────────────────────────────────────────────────────
+# Голова у всех скинов приводится к классической — это HEAD_TARGET_PX.
+#
+# Но одной нормировки головы мало. У Гарри, Джокера, Бэтмена и Спайдера в кадре
+# нарисовано ещё и тело с посохом, и при равных головах их силуэт вырастает до
+# 199×158 против классических 91×71 — вдвое. Бьётся при этом ТОЛЬКО голова:
+# хитбокс это круг радиусом 32. Игрок видит тушу в два лейна, которая ничем не
+# задевает предметы, и не понимает, где у него граница.
+#
+# Поэтому силуэт ограничен коробкой MAX_BODY. Она задана в тех же экранных
+# пикселях: 150 в ширину и 120 в высоту — это 1.4 высоты лейна (430/5 = 86) и
+# 1.9 диаметра хитбокса. Скин, которому коробка тесна, ужимается целиком:
+# голова у него получается чуть меньше классической, зато он честно показывает
+# свои габариты. Ужимаются четверо; остальные десять проходят как есть.
+const HEAD_TARGET_PX : float = 91.0
+const MAX_BODY : Vector2 = Vector2(150.0, 120.0)
 
 # Множитель масштаба скина, приводящий его голову к классической.
 func scale_for(skin_id: String) -> float:
 	return float((HEADS.get(skin_id, {}) as Dictionary).get("scale", 1.0))
+
+# Доля ширины кадра, которую занимает голова. Интерфейсу она нужна, чтобы
+# посадить голову в коробку аватарки, не таща за собой руки и посохи.
+func head_frac_for(skin_id: String) -> float:
+	return float((HEADS.get(skin_id, {}) as Dictionary).get("head", 1.0))
+
+# Габариты ВИДИМОГО силуэта в долях кадра для состояния жира.
+func box_for(skin_id: String, fat_state: int) -> Vector2:
+	var boxes : Array = (HEADS.get(skin_id, {}) as Dictionary).get("box", [])
+	if boxes.is_empty():
+		return Vector2.ONE
+	return boxes[clampi(fat_state, 0, boxes.size() - 1)]
+
+# Итоговый масштаб спрайта: голова к классической, силуэт не шире MAX_BODY.
+func sprite_scale(skin_id: String, fat_state: int, tex_size: Vector2) -> float:
+	if tex_size.x <= 0.0 or tex_size.y <= 0.0:
+		return 1.0
+	var s : float = HEAD_TARGET_PX / tex_size.x * scale_for(skin_id)
+	var box : Vector2 = box_for(skin_id, fat_state)
+	var w : float = box.x * tex_size.x * s
+	var h : float = box.y * tex_size.y * s
+	var k : float = 1.0
+	if w > MAX_BODY.x:
+		k = minf(k, MAX_BODY.x / w)
+	if h > MAX_BODY.y:
+		k = minf(k, MAX_BODY.y / h)
+	return s * k
 
 # Смещение центра головы от центра кадра (доли кадра) для состояния жира.
 func offset_for(skin_id: String, fat_state: int) -> Vector2:

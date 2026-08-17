@@ -26,6 +26,8 @@ func _initialize() -> void:
 	_test_heads(reg)
 	print("── Карточка скина ──")
 	_test_card(skil, save)
+	print("── Размер на экране ──")
+	await _test_sizes(reg, save)
 	print("── Карточки наград ──")
 	await _test_reward_cards(reg, save, prog)
 	print("── Касты ──")
@@ -162,6 +164,77 @@ func _test_card(skil: Node, save: Node) -> void:
 		if bool(r.get("unlocked", false)):
 			other_open += 1
 	_check(other_open < 3, "у неактивного скина открыто по ЕГО уровню: %d из 3" % other_open)
+
+# Размер скина держат два правила, и оба легко сломать новым спрайтом:
+#   в забеге — голова как у классики, но силуэт не больше MAX_BODY;
+#   в интерфейсе — голова занимает ровно UI_HEAD_FILL коробки у ВСЕХ скинов.
+# Первое ловит «скин раздулся на два лейна», второе — «Джокер втрое мельче».
+func _test_sizes(reg: Node, save: Node) -> void:
+	var met : Node = get_root().get_node_or_null("SkinMetrics")
+
+	var over : Array = []
+	var head_min : float = 1e9
+	var head_max : float = 0.0
+	for s in reg.SKINS:
+		var id := String(s["id"])
+		for fat in 4:
+			var tex : Texture2D = reg.get_avatar_texture(id, fat)
+			if tex == null:
+				continue
+			var sz : Vector2 = tex.get_size()
+			var k  : float   = met.sprite_scale(id, fat, sz)
+			var box: Vector2 = met.box_for(id, fat)
+			var w  : float   = box.x * sz.x * k
+			var h  : float   = box.y * sz.y * k
+			if w > met.MAX_BODY.x + 1.0 or h > met.MAX_BODY.y + 1.0:
+				over.append("%s/%d %.0fx%.0f" % [id, fat, w, h])
+			if fat == 0:
+				var hw : float = met.head_frac_for(id) * sz.x * k
+				head_min = minf(head_min, hw)
+				head_max = maxf(head_max, hw)
+	_check(over.is_empty(), "силуэт всех скинов в коробке %.0fx%.0f, вылезли: %s"
+		% [met.MAX_BODY.x, met.MAX_BODY.y, over])
+	# Голова не обязана совпадать пиксель в пиксель — четверых поджимает коробка,
+	# — но разброс должен остаться небольшим. До нормировки он был 2.3 раза.
+	_check(head_min / head_max > 0.70,
+		"головы в забеге от %.0f до %.0f px (разброс ×%.2f)"
+		% [head_min, head_max, head_max / head_min])
+
+	# Интерфейс: коробка одна, голова в ней одна у любого скина.
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var hud : Node = game.get_node_or_null("HUD")
+	var host := Control.new()
+	hud.add_child(host)
+	await process_frame
+
+	const BOX := 52.0
+	var widths : Array = []
+	var out_of_box : Array = []
+	for s in reg.SKINS:
+		var id := String(s["id"])
+		var holder : Control = hud.call("_skin_head_icon", id, 0, BOX)
+		host.add_child(holder)
+		var r : TextureRect = hud.call("_head_icon_rect", holder)
+		var tex : Texture2D = r.texture
+		var hw : float = met.head_frac_for(id) * r.size.x
+		widths.append(snappedf(hw, 0.1))
+		# Центр головы обязан сидеть в центре коробки, иначе обрезка съест лицо.
+		var c : Vector2 = Vector2(0.5, 0.5) + met.offset_for(id, 0)
+		var head_c : Vector2 = r.position + Vector2(c.x * r.size.x, c.y * r.size.y)
+		if head_c.distance_to(Vector2(BOX, BOX) * 0.5) > 1.0:
+			out_of_box.append(id)
+	await process_frame
+	var same := true
+	for w in widths:
+		if absf(float(w) - BOX * float(hud.get("UI_HEAD_FILL"))) > 0.5:
+			same = false
+	_check(same, "в карточках голова %.0f px у всех %d скинов" % [BOX * float(hud.get("UI_HEAD_FILL")), widths.size()])
+	_check(out_of_box.is_empty(), "голова по центру коробки, съехали: %s" % [out_of_box])
+
+	game.queue_free()
+	await process_frame
 
 # Награды за уровень рисуются в ЧЕТЫРЁХ местах (колонка карточек, список
 # «НАГРАДЫ ЗА УРОВНИ», попап повышения и подсказка сундука), и каждое из них
