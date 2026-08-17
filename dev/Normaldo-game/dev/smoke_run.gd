@@ -74,6 +74,8 @@ func _initialize() -> void:
 
 	print("── Множитель мини-игр ──")
 	await _test_multiplier(normaldo)
+	print("── Итоговые барабаны ──")
+	await _test_payout(game)
 
 	print("")
 	if _fails == 0:
@@ -187,3 +189,51 @@ func _test_multiplier(normaldo: Node) -> void:
 	# Повторный вызов не должен начислять ничего.
 	var again : Vector2i = normaldo.call("award_loot_tally", 5)
 	_check(again == Vector2i.ZERO, "повторное начисление не срабатывает")
+
+# Окно итогов: барабаны ОБЯЗАНЫ встать тремя одинаковыми и ровно на брошенном
+# множителе — иначе игрок видит одно, а на счёт приходит другое. Плашка к концу
+# должна показывать умноженные числа, а сама сцена — закрыться и не остаться
+# висеть поверх забега.
+func _test_payout(game: Node) -> void:
+	for mult in [1, 3, 5]:
+		var w : Node = load("res://scripts/minigame_payout.gd").new()
+		w.call("setup", 7, 4, mult, Vector2(120.0, 14.0), Vector2(180.0, 14.0))
+		game.add_child(w)
+		var got : Array = []
+		w.connect("finished", func(m: int) -> void: got.append(m))
+		# Ждём с запасом: вся сцена укладывается примерно в четыре секунды.
+		var t := 0.0
+		while t < 6.0 and is_instance_valid(w):
+			await process_frame
+			t += 1.0 / 60.0
+		_check(not is_instance_valid(w), "×%d: окно итогов закрылось само" % mult)
+		_check(got == [mult], "×%d: сигнал finished принёс тот же множитель: %s" % [mult, got])
+
+	# Отдельно — что именно встало на барабанах. Ждём остановки и читаем ленту.
+	var w2 : Node = load("res://scripts/minigame_payout.gd").new()
+	w2.call("setup", 7, 4, 4, Vector2(120.0, 14.0), Vector2(180.0, 14.0))
+	game.add_child(w2)
+	var t2 := 0.0
+	while t2 < 2.6:
+		await process_frame
+		t2 += 1.0 / 60.0
+	var faces : Array = []
+	for reel in w2.get("_tiles"):
+		faces.append(String(reel[0].text))
+	_check(faces == ["×4", "×4", "×4"], "три барабана встали одинаково: %s" % [faces])
+	# Числа прокручиваются позже барабанов, поэтому ждём событие, а не таймер:
+	# фиксированная пауза развалилась бы от любой правки длительностей.
+	var pl : Label = w2.get("_pizza_lbl")
+	var dl : Label = w2.get("_dollar_lbl")
+	var grown := false
+	var t3 := 0.0
+	while t3 < 6.0 and is_instance_valid(w2):
+		if int(pl.text) == 28 and int(dl.text) == 16:
+			grown = true
+			break
+		await process_frame
+		t3 += 1.0 / 60.0
+	_check(grown, "плашка досчитала до умноженного: %s пицц, %s $" % [pl.text, dl.text])
+	if is_instance_valid(w2):
+		w2.queue_free()
+	await process_frame

@@ -409,11 +409,14 @@ func _award_multiplier() -> void:
 		return
 	var got : Vector2i = _normaldo.loot_tally() if _normaldo.has_method("loot_tally") else Vector2i.ZERO
 	var mult : int = LootMultiplier.roll()
-	_normaldo.award_loot_tally(mult)
 	if got == Vector2i.ZERO:
+		_normaldo.award_loot_tally(mult)
 		return
-	LootMultiplier.show_popup(self, mult, get_viewport_rect().size * 0.5)
-	await get_tree().create_timer(0.9).timeout
+	# Барабаны, умножение на плашке, перелёт в счётчики — и только потом
+	# начисление, чтобы счётчик щёлкнул под прилетевшие иконки.
+	var tg : Array = MinigamePayout.targets_from(get_parent().get_node_or_null("HUD"))
+	await MinigamePayout.play(self, got.x, got.y, mult, tg[0], tg[1])
+	_normaldo.award_loot_tally(mult)
 
 # Close the lid + fold the pack up (shrink + slight roll + fade), then free it.
 func _fold_pack() -> void:

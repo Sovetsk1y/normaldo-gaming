@@ -1177,12 +1177,26 @@ func run_loot_tally(window: float, popup_host: Node = null) -> void:
 		return
 	var got  : Vector2i = loot_tally()
 	var mult : int      = LootMultiplier.roll()
-	award_loot_tally(mult)
 	if got == Vector2i.ZERO:
+		award_loot_tally(mult)
 		return
 	var host : Node = popup_host if (popup_host != null and is_instance_valid(popup_host)) else get_parent()
-	if host != null:
-		LootMultiplier.show_popup(host, mult, get_viewport_rect().size * Vector2(0.5, 0.32))
+	if host == null:
+		award_loot_tally(mult)
+		return
+	# На время итогов поток предметов встаёт: окно с барабанами держится около
+	# четырёх секунд, и уворачиваться под ним вслепую игрок не должен. Сама
+	# «супер пицца» событие не замораживает, поэтому паузу ставим здесь.
+	var game    : Node = get_parent()   # Normaldo лежит в Game рядом со Spawner и HUD
+	var spawner : Node = game.get_node_or_null("Spawner") if game != null else null
+	var paused  : bool = spawner != null and spawner.has_method("pause_for_event")
+	if paused:
+		spawner.pause_for_event()
+	var tg : Array = MinigamePayout.targets_from(game.get_node_or_null("HUD") if game != null else null)
+	await MinigamePayout.play(host, got.x, got.y, mult, tg[0], tg[1])
+	award_loot_tally(mult)
+	if paused and is_instance_valid(spawner) and spawner.has_method("resume_after_event"):
+		spawner.resume_after_event()
 
 func begin_loot_tally() -> void:
 	_loot_tally_active = true

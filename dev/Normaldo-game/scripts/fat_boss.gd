@@ -428,22 +428,23 @@ func _run_outro() -> void:
 
 	if _normaldo.has_method("end_fat_boss"):
 		_normaldo.end_fat_boss()
+
+	# Итог мини-игры: барабаны бросают множитель, плашка показывает умножение,
+	# добыча улетает в счётчики HUD. Поток предметов на это время ОСТАЁТСЯ на
+	# паузе — иначе игрок под окном итогов уворачивается вслепую.
+	var mult : int = LootMultiplier.roll()
+	if is_instance_valid(_bar_root):
+		_bar_root.create_tween().tween_property(_bar_root, "modulate:a", 0.0, 0.35)
+	var tg : Array = MinigamePayout.targets_from(get_parent().get_node_or_null("HUD"))
+	await MinigamePayout.play(_ui, _pizza_got, _dollar_got, mult, tg[0], tg[1])
+	if _normaldo.has_method("fat_boss_award"):
+		_normaldo.fat_boss_award(_pizza_got * mult, _dollar_got * mult)
+	_teardown_bar_hud()
+
 	if is_instance_valid(_spawner) and _spawner.has_method("resume_after_event"):
 		_spawner.resume_after_event()
 	if is_instance_valid(_background):
 		_background.start_scrolling()
-
-	# Cosmetic transfer of the tally into the HUD, then credit the run score.
-	await _fly_loot_to_hud()
-	# Множитель рейта ×1…×5 — начисляем УЖЕ умноженную добычу, чтобы игрок видел
-	# в HUD итог, а не сначала базу, а потом добавку. См. loot_multiplier.gd
-	var mult : int = LootMultiplier.roll()
-	if _pizza_got > 0 or _dollar_got > 0:
-		LootMultiplier.show_popup(_ui, mult, get_viewport_rect().size * 0.5)
-		await get_tree().create_timer(0.5).timeout
-	if _normaldo.has_method("fat_boss_award"):
-		_normaldo.fat_boss_award(_pizza_got * mult, _dollar_got * mult)
-	_teardown_bar_hud()
 
 	# Drop the shake camera so the default (no-camera) framing is fully restored.
 	if is_instance_valid(_shake_cam):
@@ -674,7 +675,7 @@ func _hide_prompt() -> void:
 # ── Phase-B HUD: speed bar + pizza/dollar tally ───────────────────────────────
 # The bar fills on tap (driving item speed) and the row beneath shows what's
 # been devoured so far. None of it is the run score yet — it flies into the HUD
-# at the end (see _fly_loot_to_hud).
+# at the end — его забирает MinigamePayout (см. _run_outro).
 
 func _build_bar_hud() -> void:
 	_teardown_bar_hud()
@@ -795,61 +796,6 @@ func _punch(node: Control) -> void:
 	var tw := node.create_tween()
 	tw.tween_property(node, "scale", Vector2.ONE, 0.18) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-
-# End transfer: the tallied loot flies up-left into the HUD pizza/dollar score,
-# then fat_boss_award() credits the real totals. Cosmetic count is sampled (≤8
-# icons) — the full amount is always awarded.
-func _fly_loot_to_hud() -> void:
-	var hud := get_parent().get_node_or_null("HUD")
-	var pizza_target  := Vector2(120.0, 14.0)
-	var dollar_target := Vector2(180.0, 14.0)
-	if hud and hud.has_method("fat_boss_pizza_target"):
-		pizza_target = hud.fat_boss_pizza_target()
-	if hud and hud.has_method("fat_boss_dollar_target"):
-		dollar_target = hud.fat_boss_dollar_target()
-
-	# Fade the bar graphics + caption out; the loot launches from the counters.
-	if is_instance_valid(_bar_root):
-		_bar_root.create_tween().tween_property(_bar_root, "modulate:a", 0.0, 0.5)
-
-	var max_t := 0.0
-	if _pizza_got > 0:
-		max_t = maxf(max_t, _spawn_flight(PIZZA_TEX, 0.12,
-			_count_icon_global(_pizza_count_icon), pizza_target, _pizza_got))
-	if _dollar_got > 0:
-		max_t = maxf(max_t, _spawn_flight(DOLLAR_TEX, 0.42,
-			_count_icon_global(_dollar_count_icon), dollar_target, _dollar_got))
-	if max_t > 0.0:
-		await get_tree().create_timer(max_t + 0.15).timeout
-
-func _count_icon_global(icon: TextureRect) -> Vector2:
-	if is_instance_valid(icon) and is_instance_valid(_bar_root):
-		return _bar_root.position + icon.position + icon.size * 0.5
-	var vp := get_viewport_rect().size
-	return Vector2(vp.x * 0.5, 90.0)
-
-func _spawn_flight(tex: Texture2D, scl: float, from: Vector2, to: Vector2, count: int) -> float:
-	var n : int = clampi(count, 1, 8)
-	var stagger := 0.06
-	var dur := 0.55
-	for i in n:
-		var s := Sprite2D.new()
-		s.texture  = tex
-		s.scale    = Vector2(scl, scl)
-		s.position = from
-		_ui.add_child(s)
-		var ctrl := Vector2((from.x + to.x) * 0.5 + randf_range(-40.0, 40.0),
-			minf(from.y, to.y) - randf_range(20.0, 70.0))
-		var tw := s.create_tween()
-		tw.tween_interval(i * stagger)
-		tw.tween_method(func(t: float): s.position = _bezier(from, ctrl, to, t), 0.0, 1.0, dur) \
-			.set_trans(Tween.TRANS_SINE)
-		tw.parallel().tween_property(s, "scale", Vector2(scl * 0.4, scl * 0.4), dur)
-		tw.tween_callback(s.queue_free)
-	return n * stagger + dur
-
-func _bezier(a: Vector2, b: Vector2, c: Vector2, t: float) -> Vector2:
-	return a.lerp(b, t).lerp(b.lerp(c, t), t)
 
 # ── Intensity stages: calm → mid (screen dances) → madness (disco light) ───────
 # Stage is purely a function of the bar level, with up/down hysteresis margins so
