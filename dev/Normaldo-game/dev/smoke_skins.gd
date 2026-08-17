@@ -125,7 +125,9 @@ func _test_casts(reg: Node, save: Node) -> void:
 
 	# Поза каста подгрузилась у скинов, чьи архивы приехали.
 	var posed : Array = []
-	for id in ["batman", "harry_potter", "halloween", "spider_man", "wizard"]:
+	var with_art := ["batman", "harry_potter", "halloween", "spider_man", "wizard",
+		"joker", "tyson", "viking"]
+	for id in with_art:
 		save.active_skin = id
 		normaldo.reload_skin()
 		await process_frame
@@ -136,6 +138,8 @@ func _test_casts(reg: Node, save: Node) -> void:
 				n += 1
 		if n == 4:
 			posed.append(id)
-	_check(posed.size() == 5, "позы каста на всех 4 состояниях жира: %s" % [posed])
+	_check(posed.size() == with_art.size(),
+		"позы каста на всех 4 состояниях жира у %d/%d скинов: %s"
+		% [posed.size(), with_art.size(), posed])
 
 	game.queue_free()

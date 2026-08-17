@@ -267,8 +267,10 @@ const _ITEM_SCENE        := preload("res://scenes/item.tscn")
 const _PIZZA_TEX         := preload("res://assets/items/pizza.png")
 const _DOLLAR_TEX        := preload("res://assets/items/dollar.png")
 const _RESIST_SFX        := preload("res://assets/audio/resist.mp3")
-const _PUNCH_TEX         := preload("res://assets/items/boxing_glove.png")
-const _GLOVE_TEX         := preload("res://assets/items/boxing_glove.png")
+# Кулак Викинга и перчатка Тайсона — из их собственных архивов. До этого оба
+# мили-спелла рисовались боксёрской перчаткой из трубы, то есть чужим предметом.
+const _PUNCH_TEX         := preload("res://assets/skills/viking/fist.png")
+const _GLOVE_TEX         := preload("res://assets/skills/tyson/punch.png")
 const _SHOVEL_TEX        := preload("res://assets/items/shuriken.png")
 const _BIRD_TEX          := preload("res://assets/skills/halloween/blackbird.png")
 
@@ -1591,8 +1593,8 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 			_arm_frames(ps, web, 20.0)
 			_play_skill_sfx(SkinSkills.DODGE)
 		"card_deck":
-			_cast_three_lines(_CARD_TEX, 40.0, 8.0, _break_once_handler(), Color(1, 1, 1),
-				_RYAG_HIT_GROUPS, 150.0, Color(0.62, 0.24, 0.95))
+			# Три карты веером, каждая крутится своей раскадровкой из 9 кадров.
+			_cast_card_deck(dir)
 			_play_skill_sfx(SkinSkills.DODGE)
 		"invisibility":
 			_cast_invisibility(float(_ability_cfg.get("duration", 2.0)))
@@ -1634,6 +1636,18 @@ func _arm_frames(proj: Node2D, spr: Sprite2D, fps: float) -> void:
 		return
 	proj.set("frames", spr.get_meta("frames"))
 	proj.set("fps", fps)
+
+# Колода Джокера. Не через _cast_three_lines: тем нужна одна общая текстура, а
+# здесь у каждой карты своя анимация вращения, и веер строится от направления
+# тапа, а не по фиксированным трём рядам.
+func _cast_card_deck(dir: Vector2) -> void:
+	for a in [-0.34, 0.0, 0.34]:
+		var card := _make_anim_sprite("res://assets/skills/joker/", "card", 9, 46.0)
+		var pc := _spawn_skill_projectile(dir.rotated(a), 560.0, card, 26.0,
+			_RYAG_HIT_GROUPS, _break_once_handler(), 0.0)
+		_arm_frames(pc, card, 20.0)
+		if pc != null:
+			pc.add_child(_make_skill_trail(Color(0.62, 0.24, 0.95), -dir))
 
 func _throw_shovel(dir: Vector2) -> void:
 	var sh := _make_sprite(_SHOVEL_TEX, 52.0)
