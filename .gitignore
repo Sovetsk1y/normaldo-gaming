@@ -20,3 +20,6 @@
 
 # Empty leftover git init, not part of the project
 dev/legacy/normaldo_gaming/ios/template/
+
+__pycache__/
+*.pyc
