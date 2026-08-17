@@ -169,8 +169,10 @@ func get_unique(skin_id: String) -> Dictionary:
 # прогрессии, поэтому и HUD-бейджи, и логика урона в normaldo.gd видят один и
 # тот же список без отдельной синхронизации.
 func get_resists(skin_id: String) -> Array:
-	var lvl : int = SaveData.skin_level if skin_id == SaveData.active_skin else 10
-	return resists_at(skin_id, lvl)
+	# Уровень берём у самого скина, а не у активного. Раньше для неактивных
+	# подставлялась десятка, и карточка чужого скина показывала все резисты
+	# открытыми — то есть обещала то, чего у игрока нет.
+	return resists_at(skin_id, SaveData.get_skin_level_for(skin_id))
 
 func resists_at(skin_id: String, level: int) -> Array:
 	var cd := resist_cd(skin_id)
@@ -178,6 +180,20 @@ func resists_at(skin_id: String, level: int) -> Array:
 	for tag in SkinProgression.immunities(skin_id, level):
 		if String(tag) != "":
 			out.append({ "item": String(tag), "cd": cd })
+	return out
+
+# ВСЕ резисты скина, включая ещё не открытые. Нужен карточке скина: игрок должен
+# видеть, что его ждёт на 6-м и 8-м уровнях, а не пустое место. `unlocked`
+# говорит, работает ли резист сейчас, `level` — на каком уровне он откроется.
+func all_resists(skin_id: String) -> Array:
+	var lvl : int = SaveData.get_skin_level_for(skin_id)
+	var cd  : float = resist_cd(skin_id)
+	var out : Array = []
+	for lv in range(2, 11):
+		var r : Dictionary = SkinProgression.reward_for(skin_id, lv)
+		if r.get("kind", "") == "immunity":
+			out.append({ "item": String(r.get("item", "")), "cd": cd,
+				"level": lv, "unlocked": lvl >= lv })
 	return out
 
 # Откат резиста по редкости скина.

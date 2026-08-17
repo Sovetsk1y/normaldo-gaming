@@ -24,6 +24,8 @@ func _initialize() -> void:
 	_test_resists(prog, skil, save)
 	print("── Размер головы ──")
 	_test_heads(reg)
+	print("── Карточка скина ──")
+	_test_card(skil, save)
 	print("── Касты ──")
 	await _test_casts(reg, save)
 	print("── Паутина Спайдера ──")
@@ -118,6 +120,46 @@ func _test_heads(reg: Node) -> void:
 	# Смещение головы у Гарри ощутимое — проверяем, что оно вообще не нулевое.
 	var off : Vector2 = metrics.offset_for("harry_potter", 0)
 	_check(absf(off.x) > 0.05, "у Гарри учтено смещение головы от центра: %.3f" % off.x)
+
+# Карточка обязана показывать ВСЕ резисты скина, включая ещё не открытые, —
+# иначе игрок не видит, ради чего качать скин дальше. Открытые и закрытые
+# различаются флагом unlocked, по нему рисуется замок.
+func _test_card(skil: Node, save: Node) -> void:
+	save.active_skin = "tyson"
+	save.skin_level  = 1
+	var all_1 : Array = skil.all_resists("tyson")
+	_check(all_1.size() == 3, "на 1 уровне в карточке всё равно 3 кружка резистов")
+	var locked := 0
+	for r in all_1:
+		if not bool(r.get("unlocked", true)):
+			locked += 1
+	_check(locked == 3, "на 1 уровне все три закрыты замком")
+
+	save.skin_level = 6
+	var all_6 : Array = skil.all_resists("tyson")
+	var open_6 := 0
+	for r in all_6:
+		if bool(r.get("unlocked", false)):
+			open_6 += 1
+	_check(all_6.size() == 3 and open_6 == 2,
+		"на 6 уровне кружков всё так же 3, открыто %d" % open_6)
+
+	# Уровень открытия должен быть проставлен — по нему подпись «откроется на N».
+	var lvls : Array = []
+	for r in all_6:
+		lvls.append(int(r.get("level", 0)))
+	_check(lvls == [4, 6, 8], "уровни открытия резистов: %s" % [lvls])
+
+	# Карточка НЕ активного скина должна смотреть на его собственный уровень,
+	# а не показывать всё открытым.
+	save.active_skin = "viking"
+	save.skin_level  = 10
+	var other : Array = skil.all_resists("tyson")
+	var other_open := 0
+	for r in other:
+		if bool(r.get("unlocked", false)):
+			other_open += 1
+	_check(other_open < 3, "у неактивного скина открыто по ЕГО уровню: %d из 3" % other_open)
 
 func _test_casts(reg: Node, save: Node) -> void:
 	var game : Node = load("res://scenes/game.tscn").instantiate()

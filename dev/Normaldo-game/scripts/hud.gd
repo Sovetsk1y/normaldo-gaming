@@ -3812,6 +3812,23 @@ const _RESIST_TEX : Dictionary = {
 	"shuriken": preload("res://assets/items/shuriken.png"),
 	"bum":      preload("res://assets/items/homeless1.png"),
 	"banana":   preload("res://assets/items/banana_peel.png"),
+	# Резисты теперь выдаёт лестница уровней и предметов в ней вдвое больше —
+	# без этих иконок половина кружков в карточке скина была бы пустой.
+	"beer":         preload("res://assets/items/beer.png"),
+	"cone":         preload("res://assets/items/cone.png"),
+	"dog":          preload("res://assets/items/angry_dog.png"),
+	"thief":        preload("res://assets/items/thief1.png"),
+	"compass":      preload("res://assets/items/compass.png"),
+	"handcuffs":    preload("res://assets/items/handcuffs.png"),
+	"black_ace":    preload("res://assets/items/black_ace.png"),
+	"loser_ticket": preload("res://assets/items/loser_ticket.png"),
+	"safe":         preload("res://assets/items/safe.png"),
+	"cocktail":     preload("res://assets/items/cocktail.png"),
+	"cop":          preload("res://assets/items/cop.png"),
+	"poison":       preload("res://assets/items/poison.png"),
+	"bird":         preload("res://assets/items/bird.png"),
+	"helm":         preload("res://assets/skills/ship_wheel.png"),
+	"shaman":       preload("res://assets/items/shaman.png"),
 }
 const _RESIST_NAME : Dictionary = {
 	"trash": "Бочка", "stone": "Камень", "glove": "Перчатка", "snake": "Змея",
@@ -3872,8 +3889,11 @@ func _circle_tex() -> Texture2D:
 	return _circle_cache
 
 # Round badge: black disc + coloured ring, with an item icon (or a star symbol).
+# `locked` — способность ещё не открыта уровнем скина: кружок гаснет, а поверх
+# ложится замок. Показывать её всё равно нужно — игрок должен видеть, ради чего
+# качать скин дальше.
 func _ability_badge(parent: Control, x: float, y: float, sz: float, ring_col: Color,
-		icon_tex: Texture2D, icon_mod: Color, star: String) -> void:
+		icon_tex: Texture2D, icon_mod: Color, star: String, locked: bool = false) -> void:
 	var rim := TextureRect.new()
 	rim.texture = _circle_tex(); rim.modulate = ring_col
 	rim.stretch_mode = TextureRect.STRETCH_SCALE; rim.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -3898,6 +3918,26 @@ func _ability_badge(parent: Control, x: float, y: float, sz: float, ring_col: Co
 		sl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; sl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		sl.size = Vector2(sz, sz); sl.position = Vector2(x, y)
 		parent.add_child(sl)
+	if locked:
+		# Затемняем сам кружок и кладём замок сверху. Иконка под ним остаётся
+		# различимой — так видно, ЧТО именно откроется, а не просто «что-то».
+		var shade := TextureRect.new()
+		shade.texture = _circle_tex(); shade.modulate = Color(0.03, 0.03, 0.05, 0.72)
+		shade.stretch_mode = TextureRect.STRETCH_SCALE; shade.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		shade.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+		shade.size = Vector2(sz, sz); shade.position = Vector2(x, y)
+		shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		parent.add_child(shade)
+		var lk := TextureRect.new()
+		lk.texture = _lock_tex()
+		lk.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		lk.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
+		lk.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+		var lsz := sz * 0.52
+		lk.size = Vector2(lsz, lsz); lk.position = Vector2(x + (sz - lsz) * 0.5, y + (sz - lsz) * 0.5)
+		lk.modulate = Color(1.0, 0.88, 0.45, 0.95)
+		lk.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		parent.add_child(lk)
 
 # Shared ability list: resists (red) → passive (blue) → active (green), each with
 # ring colour, inner icon/star, and a title + description for the Описание panel.
@@ -3908,15 +3948,20 @@ func _ability_items(skin_id: String) -> Array:
 	const BELCH       := Color(0.35, 1.00, 0.45)
 	var smoke := load("res://assets/bosses/ninja_foot/smoke.png") as Texture2D
 	var items : Array = []
-	for r in SkinSkills.get_resists(skin_id):
-		var item_tags : Array = r.get("items", [r["item"]])
-		var names : Array = []
-		for t in item_tags:
-			names.append(_RESIST_NAME.get(t, t))
-		var nm : String = ", ".join(names)
-		items.append({ "ring": RING_RESIST, "tex": _RESIST_TEX.get(r["item"]), "mod": Color(1, 1, 1), "star": "",
-			"kind": "РЕЗИСТ", "kind_col": RING_RESIST,
-			"title": "Откат " + str(int(r.get("cd", 8))) + " c", "desc": "Разбиваешь «" + nm + "» без вреда для себя." })
+	# ВСЕ резисты скина, а не только открытые: закрытые показываются тем же
+	# кружком, но погашенным и с замком. Иначе карточка молчит о том, ради чего
+	# скин вообще качать.
+	for r in SkinSkills.all_resists(skin_id):
+		var tag : String = String(r.get("item", ""))
+		var nm  : String = SkinProgression.item_name(tag)
+		var unlocked : bool = bool(r.get("unlocked", true))
+		var lv : int = int(r.get("level", 0))
+		items.append({ "ring": RING_RESIST, "tex": _RESIST_TEX.get(tag), "mod": Color(1, 1, 1), "star": "",
+			"kind": "РЕЗИСТ" if unlocked else "РЕЗИСТ · %d УРОВЕНЬ" % lv,
+			"kind_col": RING_RESIST if unlocked else Color(0.62, 0.40, 0.38),
+			"locked": not unlocked,
+			"title": ("Откат " + str(int(r.get("cd", 8))) + " c") if unlocked else ("Откроется на %d уровне" % lv),
+			"desc": "Разбиваешь «" + nm + "» без вреда для себя." })
 	var passive := SkinSkills.get_passive(skin_id)
 	if not passive.is_empty():
 		items.append({ "ring": RING_PASS, "tex": null, "mod": Color(1, 1, 1), "star": "★",
@@ -3943,7 +3988,8 @@ func _fill_desc(desc_root: VBoxContainer, skin_id: String) -> void:
 		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var bc := Control.new()
 		bc.custom_minimum_size = Vector2(28.0, 28.0)
-		_ability_badge(bc, 0.0, 0.0, 28.0, it["ring"], it["tex"], it["mod"], it["star"])
+		_ability_badge(bc, 0.0, 0.0, 28.0, it["ring"], it["tex"], it["mod"], it["star"],
+			bool(it.get("locked", false)))
 		row.add_child(bc)
 		var col := VBoxContainer.new()
 		col.add_theme_constant_override("separation", 1)
@@ -3960,7 +4006,7 @@ func _fill_desc(desc_root: VBoxContainer, skin_id: String) -> void:
 		l.add_theme_color_override("font_outline_color", Color(0, 0, 0)); l.add_theme_constant_override("outline_size", 2)
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		l.modulate = Color(0.9, 0.9, 0.95)
+		l.modulate = Color(0.55, 0.53, 0.58) if bool(it.get("locked", false)) else Color(0.9, 0.9, 0.95)
 		l.text = it["title"] + "\n" + it["desc"]
 		col.add_child(l)
 		row.add_child(col)
@@ -4336,10 +4382,17 @@ func _show_skin_detail(skin_data: Dictionary, from_slots: bool, shop_overlay: Co
 	var bx0 : float = cx + (cw - total_bw) * 0.5
 	for i in items.size():
 		var b : Dictionary = items[i]
-		_ability_badge(overlay, bx0 + i * (BSZ + BGP), cur_y, BSZ, b["ring"], b["tex"], b["mod"], b["star"])
+		_ability_badge(overlay, bx0 + i * (BSZ + BGP), cur_y, BSZ, b["ring"], b["tex"], b["mod"],
+			b["star"], bool(b.get("locked", false)))
 	cur_y += BSZ + 4.0
 
-	# Whole-block tap → fill the Описание panel with the explanation.
+	# Описание заполняем СРАЗУ при открытии карточки. Раньше панель «Описание»
+	# стояла пустой, пока игрок не догадается ткнуть в кружки — то есть главная
+	# информация о скине была спрятана за неочевидным жестом.
+	_fill_desc(desc_root, skin_id)
+
+	# Тап по блоку оставлен: он перерисовывает описание (удобно после покупки
+	# уровня) и даёт привычный отклик со звуком.
 	var blk := Button.new()
 	blk.flat = true; blk.focus_mode = Control.FOCUS_NONE
 	blk.size = Vector2(cw, cur_y - sk_top); blk.position = Vector2(cx, sk_top)

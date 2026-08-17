@@ -35,6 +35,16 @@ func _initialize() -> void:
 		return
 
 	print("── Старт забега ──")
+	# Прогон обязан быть независим от сейва: SaveData пишется на диск, и от
+	# прошлого запуска мог остаться прокачанный скин с резистами. Тогда,
+	# например, наручники честно разбились бы о резист Бэтмена, и тест упал бы
+	# на исправном поведении. Классика резистов не имеет вовсе.
+	var save0 : Node = get_root().get_node_or_null("SaveData")
+	if save0:
+		save0.active_skin = "classic"
+		save0.skin_level  = 1
+	normaldo.reload_skin()
+	normaldo.call("_build_skin_runtime")
 	normaldo.enable_input()
 	normaldo.set_dev_immortal(true)     # смерть проверяем отдельно, в самом конце
 	spawner.campaign_mode = true
