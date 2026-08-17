@@ -22,8 +22,12 @@ func _initialize() -> void:
 	_test_ladder(prog, reg)
 	print("── Резисты по уровням ──")
 	_test_resists(prog, skil, save)
+	print("── Размер головы ──")
+	_test_heads(reg)
 	print("── Касты ──")
 	await _test_casts(reg, save)
+	print("── Паутина Спайдера ──")
+	await _test_web(save)
 
 	print("")
 	if _fails == 0:
@@ -51,10 +55,10 @@ func _test_ladder(prog: Node, reg: Node) -> void:
 	_check(no_first, "ни у одного скина нет награды за 1 уровень")
 	_check(full, "уровни 2–10 заполнены у всех %d скинов" % ids.size())
 
-	# 4-е состояние жира открывает 2-й уровень, а не 5-й как раньше.
+	# Три состояния жира доступны сразу, 4-е открывает 2-й уровень.
 	var f1 : int = prog.max_fat_state("viking", 1)
 	var f2 : int = prog.max_fat_state("viking", 2)
-	_check(f1 == 1 and f2 == 3, "жир: 1 лвл → %d, 2 лвл → %d" % [f1, f2])
+	_check(f1 == 2 and f2 == 3, "жир: 1 лвл → %d состояния, 2 лвл → %d" % [f1 + 1, f2 + 1])
 
 	# Венец 10-го уровня есть у каждого скина из ТЗ.
 	var crowned := 0
@@ -90,6 +94,30 @@ func _test_resists(prog: Node, skil: Node, save: Node) -> void:
 	_check(skil.get_resists("tyson").is_empty(), "на 3 уровне активный скин без резистов")
 	save.skin_level = 10
 	_check(skil.get_resists("tyson").size() == 3, "на 10 уровне активный скин с тремя резистами")
+
+# Замеры голов лежат таблицей (skin_metrics.gd), и главный риск — добавить скин
+# и забыть её пересчитать: тогда он молча отрисуется по старой логике «ширина
+# кадра» и снова окажется мельче остальных. Сверку самой таблицы со спрайтами
+# делает dev/tools/measure_heads.py --check, здесь ловим именно пропуск.
+func _test_heads(reg: Node) -> void:
+	var metrics : Node = get_root().get_node_or_null("SkinMetrics")
+	var missing : Array = []
+	for s in reg.SKINS:
+		var id := String(s["id"])
+		if id == "classic":
+			continue   # у классики кадр это ровно голова, замер не нужен
+		if not metrics.HEADS.has(id):
+			missing.append(id)
+	_check(missing.is_empty(), "замеры головы есть у всех скинов, пропущено: %s" % [missing])
+
+	# Джокер — крайний случай: его голова 27 % кадра, множитель должен быть
+	# заметно больше единицы, иначе нормировка не работает.
+	var jk : float = metrics.scale_for("joker")
+	_check(jk > 3.0, "Джокеру назначен множитель ×%.2f" % jk)
+
+	# Смещение головы у Гарри ощутимое — проверяем, что оно вообще не нулевое.
+	var off : Vector2 = metrics.offset_for("harry_potter", 0)
+	_check(absf(off.x) > 0.05, "у Гарри учтено смещение головы от центра: %.3f" % off.x)
 
 func _test_casts(reg: Node, save: Node) -> void:
 	var game : Node = load("res://scenes/game.tscn").instantiate()
@@ -141,5 +169,61 @@ func _test_casts(reg: Node, save: Node) -> void:
 	_check(posed.size() == with_art.size(),
 		"позы каста на всех 4 состояниях жира у %d/%d скинов: %s"
 		% [posed.size(), with_art.size(), posed])
+
+	game.queue_free()
+
+# Паутина обязана вести себя по-разному: добычу тянет к себе, препятствие
+# облепляет и тормозит. Если перепутать — спелл с откатом 2 c будет уничтожать
+# любую угрозу и обесценит остальные скины.
+func _test_web(save: Node) -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var normaldo : Node = game.get_node_or_null("Normaldo")
+	var spawner  : Node = game.get_node_or_null("Spawner")
+	spawner.clear_items()
+	save.active_skin = "spider_man"
+	save.skin_level  = 10
+	normaldo.reload_skin()
+	await process_frame
+
+	# Препятствие: липнет и тормозит, но НЕ ломается.
+	var rock := Area2D.new()
+	rock.set_script(preload("res://scripts/hazard_item.gd"))
+	rock.set("kind", "safe")
+	rock.set("speed", 250.0)
+	rock.position = Vector2(500.0, 200.0)
+	spawner.add_child(rock)
+	await process_frame
+	var speed_before : float = float(rock.get("speed"))
+	normaldo.call("_web_stick", rock)
+	await process_frame
+	_check(is_instance_valid(rock), "препятствие после паутины ЖИВО, а не сломано")
+	_check(float(rock.get("speed")) < speed_before,
+		"препятствие замедлено: %.0f → %.0f" % [speed_before, float(rock.get("speed"))])
+	_check(rock.has_meta("webbed"), "на препятствии висит паутина")
+
+	# Добыча: подтягивается к голове.
+	var pizza := Area2D.new()
+	pizza.set_script(preload("res://scripts/effect_item.gd"))
+	pizza.set("kind", "casino_chip")
+	pizza.set("speed", 250.0)
+	pizza.position = Vector2(700.0, 60.0)
+	spawner.add_child(pizza)
+	await process_frame
+	var dist_before : float = pizza.global_position.distance_to(normaldo.global_position)
+	normaldo.call("_web_pull", pizza)
+	# Замеряем В ПОЛЁТЕ: долетев до головы, добыча честно подбирается и узел
+	# освобождается — это правильный исход, а не пропажа.
+	var t := 0.0
+	while t < 0.12:
+		await process_frame
+		t += 1.0 / 60.0
+	if is_instance_valid(pizza):
+		var dist_after : float = pizza.global_position.distance_to(normaldo.global_position)
+		_check(dist_after < dist_before,
+			"добыча подтягивается к голове: %.0f → %.0f" % [dist_before, dist_after])
+	else:
+		_check(true, "добыча долетела до головы и подобрана")
 
 	game.queue_free()

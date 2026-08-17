@@ -57,13 +57,9 @@ const PROXIMITY_RADIUS := 80.0
 const EAT_ANIM_TIME    := 0.25
 const _CLASSIC_TEX_REF := 91.0  # pixel width of classic skin — normalisation reference
 
-# Per-skin multiplier applied on top of the classic-width normalisation in
-# `_apply_skin_to_sprite()`. Use when a particular skin reads visibly too
-# small (or too big) at the default 1.0 ratio.
-const _SKIN_SCALE_BUMP : Dictionary = {
-	"viking": 1.10,
-	"tyson":  1.10,
-}
+# Ручные добавки к масштабу больше не нужны: их заменили замеры голов в
+# skin_metrics.gd. Раньше здесь на глаз стояли 1.10 для Викинга и Тайсона —
+# по замерам им нужно 1.74 и 1.56, то есть глаз ошибался в полтора раза.
 
 # ── Menu idle (decor before the run starts) ──────────────────────────────────
 # Fired at the exact frame the remote "button press" jerk happens. The TV node
@@ -267,10 +263,10 @@ const _ITEM_SCENE        := preload("res://scenes/item.tscn")
 const _PIZZA_TEX         := preload("res://assets/items/pizza.png")
 const _DOLLAR_TEX        := preload("res://assets/items/dollar.png")
 const _RESIST_SFX        := preload("res://assets/audio/resist.mp3")
-# Кулак Викинга и перчатка Тайсона — из их собственных архивов. До этого оба
-# мили-спелла рисовались боксёрской перчаткой из трубы, то есть чужим предметом.
-const _PUNCH_TEX         := preload("res://assets/skills/viking/fist.png")
-const _GLOVE_TEX         := preload("res://assets/skills/tyson/punch.png")
+const _WEB_BIG_TEX       := preload("res://assets/skills/spider_man/big_shot.png")
+# Кулак Викинга и перчатка Тайсона лежат в assets/skills/<скин>/ и рисуются
+# прямо в позе каста (stateN_spell). Отдельными спрайтами их больше не спавним —
+# именно от этого на экране получалось два кулака сразу.
 const _SHOVEL_TEX        := preload("res://assets/items/shuriken.png")
 const _BIRD_TEX          := preload("res://assets/skills/halloween/blackbird.png")
 
@@ -323,25 +319,41 @@ var _loot_dollar_tally : int  = 0
 
 func _apply_skin_to_sprite() -> void:
 	_sprite.texture = _skin_tex[fat_state]
-	var tex_w = _skin_tex[fat_state].get_size().x
-	var s     = _CLASSIC_TEX_REF / tex_w if tex_w > 0.0 else 1.0
-	# Per-skin scale bump for skins that look too small at the normalised
-	# width (e.g. viking's silhouette reads tiny next to the classic ref).
-	s *= _SKIN_SCALE_BUMP.get(SaveData.active_skin, 1.0)
-	_base_scale     = Vector2(s, s)
+	_base_scale     = _head_scale()
 	_sprite.scale   = _base_scale
-	# Classic texture has the head shifted left in the image; other skins are centered
-	_sprite.position.x = -14.0 if tex_w <= 91.0 else 0.0
+	_apply_head_offset()
+
+# Масштаб считается так, чтобы ГОЛОВА была одного размера у всех скинов.
+# Раньше нормировали ширину КАДРА, и скины с руками выходили мельче: у Джокера
+# голова занимает 27 % кадра, то есть была почти втрое меньше классической.
+# Замеры голов лежат в skin_metrics.gd.
+func _head_scale() -> Vector2:
+	var tex_w : float = _skin_tex[fat_state].get_size().x
+	var s : float = (_CLASSIC_TEX_REF / tex_w) if tex_w > 0.0 else 1.0
+	s *= SkinMetrics.scale_for(SaveData.active_skin)
+	return Vector2(s, s)
+
+# Голова в кадре бывает смещена от центра (у Гарри, Мага и Кусса — заметно), а
+# хитбокс сидит в начале координат. Сдвигаем спрайт так, чтобы голова села
+# именно на хитбокс, иначе удар засчитывается «по воздуху» рядом с ней.
+func _apply_head_offset() -> void:
+	var tex : Texture2D = _skin_tex[fat_state]
+	if tex == null:
+		return
+	if SaveData.active_skin == "classic":
+		# У классики в кадре только голова, но нарисована со сдвигом влево.
+		_sprite.position = Vector2(-14.0, 0.0)
+		return
+	var sz  : Vector2 = tex.get_size()
+	var off := SkinMetrics.offset_for(SaveData.active_skin, fat_state)
+	_sprite.position = Vector2(-off.x * sz.x * _base_scale.x, -off.y * sz.y * _base_scale.y)
 
 # Swap the sprite to the current fat-state texture + recompute _base_scale, WITHOUT
 # touching the live scale (the morph tween drives scale itself). Returns the base.
 func _refresh_fat_sprite() -> Vector2:
 	_sprite.texture = _skin_tex[fat_state]
-	var tex_w = _skin_tex[fat_state].get_size().x
-	var s = _CLASSIC_TEX_REF / tex_w if tex_w > 0.0 else 1.0
-	s *= _SKIN_SCALE_BUMP.get(SaveData.active_skin, 1.0)
-	_base_scale = Vector2(s, s)
-	_sprite.position.x = -14.0 if tex_w <= 91.0 else 0.0
+	_base_scale     = _head_scale()
+	_apply_head_offset()
 	return _base_scale
 
 # Fat-change morph: the head spins CLOCKWISE down to a point, swaps to the new fat
@@ -1533,14 +1545,46 @@ func _make_anim_sprite(dir_path: String, prefix: String, count: int, px: float) 
 	spr.set_meta("frames", frames)
 	return spr
 
-# Ближний бой: удар «вплотную» — не летящий снаряд, а короткий рывок вперёд с
-# большим радиусом и очень маленькой жизнью. Иначе мили-спелл ничем не
-# отличался бы от дальнего, просто с меньшей дальностью.
-func _cast_melee(spr: Node2D, dir: Vector2, reach: float) -> void:
-	var proj := _spawn_skill_projectile(dir, reach * 3.0, spr, 64.0,
-		_RYAG_HIT_GROUPS, _break_handler(), 0.0, 0.30)
-	if proj != null:
-		proj.global_position = global_position + dir * 34.0
+# Ближний бой: ОДИН удар, а не летящий снаряд.
+#
+# Раньше здесь спавнился снаряд с картинкой кулака, который улетал от головы. На
+# экране получались два кулака сразу: один нарисован в позе каста (stateN_spell),
+# второй улетал прочь — читалось как баг, будто перчатку метнули.
+#
+# Теперь бьёт невидимая зона: она проходит короткую ДУГУ перед головой, снося
+# всё, чего коснулась. Кулак игрок видит ровно один — тот, что нарисован в позе,
+# а сама голова на время удара подаётся вперёд по той же дуге.
+const MELEE_SWEEP_TIME : float = 0.26
+const MELEE_ARC        : float = 0.85   # раствор дуги в радианах
+const MELEE_RADIUS     : float = 60.0   # радиус поражения
+
+func _cast_melee(dir: Vector2, reach: float) -> void:
+	var proj := _spawn_skill_projectile(dir, 0.0, null, MELEE_RADIUS,
+		_RYAG_HIT_GROUPS, _break_handler(), 0.0, MELEE_SWEEP_TIME + 0.05)
+	if proj == null:
+		return
+	# Дуга: от «замаха» сверху к «доводке» снизу, с вылетом вперёд на reach.
+	var steps := 4
+	var tw := proj.create_tween()
+	for i in range(steps + 1):
+		var t : float = float(i) / float(steps)
+		var ang : float = lerpf(-MELEE_ARC * 0.5, MELEE_ARC * 0.5, t)
+		var rad : float = lerpf(30.0, reach, sin(t * PI * 0.75))
+		var target : Vector2 = global_position + dir.rotated(ang) * rad
+		if i == 0:
+			proj.global_position = target
+		else:
+			tw.tween_property(proj, "global_position", target, MELEE_SWEEP_TIME / float(steps))
+	_lunge(dir)
+
+# Короткий выпад головы в сторону удара — то, что делает мили-спелл «ударом», а
+# не срабатыванием невидимой зоны.
+func _lunge(dir: Vector2) -> void:
+	var home := _sprite.position
+	var tw := _sprite.create_tween()
+	tw.tween_property(_sprite, "position", home + dir * 16.0, 0.09) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_sprite, "position", home, 0.17)
 
 func _cast_spell(spell_id: String, dir: Vector2) -> void:
 	match spell_id:
@@ -1548,13 +1592,12 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 			# Вспышка Гарри обнуляет весь экран разом.
 			_cast_expecto()
 		"explosive_fist":
-			# Викинг: кулак взрывается вплотную перед собой.
-			_cast_melee(_make_sprite(_PUNCH_TEX, 74.0), dir, 90.0)
-			_vfx_particles(SkinSkills.TRANSFORM)
+			# Викинг: кулак проходит дугой вплотную перед собой.
+			_cast_melee(dir, 92.0)
 			_play_skill_sfx(SkinSkills.COUNTER)
 		"glove_punch":
-			# Тайсон: короткий хук той же перчаткой, что летает по трубе.
-			_cast_melee(_make_sprite(_GLOVE_TEX, 70.0), dir, 80.0)
+			# Тайсон: тот же удар, но короче и чаще (откат 3 c против 5 c).
+			_cast_melee(dir, 78.0)
 			_play_skill_sfx(SkinSkills.COUNTER)
 		"shovel_throw":
 			# Кусс: одна цель. На 10-м уровне уходит вторая лопатка следом.
@@ -1654,22 +1697,72 @@ func _throw_shovel(dir: Vector2) -> void:
 	_spawn_skill_projectile(dir, 540.0, sh, 26.0, _RYAG_HIT_GROUPS, _break_once_handler(), 11.0)
 	_play_skill_sfx(SkinSkills.DODGE)
 
-# Паутина не ломает добычу, а подтягивает её к голове — поэтому у неё свой
-# обработчик, а не _break_once_handler.
+# Паутина работает по-разному в зависимости от того, во что попала:
+#
+#   ДОБЫЧА (пицца, доллар, бонус) — подтягивается к голове. Это и есть
+#     «притягивание паутиной»: собрать то, до чего не дотянуться.
+#   ПРЕПЯТСТВИЕ — ломать его паутина не должна, она липкая, а не режущая.
+#     Паутина ОСТАЁТСЯ на предмете и тормозит его, давая время объехать.
+#
+# Разделение важно: иначе спелл с откатом 2 секунды просто уничтожал бы любую
+# угрозу и обесценивал весь остальной набор скинов.
+const WEB_SLOW_FACTOR   : float = 0.35   # во столько раз замедляется предмет
+const WEB_STICK_TIME    : float = 3.0    # сколько держится паутина
+
 func _pull_handler() -> Callable:
 	return func(node: Node) -> bool:
 		if not is_instance_valid(node) or not (node is Node2D):
 			return false
 		var n := node as Node2D
-		if n.has_method("set_process"):
-			n.set_process(false)
-		var tw := n.create_tween()
-		tw.tween_property(n, "global_position", global_position, 0.22) \
-			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-		tw.tween_callback(func() -> void:
-			if is_instance_valid(n):
-				n.set_process(true))
+		if n.is_in_group("obstacle") or n.is_in_group("slowing"):
+			_web_stick(n)
+		else:
+			_web_pull(n)
 		return true
+
+# Липкая паутина на препятствии: большой спрайт поверх предмета + замедление.
+func _web_stick(n: Node2D) -> void:
+	if n.has_meta("webbed"):
+		return
+	n.set_meta("webbed", true)
+	var spr := Sprite2D.new()
+	spr.texture        = _WEB_BIG_TEX
+	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	spr.z_index        = 5
+	# Считаем от РАЗМЕРА ПРЕДМЕТА, а не фиксированным числом: предметы теперь
+	# бывают ×1…×3 (см. ItemSizing), и одна паутина на всех смотрелась бы то
+	# нашлёпкой, то марлей.
+	var px : float = ItemSizing.BASE_PX * 1.5
+	spr.scale = Vector2.ONE * ItemSizing.fit_scale(_WEB_BIG_TEX, px)
+	spr.modulate = Color(1, 1, 1, 0.0)
+	n.add_child(spr)
+	var tin := spr.create_tween()
+	tin.tween_property(spr, "modulate:a", 0.95, 0.10)
+
+	if n.get("speed") != null:
+		var was : float = float(n.speed)
+		n.speed = was * WEB_SLOW_FACTOR
+		get_tree().create_timer(WEB_STICK_TIME).timeout.connect(func() -> void:
+			if not is_instance_valid(n):
+				return
+			if n.get("speed") != null:
+				n.speed = was
+			n.remove_meta("webbed")
+			if is_instance_valid(spr):
+				var tout := spr.create_tween()
+				tout.tween_property(spr, "modulate:a", 0.0, 0.25)
+				tout.tween_callback(spr.queue_free))
+	_play_skill_sfx(SkinSkills.DODGE)
+
+func _web_pull(n: Node2D) -> void:
+	if n.has_method("set_process"):
+		n.set_process(false)
+	var tw := n.create_tween()
+	tw.tween_property(n, "global_position", global_position, 0.22) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_callback(func() -> void:
+		if is_instance_valid(n):
+			n.set_process(true))
 
 # Невидимость Дракулы: препятствия пролетают сквозь, голова полупрозрачна.
 func _cast_invisibility(duration: float) -> void:
