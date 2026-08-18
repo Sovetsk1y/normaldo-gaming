@@ -169,7 +169,13 @@ var _last_hit_name  : String = ""
 var _invincible     : bool  = false
 var _input_enabled  : bool  = false
 var _fat_boss_active : bool = false   # ЖИРОБОСС mini-game in progress
-var _fat_boss_factor : float = 1.0    # live size factor (1 = normal, ~12 = huge)
+var _fat_boss_factor : float = 1.0    # live size factor (1 = normal)
+var _fat_boss_max    : float = 12.0   # пик размера этого забега (ставит fat_boss.gd)
+var _run_shape       : Shape2D = null # боевой хитбокс, подменённый на время босса
+
+# Насколько круг хитбокса босса уже нарисованной головы по высоте. Единица —
+# круг ровно по овалу; чуть меньше, чтобы он гарантированно не торчал наружу.
+const BOSS_HITBOX_INSET : float = 0.95
 var _dev_immortal   : bool  = false  # dev toggle: no death on Skinny hit
 var _bobbing        : bool  = false
 # Public x-velocity (px/sec), updated each physics tick. Used by ceiling decor
@@ -342,8 +348,10 @@ func _apply_head_offset() -> void:
 	var tex : Texture2D = _skin_tex[fat_state]
 	if tex == null:
 		return
-	if SaveData.active_skin == "classic":
+	if SaveData.active_skin == "classic" and not _fat_boss_active:
 		# У классики в кадре только голова, но нарисована со сдвигом влево.
+		# Правка ручная, в пикселях забега. На ЖИРОБОССЕ она умножается на
+		# множитель размера и уводит лицо за левый край — там берём замер.
 		_sprite.position = Vector2(-14.0, 0.0)
 		return
 	var sz  : Vector2 = tex.get_size()
@@ -482,8 +490,65 @@ func is_input_enabled() -> bool:
 #   head also eats everything near it. factor 1.0 = normal size.
 # end: restore normal scale, control and vulnerability.
 
+# ── Размер и хитбокс ЖИРОБОССА ────────────────────────────────────────────────
+# Раньше босс раздувался фиксированным ×12 на любом скине. Голова классики при
+# этом выходила 1092 px в ширину на экране 960×430 — лица не видно вовсе,
+# зелёное пятно во весь кадр, и у каждого скина свой размер, потому что головы
+# разного соотношения сторон.
+#
+# Теперь множитель считается ПОД ЭКРАН: голова растягивается до заданной высоты,
+# одинаковой для всех скинов и состояний жира. Голова ставится центром ровно на
+# левый край кадра, поэтому видно ровно её правую половину — половину лица.
+func boss_face_factor(target_h: float) -> float:
+	var h : float = _boss_head_px().y
+	if h <= 1.0:
+		return 6.0
+	return clampf(target_h / h, 1.5, 40.0)
+
+# Размер нарисованной головы в экранных пикселях при масштабе 1 — по замеру
+# ИМЕННО ЭТОГО состояния жира.
+func _boss_head_px() -> Vector2:
+	var tex : Texture2D = _skin_tex[fat_state]
+	if tex == null:
+		return Vector2(64.0, 64.0)
+	var sz : Vector2 = tex.get_size()
+	var fr : Vector2 = SkinMetrics.head_size_for(SaveData.active_skin, fat_state)
+	return Vector2(fr.x * sz.x * _base_scale.x, fr.y * sz.y * _base_scale.y)
+
+# Хитбокс босса — круг, ВПИСАННЫЙ в нарисованную голову по высоте.
+#
+# Круг радиусом с полуширину головы торчал бы сверху и снизу за нарисованный
+# овал (у классики голова 683×451 на экране), и предметы лопались бы в пустоте
+# перед лицом — «об невидимую стену». Вписанный по высоте круг ошибается в
+# другую сторону: предмет чуть утопает в лице, прежде чем исчезнуть, и это
+# читается как «съеден», а не как стена.
+func boss_head_radius() -> float:
+	var hp : Vector2 = _boss_head_px()
+	# По МЕНЬШЕЙ стороне: круг обязан помещаться в овал головы и по ширине, и по
+	# высоте. У Кусса и Мага голова выше, чем шире, — вписывай только по высоте, и
+	# круг вылезет по бокам.
+	return maxf(8.0, minf(hp.x, hp.y) * 0.5 * BOSS_HITBOX_INSET)
+
+func _set_hitbox_radius(radius: float) -> void:
+	var cs := get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if cs == null:
+		return
+	if _run_shape == null:
+		_run_shape = cs.shape          # боевой хитбокс забега, вернём его в конце
+	var c := CircleShape2D.new()
+	c.radius = radius
+	cs.shape = c
+
+func _restore_hitbox() -> void:
+	var cs := get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if cs == null or _run_shape == null:
+		return
+	cs.shape = _run_shape
+
 func begin_fat_boss() -> void:
+	_set_hitbox_radius(boss_head_radius())
 	_fat_boss_active  = true
+	_apply_head_offset()   # у классики на боссе своя посадка головы (см. ниже)
 	_input_enabled    = false
 	_invincible       = true
 	_touching         = false
@@ -498,20 +563,26 @@ func set_fat_boss_factor(f: float) -> void:
 	scale = Vector2(f, f)
 	_fat_boss_factor = f
 
-# Eat-sfx pitch: lowest at max size, back to normal as he deflates.
-# (12.0 matches FatBoss MAX_FACTOR; the clamp covers the tap-pulse overshoot.)
+# Пик размера этого забега — от него считается низкий питч чавканья.
+func set_fat_boss_max(f: float) -> void:
+	_fat_boss_max = maxf(f, 1.01)
+
+# Eat-sfx pitch: lowest at max size, back to normal as he deflates. Пик размера
+# теперь считается под скин, поэтому опорная точка приходит из fat_boss.gd.
 func _eat_pitch() -> float:
 	if not _fat_boss_active:
 		return 1.0
-	return clampf(remap(_fat_boss_factor, 1.0, 12.0, 1.0, 0.72), 0.72, 1.0)
+	return clampf(remap(_fat_boss_factor, 1.0, _fat_boss_max, 1.0, 0.72), 0.72, 1.0)
 
 func set_fat_boss_rotation(r: float) -> void:
 	rotation = r
 
 func end_fat_boss() -> void:
+	_restore_hitbox()
+	_fat_boss_active = false
+	_apply_head_offset()
 	scale            = Vector2.ONE
 	rotation         = 0.0
-	_fat_boss_active = false
 	_fat_boss_factor = 1.0
 	_invincible      = false
 	_input_enabled   = true

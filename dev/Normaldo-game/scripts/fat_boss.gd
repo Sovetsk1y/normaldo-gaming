@@ -48,13 +48,17 @@ const SLAKE_TEX  := preload("res://assets/normaldo/slakebake.png")   # parting "
 @export var mutagen_chance  : float = 0.0022
 
 # Growth — ×2, ×2, then ×3 → ×12 (way taller than the screen).
-const GROW_STEPS  : Array[float] = [2.0, 4.0, 12.0]
+# Ступени раздувания — ДОЛИ от финального множителя, а не абсолютные числа:
+# сам множитель теперь свой у каждого скина и состояния жира.
+const GROW_STEPS  : Array[float] = [0.17, 0.34, 1.0]
 # Per-step tilt (degrees): jerk left, then right, … ending dead straight at the
 # max-fat step so he stands normally for the tap phase.
 const GROW_ANGLES_DEG : Array[float] = [-30.0, 15.0, 0.0]
 const GROW_STEP_T : float = 0.45             # tween time per step
 const GROW_HOLD_T : float = 0.40             # tremble pause between steps
-const MAX_FACTOR  : float = 12.0
+# Высота нарисованной головы на пике, в долях высоты экрана. Чуть больше
+# единицы: лицо должно упираться в верх и низ кадра, но остаться лицом.
+const BOSS_FACE_H : float = 1.05
 
 # Phase B is a fixed-length feeding frenzy. The head stays HUGE the whole time —
 # tapping never changes his size (only a tiny impact tremble); it fills a SPEED
@@ -115,6 +119,8 @@ var _arm_timer: float = 0.0
 var _bar       : float = 0.0      # speed throttle 0..1 (fills on tap, drives item speed)
 var _frenzy_t  : float = 0.0      # countdown to the frenzy's end
 var _mad_time  : float = 0.0      # cumulative time spent in stage 2, for the late spike
+var _max_factor : float = 12.0    # пик размера, считается под скин в _refresh_max_factor
+var _pre_boss_pos : Vector2 = Vector2.ZERO   # куда вернуть голову после мини-игры
 var _pizza_got : int   = 0        # loot tallied this mini-game (credited at the end)
 var _dollar_got: int   = 0
 var _breathe_t : float = 0.0      # phase accumulator for the idle size-breathing
@@ -255,6 +261,36 @@ func _freeze_run() -> void:
 	if is_instance_valid(_background):
 		_background.stop_scrolling()
 
+# Куда ставится голова на время френзи: ЦЕНТРОМ ровно на левый край кадра.
+# Спрайт скина посажен так, что центр головы совпадает с началом координат узла
+# (см. normaldo._apply_head_offset), поэтому на экране остаётся ровно правая
+# половина головы — половина лица, как и задумано.
+func boss_anchor(vp: Vector2) -> Vector2:
+	return Vector2(0.0, vp.y * 0.5)
+
+# Пик размера считается ПОД СКИН и состояние жира: голова растягивается до
+# BOSS_FACE_H высоты экрана. Прежнее фиксированное ×12 давало у классики голову
+# шириной 1092 px на экране 960 — лица не видно, и у каждого скина размер свой.
+func _refresh_max_factor() -> void:
+	var vp := get_viewport_rect().size
+	if is_instance_valid(_normaldo) and _normaldo.has_method("boss_face_factor"):
+		_max_factor = _normaldo.boss_face_factor(vp.y * BOSS_FACE_H)
+	if is_instance_valid(_normaldo) and _normaldo.has_method("set_fat_boss_max"):
+		_normaldo.set_fat_boss_max(_max_factor)
+
+# Dev hook: поставить босса в позу френзи без погони за мутагеном. Нужен
+# dev/shot_boss.gd, который снимает кадр по каждому скину и состоянию жира.
+func dev_pose_boss() -> void:
+	if not is_instance_valid(_normaldo):
+		return
+	var vp := get_viewport_rect().size
+	_refresh_max_factor()
+	_normaldo.position = boss_anchor(vp)
+	if _normaldo.has_method("set_fat_boss_factor"):
+		_normaldo.set_fat_boss_factor(_max_factor)
+	if _normaldo.has_method("set_fat_boss_rotation"):
+		_normaldo.set_fat_boss_rotation(0.0)
+
 # Dev hook: fire a mutagen right now. No-op if a mini-game is already in progress.
 func dev_send_mutagen() -> void:
 	if _state != State.IDLE or is_instance_valid(_mutagen):
@@ -277,17 +313,22 @@ func _run_grow() -> void:
 	_state = State.GROW
 	if _normaldo.has_method("begin_fat_boss"):
 		_normaldo.begin_fat_boss()
+	_refresh_max_factor()
 	var vp := get_viewport_rect().size
 	# Fattening starts IMMEDIATELY — Normaldo slides into position while already
 	# inflating (don't wait for him to arrive / for the mutagen to have parked).
+	# Куда вернуть голову после мини-игры. Раньше босс стоял почти на месте
+	# забега и возвращать было нечего; теперь он уезжает центром на левый край,
+	# и без возврата игрок продолжал бы забег вплотную к краю экрана.
+	_pre_boss_pos = _normaldo.position
 	if _normaldo.has_method("move_to"):
-		_normaldo.move_to(Vector2(vp.x * 0.18, vp.y * 0.5), 0.5)
+		_normaldo.move_to(boss_anchor(vp), 0.5)
 
 	_speech_bubble("Я ЧУВСТВУЮ...")
 
 	for i in GROW_STEPS.size():
-		var from_f : float = 1.0 if i == 0 else GROW_STEPS[i - 1]
-		var to_f   : float = GROW_STEPS[i]
+		var from_f : float = 1.0 if i == 0 else GROW_STEPS[i - 1] * _max_factor
+		var to_f   : float = GROW_STEPS[i] * _max_factor
 		var angle  : float = deg_to_rad(GROW_ANGLES_DEG[i])
 		# Inflate + tilt together (jerk left, then right, … straight at the top).
 		var tw := create_tween().set_parallel(true)
@@ -303,7 +344,7 @@ func _run_grow() -> void:
 			_sfx_grow.play()
 		await get_tree().create_timer(GROW_HOLD_T).timeout
 
-	# Peak fatness reached — he now stays at MAX_FACTOR for the whole frenzy.
+	# Peak fatness reached — он держит свой пиковый множитель всю френзи.
 	_speech_bubble("ЖИИИРРР!!!")
 	_crossfade_music()
 
@@ -323,7 +364,7 @@ func _run_grow() -> void:
 	_last_tap_msec = Time.get_ticks_msec()
 	_mg_timer     = 0.0
 	if _normaldo.has_method("set_fat_boss_factor"):
-		_normaldo.set_fat_boss_factor(MAX_FACTOR)
+		_normaldo.set_fat_boss_factor(_max_factor)
 	_build_bar_hud()
 	_show_prompt()
 	_state = State.PLAY
@@ -343,12 +384,12 @@ func _tick_play(delta: float) -> void:
 	_tap_pulse = lerpf(_tap_pulse, 0.0, delta * 12.0)
 	_tap_rot   = lerpf(_tap_rot, 0.0, delta * 9.0)
 
-	# Size stays at MAX_FACTOR — only a faint breathing wobble + the transient tap
+	# Size stays at the peak factor — only a faint breathing wobble + the transient tap
 	# impact ride on top. He never *grows* from a tap; he just jolts.
 	_breathe_t += delta * 5.0
 	if _normaldo.has_method("set_fat_boss_factor"):
 		var wobble := 1.0 + sin(_breathe_t) * 0.012 + _tap_pulse
-		_normaldo.set_fat_boss_factor(MAX_FACTOR * wobble)
+		_normaldo.set_fat_boss_factor(_max_factor * wobble)
 	if _normaldo.has_method("set_fat_boss_rotation"):
 		_normaldo.set_fat_boss_rotation(_tap_rot)
 
@@ -455,13 +496,17 @@ func _run_outro() -> void:
 	_state = State.IDLE
 
 # Smooth deflation: a tiny anticipation puff (BACK/EASE_IN overshoots up first),
-# then he sags from MAX_FACTOR back to normal size over DEFLATE_T.
+# then he sags from the peak factor back to normal size over DEFLATE_T.
 func _deflate() -> void:
 	if not _normaldo.has_method("set_fat_boss_factor"):
 		return
 	var tw := create_tween()
-	tw.tween_method(Callable(_normaldo, "set_fat_boss_factor"), MAX_FACTOR, 1.0, DEFLATE_T) \
+	tw.tween_method(Callable(_normaldo, "set_fat_boss_factor"), _max_factor, 1.0, DEFLATE_T) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	# Сдувается и одновременно возвращается на своё место в забеге.
+	if _pre_boss_pos != Vector2.ZERO:
+		tw.parallel().tween_property(_normaldo, "position", _pre_boss_pos, DEFLATE_T) \
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	await tw.finished
 
 # Parting "slake bake" image: pops in over the now-deflated Normaldo, holds, fades.

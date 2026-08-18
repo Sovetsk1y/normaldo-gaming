@@ -36,7 +36,12 @@ ALPHA_MIN = 40
 
 
 def head_metrics(path):
-    """(доля ширины кадра, смещение центра по X, по Y) — всё в долях кадра."""
+    """(доля ширины кадра, смещение центра X, смещение центра Y, доля высоты).
+
+    Высота головы нужна ЖИРОБОССУ: там голова растягивается на высоту экрана, и
+    считать её размер по ширине нельзя — у классики голова заметно шире, чем
+    выше, и она вылезала бы за кадр сильнее остальных.
+    """
     im = Image.open(path).convert("RGBA")
     w, h = im.size
     sc = float(WORK_SIZE) / max(w, h)
@@ -72,7 +77,8 @@ def head_metrics(path):
     _, minx, maxx, miny, maxy = best
     return ((maxx - minx + 1) / float(W),
             ((minx + maxx) / 2.0) / float(W) - 0.5,
-            ((miny + maxy) / 2.0) / float(H) - 0.5)
+            ((miny + maxy) / 2.0) / float(H) - 0.5,
+            (maxy - miny + 1) / float(H))
 
 
 def body_box(path):
@@ -102,22 +108,27 @@ def _states(d, classic=False):
 
 
 def _row(sid, states, ref):
-    frac, _, _ = head_metrics(states[0])
-    offs, boxes = [], []
+    frac, _, _, frac_h = head_metrics(states[0])
+    offs, boxes, heads = [], [], []
     for p in states:
         if p is None:
             offs.append((0.0, 0.0))
             boxes.append((1.0, 1.0))
+            heads.append((frac, frac_h))
             continue
-        _, ox, oy = head_metrics(p)
+        fw, ox, oy, fh = head_metrics(p)
         offs.append((ox, oy))
         boxes.append(body_box(p))
-    return (sid, ref / frac, frac, offs, boxes)
+        # Голова ПО КАЖДОМУ состоянию жира: при жирении она нарисована крупнее,
+        # и ЖИРОБОСС, считающий размер по первому состоянию, на четвёртом
+        # раздувался бы сильнее и хитбоксом вылезал за лицо.
+        heads.append((fw, fh))
+    return (sid, ref / frac, frac, frac_h, offs, boxes, heads)
 
 
 def build_rows():
     # Классика — эталон: её кадр это ровно голова.
-    ref, _, _ = head_metrics(os.path.join(SKINS_DIR, "normaldo1.png"))
+    ref = head_metrics(os.path.join(SKINS_DIR, "normaldo1.png"))[0]
     # Классика тоже попадает в таблицу: масштаб у неё ×1, но силуэт и доля
     # головы нужны интерфейсу наравне с остальными.
     rows = [_row("classic", _states(None, classic=True), ref)]
@@ -131,11 +142,13 @@ def build_rows():
 
 def render_table(rows):
     out = []
-    for sid, scale, frac, offs, boxes in rows:
+    for sid, scale, frac, frac_h, offs, boxes, heads in rows:
         pts = ", ".join("Vector2(%.4f, %.4f)" % o for o in offs)
         bxs = ", ".join("Vector2(%.4f, %.4f)" % b for b in boxes)
-        out.append('\t"%s": { "scale": %.3f, "head": %.4f, "off": [%s], "box": [%s] },'
-                   % (sid, scale, frac, pts, bxs))
+        hds = ", ".join("Vector2(%.4f, %.4f)" % h for h in heads)
+        out.append('\t"%s": { "scale": %.3f, "head": %.4f, "head_h": %.4f, '
+                   '"off": [%s], "box": [%s], "head_wh": [%s] },'
+                   % (sid, scale, frac, frac_h, pts, bxs, hds))
     return "\n".join(out)
 
 
@@ -163,9 +176,10 @@ def main():
                      current, flags=re.S)
     open(OUT, "w", encoding="utf-8").write(updated)
     print("Обновлено %d скинов в %s" % (len(rows), os.path.relpath(OUT, ROOT)))
-    for sid, scale, frac, _, boxes in rows:
-        print("  %-14s ×%.2f  голова %.0f %% кадра, силуэт %.0f×%.0f %%"
-              % (sid, scale, frac * 100.0, boxes[0][0] * 100.0, boxes[0][1] * 100.0))
+    for sid, scale, frac, frac_h, _, boxes, _h in rows:
+        print("  %-14s ×%.2f  голова %.0f×%.0f %% кадра, силуэт %.0f×%.0f %%"
+              % (sid, scale, frac * 100.0, frac_h * 100.0,
+                 boxes[0][0] * 100.0, boxes[0][1] * 100.0))
     return 0
 
 

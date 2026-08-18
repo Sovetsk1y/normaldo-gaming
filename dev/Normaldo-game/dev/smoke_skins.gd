@@ -28,6 +28,8 @@ func _initialize() -> void:
 	_test_card(skil, save)
 	print("── Размер на экране ──")
 	await _test_sizes(reg, save)
+	print("── ЖИРОБОСС ──")
+	await _test_boss(reg, save)
 	print("── Карточки наград ──")
 	await _test_reward_cards(reg, save, prog)
 	print("── Касты ──")
@@ -232,6 +234,106 @@ func _test_sizes(reg: Node, save: Node) -> void:
 			same = false
 	_check(same, "в карточках голова %.0f px у всех %d скинов" % [BOX * float(hud.get("UI_HEAD_FILL")), widths.size()])
 	_check(out_of_box.is_empty(), "голова по центру коробки, съехали: %s" % [out_of_box])
+
+	game.queue_free()
+	await process_frame
+
+# ЖИРОБОСС должен для КАЖДОГО скина и КАЖДОГО состояния жира встать одинаково:
+# голова ростом с экран, центром на левом крае — видно ровно половину лица. И
+# хитбокс обязан помещаться в нарисованную голову: круг больше головы означает,
+# что предметы лопаются в пустоте перед лицом, «об невидимую стену».
+func _test_boss(reg: Node, save: Node) -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var normaldo : Node = game.get_node_or_null("Normaldo")
+	var spawner  : Node = game.get_node_or_null("Spawner")
+	var boss     : Node = game.get_node_or_null("FatBoss")
+	var met      : Node = get_root().get_node_or_null("SkinMetrics")
+	spawner.clear_items()
+	var vp : Vector2 = get_root().get_visible_rect().size
+
+	_check(is_equal_approx(boss.boss_anchor(vp).x, 0.0),
+		"голова босса ставится центром на левый край: x = %.0f" % boss.boss_anchor(vp).x)
+
+	var target_h : float = vp.y * float(boss.BOSS_FACE_H)
+	var bad_size : Array = []
+	var bad_box  : Array = []
+	for sk in reg.SKINS:
+		var id := String(sk["id"])
+		save.active_skin = id
+		save.skin_level  = 10
+		normaldo.reload_skin()
+		await process_frame
+		for fat in 4:
+			normaldo.set("fat_state", fat)
+			normaldo.call("_apply_skin_to_sprite")
+			var tex : Texture2D = reg.get_avatar_texture(id, fat)
+			if tex == null:
+				continue
+			var base : Vector2 = normaldo.get("_base_scale")
+			var f  : float = normaldo.call("boss_face_factor", target_h)
+			var fr : Vector2 = met.head_size_for(id, fat)
+			var hw : float = fr.x * tex.get_size().x * base.x * f
+			var hh : float = fr.y * tex.get_size().y * base.y * f
+			var r  : float = float(normaldo.call("boss_head_radius")) * f
+			# Голова ростом с экран — с точностью до пары процентов.
+			if absf(hh - target_h) > target_h * 0.03:
+				bad_size.append("%s/%d %.0f" % [id, fat, hh])
+			# Круг обязан быть внутри овала головы по ОБЕИМ сторонам.
+			if r > hw * 0.5 + 0.5 or r > hh * 0.5 + 0.5:
+				bad_box.append("%s/%d r=%.0f при голове %.0fx%.0f" % [id, fat, r, hw, hh])
+	_check(bad_size.is_empty(), "голова босса ростом с экран у всех, мимо: %s" % [bad_size])
+	_check(bad_box.is_empty(), "хитбокс внутри головы у всех, торчит: %s" % [bad_box])
+
+	# Живая проверка: предмет обязан ДОЛЕТЕТЬ до лица, а не лопнуть перед ним.
+	save.active_skin = "classic"
+	save.skin_level  = 1
+	normaldo.reload_skin()
+	normaldo.set("fat_state", 0)
+	normaldo.call("_apply_skin_to_sprite")
+	normaldo.call("begin_fat_boss")
+	boss.call("dev_pose_boss")
+	await process_frame
+	var f2 : float = float(normaldo.get("_fat_boss_factor"))
+	var tex2 : Texture2D = reg.get_avatar_texture("classic", 0)
+	var base2 : Vector2 = normaldo.get("_base_scale")
+	var face_r : float = met.head_size_for("classic", 0).x * tex2.get_size().x * base2.x * f2 * 0.5
+	var pizza := Area2D.new()
+	pizza.set_script(preload("res://scripts/effect_item.gd"))
+	pizza.set("kind", "casino_chip")
+	pizza.set("speed", 260.0)
+	pizza.position = Vector2(900.0, normaldo.get("position").y)
+	spawner.add_child(pizza)
+	var hit_x := -1.0
+	var t := 0.0
+	while t < 5.0:
+		await process_frame
+		t += 1.0 / 60.0
+		if not is_instance_valid(pizza):
+			break
+		hit_x = pizza.position.x
+	_check(hit_x >= 0.0 and hit_x <= face_r + 4.0,
+		"предмет исчезает НА лице, а не перед ним: x=%.0f при краю лица %.0f" % [hit_x, face_r])
+	normaldo.call("end_fat_boss")
+
+	# После мини-игры голову обязано вернуть в забег: якорь босса стоит на самом
+	# краю экрана, и оставить её там значит продолжить забег вплотную к краю.
+	normaldo.position = Vector2(220.0, 215.0)
+	var home : Vector2 = normaldo.position
+	boss.call("_run_grow")
+	var t2 := 0.0
+	while t2 < 1.2:
+		await process_frame
+		t2 += 1.0 / 60.0
+	boss.call("_deflate")
+	var t3 := 0.0
+	while t3 < 1.4:
+		await process_frame
+		t3 += 1.0 / 60.0
+	_check(absf(normaldo.position.x - home.x) < 2.0,
+		"после босса голова вернулась в забег: x=%.0f (было %.0f)" % [normaldo.position.x, home.x])
+	normaldo.call("end_fat_boss")
 
 	game.queue_free()
 	await process_frame
