@@ -245,7 +245,7 @@ func _build_reset_chip(vp: Vector2) -> void:
 	var x : float = vp.x - (RES_RIGHT_PAD * -1.0) * scale_x - 224.0 - w
 	var y : float = RES_Y * scale_y - 2.0
 	var panel := Panel.new()
-	panel.add_theme_stylebox_override("panel", _rounded(Color(0.10, 0.08, 0.06, 0.85), 8, Color(0.55, 0.45, 0.22, 0.9)))
+	panel.add_theme_stylebox_override("panel", UiKit.rounded(Color(0.10, 0.08, 0.06, 0.85), 8, Color(0.55, 0.45, 0.22, 0.9)))
 	panel.size         = Vector2(w, h)
 	panel.position     = Vector2(x, y)
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -264,21 +264,6 @@ func _build_reset_chip(vp: Vector2) -> void:
 	_reset_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	_slide_root.add_child(_reset_lbl)
 
-# Скруглённая подложка с рамкой — общий кирпич всех панелей этого экрана.
-func _rounded(fill: Color, radius: int, border: Color = Color(0, 0, 0, 0), border_w: int = 2) -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = fill
-	sb.corner_radius_top_left     = radius
-	sb.corner_radius_top_right    = radius
-	sb.corner_radius_bottom_left  = radius
-	sb.corner_radius_bottom_right = radius
-	if border.a > 0.0:
-		sb.border_color = border
-		sb.border_width_left   = border_w
-		sb.border_width_right  = border_w
-		sb.border_width_top    = border_w
-		sb.border_width_bottom = border_w
-	return sb
 
 func _build_resource_strip(vp: Vector2) -> void:
 	# Top-right resources: money_bag + dollars, then token + tokens. Laid out in
@@ -361,7 +346,7 @@ func _build_bonus_banner(pos: Vector2, size: Vector2) -> void:
 	var avail : bool = QuestManager.daily_bonus_avail
 
 	var panel := Panel.new()
-	panel.add_theme_stylebox_override("panel", _rounded(
+	panel.add_theme_stylebox_override("panel", UiKit.rounded(
 		Color(0.13, 0.20, 0.08, 0.95) if avail else Color(0.09, 0.09, 0.08, 0.92), 10,
 		Color(0.55, 0.95, 0.35, 0.95) if avail else Color(0.30, 0.30, 0.28, 0.8)))
 	panel.size         = size
@@ -418,7 +403,7 @@ func _claim_button(root: Node, pos: Vector2, size: Vector2, text: String, action
 	root.add_child(visual)
 
 	var bg := Panel.new()
-	bg.add_theme_stylebox_override("panel", _rounded(Color(0.22, 0.52, 0.14, 0.98), 8,
+	bg.add_theme_stylebox_override("panel", UiKit.rounded(Color(0.22, 0.52, 0.14, 0.98), 8,
 		Color(0.65, 1.0, 0.45, 0.95)))
 	bg.size         = size
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -477,7 +462,7 @@ func _build_card_content(root: Node2D, pos: Vector2, size: Vector2, slot: int) -
 
 	# Подложка. Готовая карточка — золотая рамка; остальные — спокойная тёмная.
 	var panel := Panel.new()
-	panel.add_theme_stylebox_override("panel", _rounded(
+	panel.add_theme_stylebox_override("panel", UiKit.rounded(
 		Color(0.12, 0.16, 0.07, 0.96) if ready else CLR_CARD, 12,
 		Color(1.0, 0.82, 0.25, 1.0) if ready else Color(0.28, 0.24, 0.20, 0.9),
 		3 if ready else 2))
@@ -558,7 +543,7 @@ func _build_tier_badge(root: Node2D, pos: Vector2, look: Dictionary) -> void:
 	var col : Color = look["col"]
 	const SZ := 26.0
 	var disc := Panel.new()
-	disc.add_theme_stylebox_override("panel", _rounded(
+	disc.add_theme_stylebox_override("panel", UiKit.rounded(
 		Color(col.r * 0.35, col.g * 0.35, col.b * 0.35, 0.98), int(SZ * 0.5), col, 2))
 	disc.size         = Vector2(SZ, SZ)
 	disc.position     = pos
@@ -599,7 +584,7 @@ func _build_progress_bar(root: Node2D, pos: Vector2, w: float, slot: int, col: C
 	var frac : float = clampf(float(pr.x) / maxf(1.0, float(pr.y)), 0.0, 1.0)
 
 	var bg := Panel.new()
-	bg.add_theme_stylebox_override("panel", _rounded(Color(0.05, 0.04, 0.03, 0.95), 6,
+	bg.add_theme_stylebox_override("panel", UiKit.rounded(Color(0.05, 0.04, 0.03, 0.95), 6,
 		Color(0.30, 0.27, 0.22, 0.9)))
 	bg.size         = Vector2(w, H)
 	bg.position     = pos
@@ -608,7 +593,7 @@ func _build_progress_bar(root: Node2D, pos: Vector2, w: float, slot: int, col: C
 
 	if frac > 0.0:
 		var fill := Panel.new()
-		fill.add_theme_stylebox_override("panel", _rounded(col, 6))
+		fill.add_theme_stylebox_override("panel", UiKit.rounded(col, 6))
 		fill.size         = Vector2(maxf(6.0, (w - 4.0) * frac), H - 4.0)
 		fill.position     = pos + Vector2(2.0, 2.0)
 		fill.mouse_filter = Control.MOUSE_FILTER_IGNORE

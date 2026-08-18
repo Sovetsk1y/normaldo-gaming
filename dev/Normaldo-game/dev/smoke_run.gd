@@ -166,7 +166,14 @@ func _test_effects(normaldo: Node, spawner: Node) -> void:
 	_check(_count_items(spawner) > before_count, "мэджик бокс: выплюнул предметы")
 
 	# Наручники — энд гейм. Снимаем dev-бессмертие, иначе предмет их уважает.
+	# Перед этим гасим поле и все временные щиты: мэджик бокс из прошлого шага
+	# разбрасывает предметы, и подобранная маска Кейси честно съедала бы
+	# наручники — тест падал на исправном поведении раз в несколько прогонов.
 	await _wait(2.5)
+	spawner.clear_items()
+	normaldo.call("_end_scars")
+	normaldo.set("_slow_immune_remaining", 0.0)
+	await process_frame
 	normaldo.set_dev_immortal(false)
 	await _touch(normaldo, spawner, "handcuffs")
 	_check(bool(normaldo.get("_dead")), "наручники: энд гейм")

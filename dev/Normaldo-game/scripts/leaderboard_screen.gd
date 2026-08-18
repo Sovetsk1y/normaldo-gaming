@@ -66,11 +66,17 @@ var _overlay      : Control = null
 var _timer_lbl    : Label     = null
 var _scroll       : ScrollContainer = null
 var _content      : Control   = null
-var _tab_best_bg  : ColorRect = null
-var _tab_total_bg : ColorRect = null
+var _tab_best_bg  : Panel = null
+var _tab_total_bg : Panel = null
 var _tab_best_lbl : Label     = null
 var _tab_total_lbl: Label     = null
 var _my_pos_btn   : Node2D    = null
+var _podium_root  : Control   = null
+# Что именно отрисовано сейчас: подиум и список по номерам мест. Пригождается и
+# при разборе жалоб «почему я не вижу себя», и в прогоне dev/smoke_leaders.gd.
+var _podium_ranks : Array     = []
+var _list_ranks   : Array     = []
+var _my_strip_lbl : Label     = null
 var _lock_overlay : Node2D    = null
 var _toast_node   : Node2D    = null
 
@@ -194,99 +200,125 @@ func _build(vp: Vector2) -> void:
 	# ── Top-right resources ────────────────────────────────────────────────
 	_build_top_resources(vp, scale_x, scale_y)
 
-	# Reset-timer label — pinned RIGHT under the title text. Same X offset as
-	# the title so it sits centred under "ЛИДЕРЫ".
+	# Таймер розыгрыша — чипом в шапке, а не мелкой подписью под заголовком:
+	# это главный мотиватор экрана, а подан был как сноска.
+	# См. /Концепция/Экран лидеров.md
+	var chip_w : float = 210.0
+	var chip_h : float = 26.0
+	var chip_x : float = vp.x - 250.0 - chip_w
+	var chip_y : float = 9.0
+	UiKit.panel(_slide_root, Vector2(chip_x, chip_y), Vector2(chip_w, chip_h),
+		Color(0.10, 0.08, 0.05, 0.88), 8, Color(0.62, 0.50, 0.24, 0.95))
 	_timer_lbl = Label.new()
 	_timer_lbl.add_theme_font_override("font", UI_FONT)
-	_timer_lbl.add_theme_font_size_override("font_size", 11)
+	_timer_lbl.add_theme_font_size_override("font_size", 12)
 	_apply_text_fx(_timer_lbl)
-	_timer_lbl.text                 = "Призы через %s" % _fmt_duration(_reset_seconds_left)
-	_timer_lbl.modulate             = Color(0.92, 0.85, 0.55)
+	_timer_lbl.text                 = "ПРИЗЫ ЧЕРЕЗ %s" % _fmt_duration(_reset_seconds_left)
+	_timer_lbl.modulate             = Color(1.0, 0.88, 0.45)
 	_timer_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_timer_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	_timer_lbl.size                 = Vector2(vp.x, 14.0)
-	# y = title bottom (TITLE_Y + TITLE_H) - small overlap to tuck under.
-	_timer_lbl.position             = Vector2(TITLE_X_OFFSET * scale_x,
-			(TITLE_Y + TITLE_H - 4.0) * scale_y)
+	_timer_lbl.size                 = Vector2(chip_w, chip_h)
+	_timer_lbl.position             = Vector2(chip_x, chip_y)
 	_timer_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	_slide_root.add_child(_timer_lbl)
 
-	# Tabs row — placed just above the central zone.
-	var tab_y := ZONE_Y * scale_y - TAB_H - 2.0
-	var tab_w := vp.x * 0.5
+	# ── Вкладки-пилюли ─────────────────────────────────────────────────────
+	# Активная отличается ФОРМОЙ (залитая против контурной), а не оттенком фона:
+	# по одному оттенку выбранную вкладку не видно.
+	var lay := _layout(vp)
+	var tab_w : float = 268.0
+	var tab_h : float = float(lay["tabs_h"])
+	var tab_y : float = float(lay["tabs_y"])
+	var gap   : float = 14.0
+	var tabs_x : float = (vp.x - tab_w * 2.0 - gap) * 0.5
 
-	_tab_best_bg = ColorRect.new()
-	_tab_best_bg.size     = Vector2(tab_w, TAB_H)
-	_tab_best_bg.position = Vector2(0.0, tab_y)
-	_overlay.add_child(_tab_best_bg)
-
-	_tab_best_lbl = Label.new()
-	_tab_best_lbl.add_theme_font_override("font", UI_FONT)
-	_tab_best_lbl.add_theme_font_size_override("font_size", 13)
-	_apply_text_fx(_tab_best_lbl)
-	_tab_best_lbl.text                 = "РЕКОРД ЗАБЕГА"
-	_tab_best_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_tab_best_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	_tab_best_lbl.size                 = _tab_best_bg.size
-	_tab_best_lbl.position             = _tab_best_bg.position
-	_tab_best_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	_overlay.add_child(_tab_best_lbl)
-
-	var btn_best := Button.new()
-	btn_best.flat       = true
-	btn_best.focus_mode = Control.FOCUS_NONE
-	btn_best.size       = _tab_best_bg.size
-	btn_best.position   = _tab_best_bg.position
-	btn_best.pressed.connect(_on_tab_best)
-	_overlay.add_child(btn_best)
-
-	_build_help_pill(_tab_best_bg.position + Vector2(tab_w - 30.0, (TAB_H - 18.0) * 0.5),
+	_tab_best_bg = _tab_pill(Vector2(tabs_x, tab_y), Vector2(tab_w, tab_h))
+	_tab_best_lbl = _tab_label("РЕКОРД ЗАБЕГА", Vector2(tabs_x, tab_y), Vector2(tab_w, tab_h))
+	_tab_button(Vector2(tabs_x, tab_y), Vector2(tab_w, tab_h), _on_tab_best)
+	_build_help_pill(Vector2(tabs_x + tab_w - 26.0, tab_y + (tab_h - 18.0) * 0.5),
 		Color(1.00, 0.85, 0.35), LeaderboardMock.Metric.BEST)
 
-	_tab_total_bg = ColorRect.new()
-	_tab_total_bg.size     = Vector2(tab_w, TAB_H)
-	_tab_total_bg.position = Vector2(tab_w, tab_y)
-	_overlay.add_child(_tab_total_bg)
-
-	_tab_total_lbl = Label.new()
-	_tab_total_lbl.add_theme_font_override("font", UI_FONT)
-	_tab_total_lbl.add_theme_font_size_override("font_size", 13)
-	_apply_text_fx(_tab_total_lbl)
-	_tab_total_lbl.text                 = "ГОРА ПИЦЦ"
-	_tab_total_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_tab_total_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	_tab_total_lbl.size                 = _tab_total_bg.size
-	_tab_total_lbl.position             = _tab_total_bg.position
-	_tab_total_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	_overlay.add_child(_tab_total_lbl)
-
-	var btn_total := Button.new()
-	btn_total.flat       = true
-	btn_total.focus_mode = Control.FOCUS_NONE
-	btn_total.size       = _tab_total_bg.size
-	btn_total.position   = _tab_total_bg.position
-	btn_total.pressed.connect(_on_tab_total)
-	_overlay.add_child(btn_total)
-
-	_build_help_pill(_tab_total_bg.position + Vector2(tab_w - 30.0, (TAB_H - 18.0) * 0.5),
+	var tx2 : float = tabs_x + tab_w + gap
+	_tab_total_bg = _tab_pill(Vector2(tx2, tab_y), Vector2(tab_w, tab_h))
+	_tab_total_lbl = _tab_label("ГОРА ПИЦЦ", Vector2(tx2, tab_y), Vector2(tab_w, tab_h))
+	_tab_button(Vector2(tx2, tab_y), Vector2(tab_w, tab_h), _on_tab_total)
+	_build_help_pill(Vector2(tx2 + tab_w - 26.0, tab_y + (tab_h - 18.0) * 0.5),
 		Color(1.00, 0.85, 0.35), LeaderboardMock.Metric.TOTAL)
 
-	# Scroll list — confined to the central zone.
-	var zone_pos  := Vector2(ZONE_X * scale_x, ZONE_Y * scale_y)
-	var zone_size := Vector2(ZONE_W * scale_x, ZONE_H * scale_y)
+	# Подиум первой тройки — витрина экрана; список идёт с 4-го места.
+	_podium_root = Control.new()
+	_podium_root.size         = vp
+	_podium_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_slide_root.add_child(_podium_root)
+
+	# Список: непрозрачная скруглённая панель. Раньше строки были полупрозрачные,
+	# и сквозь них просвечивала кирпичная стена — текст дрался с текстурой.
+	var list_pos  := Vector2(float(lay["margin"]), float(lay["list_y"]))
+	var list_size := Vector2(vp.x - float(lay["margin"]) * 2.0, float(lay["list_h"]))
+	UiKit.panel(_slide_root, list_pos - Vector2(4.0, 4.0), list_size + Vector2(8.0, 8.0),
+		Color(0.05, 0.04, 0.03, 0.94), 12, Color(0.26, 0.22, 0.16, 0.95))
+
 	_scroll = ScrollContainer.new()
-	_scroll.position = zone_pos
-	_scroll.size     = zone_size
+	_scroll.position = list_pos
+	_scroll.size     = list_size
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	_scroll.set("scroll_deadzone", 18)
 	_slide_root.add_child(_scroll)
 
 	_content = Control.new()
 	_scroll.add_child(_content)
 
-	# Floating "My position" button (bottom-right) + dev prize trigger.
-	_build_my_position_btn(vp)
+	# Своя строка закреплена внизу и видна всегда: раньше на вопрос «где я»
+	# экран отвечал только после нажатия и прокрутки.
+	_build_my_strip(vp)
 	if DevFlags.ENABLED:
 		_build_dev_prize_btn(vp)
+
+# Раскладка экрана в одном месте — её спрашивают и сборка, и перестройка списка.
+func _layout(vp: Vector2) -> Dictionary:
+	var margin   : float = 22.0
+	var tabs_y   : float = 46.0
+	var tabs_h   : float = 30.0
+	var podium_y : float = tabs_y + tabs_h + 8.0
+	var podium_h : float = 112.0
+	var strip_h  : float = 36.0
+	var strip_y  : float = vp.y - strip_h - 8.0
+	var list_y   : float = podium_y + podium_h + 10.0
+	return {
+		"margin": margin, "tabs_y": tabs_y, "tabs_h": tabs_h,
+		"podium_y": podium_y, "podium_h": podium_h,
+		"list_y": list_y, "list_h": strip_y - 10.0 - list_y,
+		"strip_y": strip_y, "strip_h": strip_h,
+	}
+
+func _tab_pill(pos: Vector2, size: Vector2) -> Panel:
+	var p := UiKit.panel(_slide_root, pos, size, CLR_TAB_DIM, 10,
+		Color(0.40, 0.36, 0.26, 0.95))
+	return p
+
+func _tab_label(text: String, pos: Vector2, size: Vector2) -> Label:
+	var l := Label.new()
+	l.add_theme_font_override("font", UI_FONT)
+	l.add_theme_font_size_override("font_size", 13)
+	_apply_text_fx(l)
+	l.text                 = text
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	l.size                 = size
+	l.position             = pos
+	l.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	_slide_root.add_child(l)
+	return l
+
+func _tab_button(pos: Vector2, size: Vector2, action: Callable) -> void:
+	var b := Button.new()
+	b.flat       = true
+	b.focus_mode = Control.FOCUS_NONE
+	b.size       = size
+	b.position   = pos
+	b.pressed.connect(action)
+	_slide_root.add_child(b)
 
 # Russo One text — black outline + soft shadow. Single helper applied to every
 # label on this screen for visual consistency with the menu / quests / book.
@@ -350,49 +382,178 @@ func _build_top_resources(vp: Vector2, scale_x: float, scale_y: float) -> void:
 	tkn_lbl.position             = Vector2(tkn_x + icon_sz + 2.0, top_y - 2.0)
 	_slide_root.add_child(tkn_lbl)
 
-func _build_my_position_btn(vp: Vector2) -> void:
-	const BTN_W : float = 160.0
-	const BTN_H : float = 36.0
-	var btn_x := vp.x - BTN_W - 12.0
-	var btn_y := vp.y - BTN_H - 12.0
+# Подиум первой тройки: второе слева, первое по центру и крупнее, третье справа.
+# Раньше тройка отличалась только цветом номера — витрины не было вовсе, а
+# дальтоник не отличал её от остального списка.
+func _build_podium(rows: Array) -> void:
+	if not is_instance_valid(_podium_root):
+		return
+	for c in _podium_root.get_children():
+		c.queue_free()
+	var vp := get_viewport().get_visible_rect().size
+	var lay := _layout(vp)
+	var y  : float = float(lay["podium_y"])
+	var h  : float = float(lay["podium_h"])
+
+	var side_w : float = 254.0
+	var mid_w  : float = 292.0
+	var gap    : float = 16.0
+	var total  : float = side_w * 2.0 + mid_w + gap * 2.0
+	var x0     : float = (vp.x - total) * 0.5
+
+	# порядок на экране: 2 — 1 — 3
+	var order : Array = [
+		{ "place": 2, "x": x0,                       "w": side_w, "dy": 14.0, "col": CLR_SILVER },
+		{ "place": 1, "x": x0 + side_w + gap,        "w": mid_w,  "dy": 0.0,  "col": CLR_GOLD },
+		{ "place": 3, "x": x0 + side_w + mid_w + gap * 2.0, "w": side_w, "dy": 14.0, "col": CLR_BRONZE },
+	]
+	for o in order:
+		var idx : int = int(o["place"]) - 1
+		if idx >= rows.size():
+			continue
+		_build_podium_card(rows[idx], Vector2(float(o["x"]), y + float(o["dy"])),
+			Vector2(float(o["w"]), h - float(o["dy"])), int(o["place"]), Color(o["col"]))
+
+func _build_podium_card(r: Dictionary, pos: Vector2, size: Vector2, place: int, col: Color) -> void:
+	UiKit.panel(_podium_root, pos, size, Color(0.09, 0.07, 0.05, 0.97), 12, col, 3 if place == 1 else 2)
+
+	# Медальон с НОМЕРОМ: место названо цифрой, а не только цветом рамки.
+	var disc_sz : float = 30.0 if place == 1 else 26.0
+	UiKit.panel(_podium_root, pos + Vector2(10.0, 8.0), Vector2(disc_sz, disc_sz),
+		Color(col.r * 0.30, col.g * 0.30, col.b * 0.30, 0.98), int(disc_sz * 0.5), col, 2)
+	var num := _label("%d" % place, 16 if place == 1 else 14, Color(1, 1, 1),
+		pos + Vector2(10.0, 8.0), Vector2(disc_sz, disc_sz))
+	num.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	num.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+
+	var av_sz : float = 46.0 if place == 1 else 40.0
+	_add_avatar(_podium_root, String(r.get("avatar_skin", "classic")),
+		int(r.get("avatar_fat", 0)), pos + Vector2(size.x - av_sz - 10.0, 6.0), av_sz)
+
+	# Имя в одну строку с медальоном: на боковых карточках (они ниже центральной)
+	# строка под медальоном налезала на счёт.
+	var pname : String = String(r.get("name", r.get("display_name", "")))
+	var name_x : float = 10.0 + disc_sz + 8.0
+	var nm := _label(pname, 15 if place == 1 else 13, Color(1.0, 0.97, 0.90),
+		pos + Vector2(name_x, 8.0), Vector2(size.x - name_x - av_sz - 16.0, disc_sz))
+	nm.clip_text          = true
+	nm.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+
+	var sy : float = size.y - 52.0
+	var pz := _make_icon(TEX_PIZZA, 20.0)
+	pz.position     = pos + Vector2(10.0, sy)
+	pz.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_podium_root.add_child(pz)
+	_label(str(int(r.get("score", 0))), 17, Color(1.0, 0.88, 0.45),
+		pos + Vector2(34.0, sy - 2.0), Vector2(size.x - 44.0, 24.0))
+
+	_build_reward_block(_podium_root, pos + Vector2(10.0, size.y - 26.0),
+		size.x - 20.0, LeaderboardMock.reward_for_place(place), 18.0)
+
+# Своя строка внизу экрана — видна всегда. Тап прокручивает список к себе
+# (бывшая плавающая кнопка «МОЯ ПОЗИЦИЯ», которая закрывала строки списка).
+func _build_my_strip(vp: Vector2) -> void:
+	var lay := _layout(vp)
+	var pos  := Vector2(float(lay["margin"]), float(lay["strip_y"]))
+	var size := Vector2(vp.x - float(lay["margin"]) * 2.0, float(lay["strip_h"]))
 	_my_pos_btn = Node2D.new()
 	_my_pos_btn.process_mode = Node.PROCESS_MODE_ALWAYS
-	_my_pos_btn.position = Vector2(btn_x, btn_y)
-	add_child(_my_pos_btn)
+	# В _slide_root, а не в экран: иначе строка стоит на месте, пока весь
+	# остальной экран въезжает снизу.
+	_slide_root.add_child(_my_pos_btn)
 
-	var bg := ColorRect.new()
-	bg.color = Color(0.12, 0.32, 0.16, 0.95)
-	bg.size  = Vector2(BTN_W, BTN_H)
-	_my_pos_btn.add_child(bg)
+	UiKit.panel(_my_pos_btn, pos, size, Color(0.09, 0.20, 0.10, 0.97), 10,
+		Color(0.45, 0.90, 0.35, 0.95))
+	# Слово «ТЫ», а не только зелёный фон: состояние обязано быть названо.
+	var you := _label("ТЫ", 13, Color(0.70, 1.0, 0.60), pos + Vector2(12.0, 0.0),
+		Vector2(34.0, size.y), _my_pos_btn)
+	you.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
-	var stripe := ColorRect.new()
-	stripe.color = Color(0.45, 0.85, 0.30, 0.80)
-	stripe.size  = Vector2(BTN_W, 2.0)
-	_my_pos_btn.add_child(stripe)
+	_my_strip_lbl = _label("", 13, Color(0.95, 1.0, 0.90), pos + Vector2(52.0, 0.0),
+		Vector2(size.x - 272.0, size.y), _my_pos_btn)
+	_my_strip_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_refresh_my_strip()
 
-	var lbl := Label.new()
-	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 13)
-	_apply_text_fx(lbl)
-	lbl.text                 = "МОЯ ПОЗИЦИЯ"
-	lbl.modulate             = Color(0.85, 1.0, 0.65)
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.size                 = Vector2(BTN_W, BTN_H)
-	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	_my_pos_btn.add_child(lbl)
+	var hint := _label("ПОКАЗАТЬ В СПИСКЕ", 12, Color(0.80, 1.0, 0.70),
+		pos + Vector2(size.x - 200.0, 0.0), Vector2(188.0, size.y), _my_pos_btn)
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	hint.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 
 	var btn := Button.new()
 	btn.flat       = true
 	btn.focus_mode = Control.FOCUS_NONE
-	btn.size       = Vector2(BTN_W, BTN_H)
+	btn.size       = size
+	btn.position   = pos
 	btn.pressed.connect(_on_my_position)
 	_my_pos_btn.add_child(btn)
+
+func _refresh_my_strip() -> void:
+	if not is_instance_valid(_my_strip_lbl):
+		return
+	var rank : int = _player_rank_for_active_metric()
+	var nick : String = SaveData.display_name if SaveData.display_name != "" else "—"
+	var total : int = int(LeaderboardMock.MOCK_TOTAL_PLAYERS)
+	_my_strip_lbl.text = "%d место из %d   ·   %s" % [rank, total, nick]
+
+# Награда местом: иконка + число, как во всей остальной игре. Текст «+5000 $»
+# внутри игрового экрана читается как заглушка.
+func _build_reward_block(parent: Node, pos: Vector2, w: float, reward: Dictionary, sz: float) -> void:
+	var d : int = int(reward.get("dollars", 0))
+	var t : int = int(reward.get("tokens", 0))
+	var x : float = pos.x
+	if d > 0:
+		var di := _make_icon(TEX_DOLLAR, sz)
+		di.position     = Vector2(x, pos.y)
+		di.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		parent.add_child(di)
+		var dl := _label("+%d" % d, int(sz * 0.72), CLR_GOLD,
+			Vector2(x + sz + 3.0, pos.y - 2.0), Vector2(78.0, sz + 4.0), parent)
+		dl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		x += sz + 3.0 + _text_w("+%d" % d, int(sz * 0.72)) + 10.0
+	if t > 0:
+		var ti := _make_icon(TEX_TOKEN, sz)
+		ti.position     = Vector2(x, pos.y)
+		ti.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		parent.add_child(ti)
+		var tl := _label("+%d" % t, int(sz * 0.72), CLR_GOLD,
+			Vector2(x + sz + 3.0, pos.y - 2.0), Vector2(60.0, sz + 4.0), parent)
+		tl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+
+func _text_w(text: String, size_px: int) -> float:
+	return UI_FONT.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size_px).x
+
+# Аватар игрока. Голова сажается в коробку тем же способом, что и в HUD, —
+# иначе у скинов с руками (Джокер) голова выходит втрое мельче соседских.
+func _add_avatar(parent: Node, skin: String, fat: int, pos: Vector2, sz: float) -> void:
+	if _hud != null and is_instance_valid(_hud) and _hud.has_method("_skin_head_icon"):
+		var holder : Control = _hud.call("_skin_head_icon", skin, fat, sz)
+		holder.position = pos
+		parent.add_child(holder)
+		return
+	var av := _make_icon(SkinRegistry.get_avatar_texture(skin, fat), sz)
+	av.position     = pos
+	av.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(av)
+
+func _label(text: String, size_px: int, col: Color, pos: Vector2, size: Vector2,
+		parent: Node = null) -> Label:
+	var l := Label.new()
+	l.add_theme_font_override("font", UI_FONT)
+	l.add_theme_font_size_override("font_size", size_px)
+	_apply_text_fx(l)
+	l.text         = text
+	l.modulate     = col
+	l.size         = size
+	l.position     = pos
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	(parent if parent != null else _podium_root).add_child(l)
+	return l
 
 func _build_dev_prize_btn(vp: Vector2) -> void:
 	const BTN_W : float = 110.0
 	const BTN_H : float = 28.0
-	var pos := Vector2(10.0, vp.y - BTN_H - 12.0)
+	# Над своей строкой, а не поверх неё.
+	var pos := Vector2(10.0, float(_layout(vp)["strip_y"]) - BTN_H - 6.0)
 	var root := Node2D.new()
 	root.process_mode = Node.PROCESS_MODE_ALWAYS
 	root.position = pos
@@ -429,17 +590,30 @@ func _build_dev_prize_btn(vp: Vector2) -> void:
 
 # ── Tab switching ────────────────────────────────────────────────────────────
 
+# Активная вкладка — ЗАЛИТАЯ пилюля с тёмным текстом, неактивная — контурная с
+# тусклым. Различие по форме, а не по оттенку фона: по оттенку выбранную
+# вкладку не видно ни на солнце, ни дальтонику.
 func _refresh_tab_visual() -> void:
-	if _active_metric == LeaderboardMock.Metric.BEST:
-		_tab_best_bg.color      = CLR_TAB_ACTV
-		_tab_total_bg.color     = CLR_TAB_DIM
-		_tab_best_lbl.modulate  = CLR_GOLD
-		_tab_total_lbl.modulate = Color(0.50, 0.45, 0.40)
+	var best_on : bool = _active_metric == LeaderboardMock.Metric.BEST
+	_set_tab_style(_tab_best_bg,  _tab_best_lbl,  best_on)
+	_set_tab_style(_tab_total_bg, _tab_total_lbl, not best_on)
+
+func _set_tab_style(pill: Panel, lbl: Label, active: bool) -> void:
+	if not is_instance_valid(pill) or not is_instance_valid(lbl):
+		return
+	if active:
+		pill.add_theme_stylebox_override("panel",
+			UiKit.rounded(CLR_GOLD, 10, Color(1.0, 0.95, 0.70, 1.0)))
+		lbl.modulate = Color(0.10, 0.08, 0.04)
+		# Чёрная обводка по тёмному тексту на золоте превращает его в кашу.
+		lbl.add_theme_constant_override("outline_size", 0)
+		lbl.add_theme_constant_override("shadow_outline_size", 0)
 	else:
-		_tab_best_bg.color      = CLR_TAB_DIM
-		_tab_total_bg.color     = CLR_TAB_ACTV
-		_tab_best_lbl.modulate  = Color(0.50, 0.45, 0.40)
-		_tab_total_lbl.modulate = CLR_GOLD
+		pill.add_theme_stylebox_override("panel",
+			UiKit.rounded(CLR_TAB_DIM, 10, Color(0.40, 0.36, 0.26, 0.95)))
+		lbl.modulate = Color(0.72, 0.68, 0.58)
+		lbl.add_theme_constant_override("outline_size", 3)
+		lbl.add_theme_constant_override("shadow_outline_size", 3)
 
 func _on_tab_best() -> void:
 	if not QuestManager.is_endless_unlocked():
@@ -495,6 +669,12 @@ func _on_my_position() -> void:
 
 func _player_rank_for_active_metric() -> int:
 	# Prefer cached server top-100 if present; fall back to mock.
+	# Демо-режим: строки подсунуты моком, и своего uid в них нет — ранг тоже
+	# берём у мока. Иначе экран честно писал «101 место», хотя данные мока
+	# говорят 47-е. Раньше это было незаметно: ранг спрашивала только кнопка
+	# прыжка, теперь он висит в строке внизу постоянно.
+	if _data_origin == "demo":
+		return LeaderboardMock.get_player_rank(_active_metric)
 	if _server_rows.has(_active_metric):
 		var my_uid := LeaderboardClient.get_user_id()
 		var rows : Array = _server_rows[_active_metric]
@@ -558,15 +738,36 @@ func _rebuild_list() -> void:
 				r["is_player"] = true
 				r["name"] = "ТЫ"
 	_update_origin_badge()
-	var vp_w : float = (ZONE_W) * (get_viewport().get_visible_rect().size.x / CANVAS_W)
-	# Bottom padding so the last rows can be scrolled above the floating
-	# "Моя позиция" button (button is 36 tall + 12 margin + 12 breathing room).
-	const BOTTOM_GAP : float = 72.0
-	var total_h := rows.size() * ROW_H + 16.0 + BOTTOM_GAP
-	_content.custom_minimum_size = Vector2(vp_w, total_h)
-	var cy := 6.0
-	var alt := false
+	_refresh_my_strip()
+
+	# Первая тройка уходит на подиум, список начинается с 4-го места: дублировать
+	# их в списке нечем, а место наверху экрана дорогое.
+	var podium : Array = []
 	for r in rows:
+		if r is Dictionary and not r.has("separator") and int(r.get("rank", 0)) <= 3:
+			podium.append(r)
+	podium.sort_custom(func(a, b): return int(a["rank"]) < int(b["rank"]))
+	_podium_ranks = []
+	for r in podium:
+		_podium_ranks.append(int(r["rank"]))
+	_build_podium(podium)
+
+	var list_rows : Array = []
+	for r in rows:
+		if r is Dictionary and not r.has("separator") and int(r.get("rank", 0)) <= 3:
+			continue
+		list_rows.append(r)
+
+	_list_ranks = []
+	for r in list_rows:
+		if not r.has("separator"):
+			_list_ranks.append(int(r.get("rank", 0)))
+
+	var w : float = _scroll.size.x
+	_content.custom_minimum_size = Vector2(w, list_rows.size() * ROW_H + 10.0)
+	var cy := 4.0
+	var alt := false
+	for r in list_rows:
 		if r.has("separator"):
 			_add_separator_row(cy)
 		else:
@@ -575,7 +776,6 @@ func _rebuild_list() -> void:
 		cy += ROW_H
 
 func _add_separator_row(cy: float) -> void:
-	var vp_w : float = (ZONE_W) * (get_viewport().get_visible_rect().size.x / CANVAS_W)
 	var lbl := Label.new()
 	lbl.add_theme_font_override("font", UI_FONT)
 	lbl.add_theme_font_size_override("font_size", 14)
@@ -584,154 +784,57 @@ func _add_separator_row(cy: float) -> void:
 	lbl.modulate             = Color(0.45, 0.45, 0.50)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.size                 = Vector2(vp_w, ROW_H)
+	lbl.size                 = Vector2(_scroll.size.x, ROW_H)
 	lbl.position             = Vector2(0.0, cy)
 	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	_content.add_child(lbl)
 
 func _add_player_row(r: Dictionary, cy: float, alt: bool) -> void:
-	var vp_w : float = (ZONE_W) * (get_viewport().get_visible_rect().size.x / CANVAS_W)
+	var w : float = _scroll.size.x
 	var is_player := bool(r.get("is_player", false))
 	var rank      := int(r["rank"])
 	var pname     : String = str(r.get("name", r.get("display_name", "")))
 	var score     := int(r["score"])
-	var av_skin   : String = str(r.get("avatar_skin", "classic"))
-	var av_fat    : int    = int(r.get("avatar_fat", 0))
 
-	var bg := ColorRect.new()
-	if is_player:
-		bg.color = CLR_ROW_PLR
-	else:
-		bg.color = CLR_ROW_BG_A if alt else CLR_ROW_BG_B
-	bg.size     = Vector2(vp_w, ROW_H - 1.0)
-	bg.position = Vector2(0.0, cy)
-	_content.add_child(bg)
+	# Подложка непрозрачная: сквозь прежние полупрозрачные строки просвечивала
+	# кирпичная стена, и текст на ней не читался.
+	UiKit.panel(_content, Vector2(2.0, cy + 1.0), Vector2(w - 4.0, ROW_H - 3.0),
+		Color(0.13, 0.20, 0.11, 0.98) if is_player else (Color(0.11, 0.09, 0.06, 0.98) if alt else Color(0.08, 0.07, 0.05, 0.98)),
+		8, Color(0.45, 0.90, 0.35, 0.95) if is_player else Color(0, 0, 0, 0))
 
-	# Rank
-	var rank_col := Color(0.85, 0.80, 0.65)
-	if rank == 1:   rank_col = CLR_GOLD
-	elif rank == 2: rank_col = CLR_SILVER
-	elif rank == 3: rank_col = CLR_BRONZE
-
-	var rank_lbl := Label.new()
-	rank_lbl.add_theme_font_override("font", UI_FONT)
-	rank_lbl.add_theme_font_size_override("font_size", 14)
-	_apply_text_fx(rank_lbl)
-	rank_lbl.text                 = "%d" % rank
-	rank_lbl.modulate             = rank_col
+	var rank_lbl := _label("%d" % rank, 14, Color(0.88, 0.84, 0.70),
+		Vector2(6.0, cy), Vector2(40.0, ROW_H), _content)
 	rank_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	rank_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	rank_lbl.size                 = Vector2(44.0, ROW_H)
-	rank_lbl.position             = Vector2(8.0, cy)
-	rank_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	_content.add_child(rank_lbl)
 
 	if is_player:
-		var marker := Label.new()
-		marker.add_theme_font_override("font", UI_FONT)
-		marker.add_theme_font_size_override("font_size", 14)
-		_apply_text_fx(marker)
-		marker.text                 = "►"
-		marker.modulate             = Color(0.55, 1.0, 0.55)
-		marker.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		marker.size                 = Vector2(14.0, ROW_H)
-		marker.position             = Vector2(58.0, cy)
-		marker.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-		_content.add_child(marker)
+		# Своя строка помечена СЛОВОМ, а не только цветом подложки.
+		var you := _label("ТЫ", 11, Color(0.70, 1.0, 0.60),
+			Vector2(50.0, cy), Vector2(26.0, ROW_H), _content)
+		you.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
-	# Avatar (just to the left of the name)
-	const AV_SZ : float = 24.0
+	const AV_SZ : float = 22.0
 	var av_x := 78.0
-	var av := TextureRect.new()
-	av.texture       = SkinRegistry.get_avatar_texture(av_skin, av_fat)
-	av.stretch_mode  = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	av.expand_mode   = TextureRect.EXPAND_IGNORE_SIZE
-	av.size          = Vector2(AV_SZ, AV_SZ)
-	av.position      = Vector2(av_x, cy + (ROW_H - AV_SZ) * 0.5)
-	av.mouse_filter  = Control.MOUSE_FILTER_IGNORE
-	_content.add_child(av)
+	_add_avatar(_content, String(r.get("avatar_skin", "classic")),
+		int(r.get("avatar_fat", 0)), Vector2(av_x, cy + (ROW_H - AV_SZ) * 0.5), AV_SZ)
 
-	# Name
-	var name_lbl := Label.new()
-	name_lbl.add_theme_font_override("font", UI_FONT)
-	name_lbl.add_theme_font_size_override("font_size", 13)
-	_apply_text_fx(name_lbl)
-	name_lbl.text                 = pname
-	name_lbl.modulate             = Color(0.70, 1.0, 0.60) if is_player else Color(0.95, 0.95, 0.85)
-	name_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	name_lbl.clip_text            = true
-	name_lbl.size                 = Vector2(vp_w * 0.36, ROW_H)
-	name_lbl.position             = Vector2(av_x + AV_SZ + 8.0, cy)
-	name_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	_content.add_child(name_lbl)
+	var name_lbl := _label(pname, 13,
+		Color(0.75, 1.0, 0.65) if is_player else Color(0.96, 0.96, 0.90),
+		Vector2(av_x + AV_SZ + 8.0, cy), Vector2(w * 0.30, ROW_H), _content)
+	name_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	name_lbl.clip_text          = true
 
-	# Score (pizza icon + number)
-	var score_x := vp_w * 0.58
-	var pz_icon := _make_icon(TEX_PIZZA, 18.0)
-	pz_icon.position = Vector2(score_x, cy + (ROW_H - 18.0) * 0.5)
-	_content.add_child(pz_icon)
+	var score_x := w * 0.46
+	var pz := _make_icon(TEX_PIZZA, 18.0)
+	pz.position     = Vector2(score_x, cy + (ROW_H - 18.0) * 0.5)
+	pz.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_content.add_child(pz)
+	var score_lbl := _label(str(score), 13, Color(1.0, 0.87, 0.50),
+		Vector2(score_x + 22.0, cy), Vector2(90.0, ROW_H), _content)
+	score_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
-	var score_lbl := Label.new()
-	score_lbl.add_theme_font_override("font", UI_FONT)
-	score_lbl.add_theme_font_size_override("font_size", 13)
-	_apply_text_fx(score_lbl)
-	score_lbl.text                 = str(score)
-	score_lbl.modulate             = Color(1.0, 0.85, 0.50)
-	score_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	score_lbl.size                 = Vector2(80.0, ROW_H)
-	score_lbl.position             = Vector2(score_x + 22.0, cy)
-	score_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	_content.add_child(score_lbl)
-
-	# Reward (right side) — text + small token icon (the word/letter "ж" is
-	# replaced by the actual token glyph for visual consistency with quests
-	# and book screens).
-	var reward := LeaderboardMock.reward_for_place(rank)
-	var reward_d : int = int(reward.get("dollars", 0))
-	var reward_t : int = int(reward.get("tokens", 0))
-	var rwd_text : String
-	if reward_d > 0 and reward_t > 0:
-		rwd_text = "+%d $  +%d" % [reward_d, reward_t]
-	elif reward_d > 0:
-		rwd_text = "+%d $" % reward_d
-	elif reward_t > 0:
-		rwd_text = "+%d" % reward_t
-	else:
-		rwd_text = "—"
-	var has_token : bool = reward_t > 0
-
-	const _RWD_FONT_SZ_ROW : int   = 11
-	const _ROW_TKN_SZ      : float = 14.0
-	const _ROW_TKN_GAP     : float = 3.0
-	# Right-anchored layout: icon hugs the right edge of the reward column,
-	# text is right-aligned to the icon's left edge.
-	var rwd_right_x : float = vp_w - 10.0
-	var rwd_lbl := Label.new()
-	rwd_lbl.add_theme_font_override("font", UI_FONT)
-	rwd_lbl.add_theme_font_size_override("font_size", _RWD_FONT_SZ_ROW)
-	_apply_text_fx(rwd_lbl)
-	rwd_lbl.text                 = rwd_text
-	rwd_lbl.modulate             = CLR_GOLD
-	rwd_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	rwd_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	var lbl_right_pad : float = (_ROW_TKN_SZ + _ROW_TKN_GAP) if has_token else 0.0
-	rwd_lbl.size                 = Vector2(170.0, ROW_H)
-	rwd_lbl.position             = Vector2(rwd_right_x - 170.0 - lbl_right_pad, cy)
-	rwd_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	_content.add_child(rwd_lbl)
-
-	if has_token:
-		var tkn := _make_icon(TEX_TOKEN, _ROW_TKN_SZ)
-		tkn.position = Vector2(rwd_right_x - _ROW_TKN_SZ,
-				cy + (ROW_H - _ROW_TKN_SZ) * 0.5)
-		_content.add_child(tkn)
-
-	# Bottom thin line
-	var sep := ColorRect.new()
-	sep.color    = Color(0.14, 0.12, 0.08, 0.40)
-	sep.size     = Vector2(vp_w, 1.0)
-	sep.position = Vector2(0.0, cy + ROW_H - 1.0)
-	_content.add_child(sep)
+	_build_reward_block(_content, Vector2(w * 0.70, cy + (ROW_H - 16.0) * 0.5),
+		w * 0.28, LeaderboardMock.reward_for_place(rank), 16.0)
 
 func _reward_str(reward: Dictionary) -> String:
 	var d := int(reward.get("dollars", 0))

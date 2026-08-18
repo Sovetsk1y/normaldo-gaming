@@ -19,14 +19,12 @@ func _initialize() -> void:
 	await process_frame
 	await process_frame
 	var hud : Node = game.get_node_or_null("HUD")
-	print("STEP scene ok")
 
 	# Сейв под съёмку: деньги на счету и задания в разном состоянии, чтобы в
 	# кадр попали и невыполненное, и готовое к получению.
 	var save : Node = get_root().get_node_or_null("SaveData")
 	save.dollars = 1024
 	save.tokens  = 83
-	print("STEP save ok")
 	# Состояние под съёмку задаётся третьим аргументом: mixed (по умолчанию) —
 	# готовое + два в процессе; claimed — забранное и слот на откате.
 	var mode : String = argv[2] if argv.size() > 2 else "mixed"
@@ -47,16 +45,13 @@ func _initialize() -> void:
 					st[0]["claimed"]   = false
 		qm.emit_signal("quests_updated")
 
-	print("STEP qm ok")
 	var screen : Node = load("res://scripts/quests_screen.gd").new()
 	screen.call("setup", hud)
 	hud.add_child(screen)
 	# Считаем КАДРЫ, а не секунды: get_process_delta_time под xvfb может вернуть
 	# ноль, и цикл по времени тогда не кончается никогда.
-	print("STEP screen added")
 	for _i in 90:
 		await process_frame
-	print("STEP frames ok")
 	await RenderingServer.frame_post_draw
 	var img := get_root().get_texture().get_image()
 	img.save_png("%s/%s.png" % [out, name])
