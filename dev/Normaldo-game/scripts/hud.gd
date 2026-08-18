@@ -4316,6 +4316,21 @@ func _resist_badge(parent: Control, x: float, y: float, sz: float, item: String,
 
 # Detail screen (3 columns: Описание | center | Награды), bg_skins. Slides in from
 # the RIGHT while the grid screen (`shop_overlay`) slides out to the LEFT.
+# Раскладка карточки скина в одном месте — её спрашивают и сборка, и прогон
+# dev/smoke_skin_card.gd, и разъезжались бы они при первой же правке отступов.
+func _skin_card_layout(vp: Vector2) -> Dictionary:
+	var margin : float = vp.x * 0.018
+	var gap    : float = vp.x * 0.014
+	var body_y : float = 62.0
+	var col_w  : float = (vp.x - margin * 2.0 - gap * 2.0) / 3.0
+	return {
+		"margin": margin, "gap": gap,
+		"body_y": body_y, "body_h": vp.y - body_y - 12.0, "col_w": col_w,
+		"lx": margin,
+		"cx": margin + col_w + gap,
+		"rx": margin + (col_w + gap) * 2.0,
+	}
+
 func _show_skin_detail(skin_data: Dictionary, from_slots: bool, shop_overlay: Control = null, skip_anim: bool = false) -> void:
 	var vp := get_viewport().get_visible_rect().size
 	var skin_id : String = skin_data["id"]
@@ -4405,112 +4420,88 @@ func _show_skin_detail(skin_data: Dictionary, from_slots: bool, shop_overlay: Co
 			overlay.queue_free()
 		_show_skin_detail(skin_data, from_slots, shop_overlay, true)
 
-	var body_y := 64.0
-	var body_h := vp.y - body_y - 12.0
+	# Три колонки с полями от краёв: раньше панели стояли впритык, а левая ещё и
+	# обрезала текст по нижней границе. См. /Концепция/Карточка скина.md
+	var lay : Dictionary = _skin_card_layout(vp)
+	var body_y : float = lay["body_y"]
+	var body_h : float = lay["body_h"]
+	var col_w  : float = lay["col_w"]
+	var lx : float = lay["lx"]
+	var cx : float = lay["cx"]
+	var rx : float = lay["rx"]
+	var cw : float = col_w
 
-	# ── LEFT: Описание ─────────────────────────────────────────────────────────
-	var lx := vp.x * 0.04
-	var lw := vp.x * 0.27
-	_detail_panel(overlay, lx, body_y, lw, body_h, "Описание")
-	# Description column — a VBox we fill with badge+text rows when the abilities
-	# block is tapped (see _fill_desc). Starts with a hint.
+	# ── ЛЕВАЯ: способности ────────────────────────────────────────────────────
+	# Здесь теперь ЕДИНСТВЕННЫЙ список способностей. Ряд кружков из центра убран:
+	# он повторял этот же список и отнимал место у прокачки.
+	_detail_panel(overlay, lx, body_y, col_w, body_h, "СПОСОБНОСТИ")
+	# Список не обязан влезать: скины с тремя резистами плюс пассивка и активная
+	# дают пять строк. Не влезло — прокручивается внутри панели, а не режется.
+	var desc_scroll := ScrollContainer.new()
+	desc_scroll.position = Vector2(lx + 10.0, body_y + 30.0)
+	desc_scroll.size     = Vector2(col_w - 20.0, body_h - 40.0)
+	desc_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	desc_scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	desc_scroll.set("scroll_deadzone", 18)
+	overlay.add_child(desc_scroll)
+
 	var desc_root := VBoxContainer.new()
 	desc_root.add_theme_constant_override("separation", 8)
-	desc_root.size = Vector2(lw - 20.0, body_h - 44.0); desc_root.position = Vector2(lx + 10.0, body_y + 34.0)
-	desc_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	overlay.add_child(desc_root)
-	var hint := Label.new()
-	hint.add_theme_font_override("font", UI_FONT); hint.add_theme_font_size_override("font_size", 10)
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD; hint.modulate = Color(0.7, 0.7, 0.75)
-	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hint.text = "Нажми на блок\nСПОСОБНОСТИ, чтобы\nузнать подробнее."
-	desc_root.add_child(hint)
+	desc_root.custom_minimum_size = Vector2(col_w - 24.0, 0.0)
+	desc_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	desc_scroll.add_child(desc_root)
 
-	# ── CENTER: two stacked sub-panels (fat-sprite/feed · abilities) ───────────
-	var cx := vp.x * 0.36
-	var cw := vp.x * 0.28
-	const FEED_H := 140.0
-	const C_GAP  := 8.0
-	# Top sub-panel: the feed widget (fat sprite + draggable pizza) + XP bar.
-	# `rewards_ctx` is filled later by _build_rewards_column but shared by ref so
-	# the feed widget can scroll/pulse the reward card when a locked fat is tapped.
+	# ── ЦЕНТР: прокачка ───────────────────────────────────────────────────────
 	var rewards_ctx : Dictionary = {}
-	_detail_panel(overlay, cx, body_y, cw, FEED_H, "")
-	_build_feed_widget(overlay, cx, cw, body_y, skin_id, desc_root, rewards_ctx)
+	_detail_panel(overlay, cx, body_y, cw, body_h, "ПРОКАЧКА")
+	_build_feed_widget(overlay, cx, cw, body_y + 18.0, skin_id, desc_root, rewards_ctx)
+
+	var act_h : float = 34.0
+	var act_y : float = body_y + body_h - act_h - 14.0
+
 	if is_owned:
 		var lvl := SaveData.get_skin_level_for(skin_id)
 		var ready := lvl >= 10
-		var xp_y := body_y + 100.0
-		var l_lbl := Label.new()
-		l_lbl.add_theme_font_override("font", UI_FONT); l_lbl.add_theme_font_size_override("font_size", 13)
-		_apply_menu_caption_fx(l_lbl)
-		l_lbl.text = "★" if ready else "ур.%d" % lvl; l_lbl.modulate = Color(0.55, 0.85, 1.0)
-		l_lbl.size = Vector2(54.0, 16.0); l_lbl.position = Vector2(cx + 12.0, xp_y)
+		var xp_y : float = act_y - 62.0
+		var l_lbl := _strong_label("★" if ready else "ур.%d" % lvl, 13, Color(0.55, 0.85, 1.0), 3)
+		l_lbl.size = Vector2(60.0, 16.0); l_lbl.position = Vector2(cx + 14.0, xp_y)
+		l_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		overlay.add_child(l_lbl)
-		var r_lbl := Label.new()
-		r_lbl.add_theme_font_override("font", UI_FONT); r_lbl.add_theme_font_size_override("font_size", 13)
-		_apply_menu_caption_fx(r_lbl)
-		r_lbl.text = "★" if ready else "ур.%d" % mini(lvl + 1, 10); r_lbl.modulate = Color(0.85, 0.95, 1.0)
+		var r_lbl := _strong_label("★" if ready else "ур.%d" % mini(lvl + 1, 10), 13,
+			Color(0.85, 0.95, 1.0), 3)
 		r_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		r_lbl.size = Vector2(54.0, 16.0); r_lbl.position = Vector2(cx + cw - 66.0, xp_y)
+		r_lbl.size = Vector2(60.0, 16.0); r_lbl.position = Vector2(cx + cw - 74.0, xp_y)
+		r_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		overlay.add_child(r_lbl)
-		var xbw := cw - 24.0
-		var xbg := ColorRect.new()
-		xbg.color = Color(0.32, 0.32, 0.38, 0.95); xbg.size = Vector2(xbw, 8.0); xbg.position = Vector2(cx + 12.0, xp_y + 20.0)
-		overlay.add_child(xbg)
-		var xfl := ColorRect.new()
-		xfl.color = Color(0.45, 0.80, 1.0); xfl.size = Vector2(xbw * SaveData.xp_level_progress_for(skin_id), 8.0); xfl.position = Vector2(cx + 12.0, xp_y + 20.0)
-		overlay.add_child(xfl)
 
-	# Bottom sub-panel: СПОСОБНОСТИ + action button.
-	var ab_y := body_y + FEED_H + C_GAP
-	var ab_h := body_h - FEED_H - C_GAP
-	_detail_panel(overlay, cx, ab_y, cw, ab_h, "")
-	var cur_y := ab_y + 12.0
+		var xbw : float = cw - 28.0
+		var xby : float = xp_y + 20.0
+		UiKit.panel(overlay, Vector2(cx + 14.0, xby), Vector2(xbw, 9.0),
+			Color(0.05, 0.04, 0.03, 0.95), 4, Color(0.30, 0.30, 0.36, 0.9))
+		var frac : float = SaveData.xp_level_progress_for(skin_id)
+		if frac > 0.0:
+			UiKit.panel(overlay, Vector2(cx + 15.0, xby + 1.5),
+				Vector2(maxf(4.0, (xbw - 2.0) * frac), 6.0), Color(0.45, 0.80, 1.0), 3)
 
-	# СПОСОБНОСТИ — a row of badges. Red ring = resist, blue = passive, green =
-	# active (РЫГАЛИТИ/spell). Tapping the WHOLE block reveals the explanation in
-	# the left "Описание" panel.
-	var sk_top := cur_y
-	var sk_t := _strong_label("СПОСОБНОСТИ", 11, Color(1.0, 0.9, 0.5), 2)
-	sk_t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sk_t.size = Vector2(cw, 14.0); sk_t.position = Vector2(cx, cur_y)
-	overlay.add_child(sk_t)
-	cur_y += 18.0
+		# Остаток ЧИСЛОМ: полоса без числа отвечает «скоро», а игрок спрашивает
+		# «сколько ещё забегов».
+		var left : int = SaveData.xp_to_next_level_for(skin_id)
+		var need := _strong_label(
+			("ещё %d пицц до жетона" % left) if ready else ("ещё %d пицц до ур.%d" % [left, mini(lvl + 1, 10)]),
+			10, Color(0.86, 0.88, 0.92), 2)
+		need.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		need.size = Vector2(cw - 20.0, 14.0); need.position = Vector2(cx + 10.0, xby + 14.0)
+		need.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		overlay.add_child(need)
 
-	var items := _ability_items(skin_id)   # resists (red) → passive (blue) → active (green)
-
-	const BSZ := 44.0
-	const BGP := 10.0
-	var total_bw : float = items.size() * BSZ + (items.size() - 1) * BGP
-	var bx0 : float = cx + (cw - total_bw) * 0.5
-	for i in items.size():
-		var b : Dictionary = items[i]
-		_ability_badge(overlay, bx0 + i * (BSZ + BGP), cur_y, BSZ, b["ring"], b["tex"], b["mod"],
-			b["star"], bool(b.get("locked", false)))
-	cur_y += BSZ + 4.0
-
-	# Описание заполняем СРАЗУ при открытии карточки. Раньше панель «Описание»
-	# стояла пустой, пока игрок не догадается ткнуть в кружки — то есть главная
-	# информация о скине была спрятана за неочевидным жестом.
+	# Описание заполняем СРАЗУ: главная информация о скине не должна прятаться
+	# за неочевидным тапом.
 	_fill_desc(desc_root, skin_id)
 
-	# Тап по блоку оставлен: он перерисовывает описание (удобно после покупки
-	# уровня) и даёт привычный отклик со звуком.
-	var blk := Button.new()
-	blk.flat = true; blk.focus_mode = Control.FOCUS_NONE
-	blk.size = Vector2(cw, cur_y - sk_top); blk.position = Vector2(cx, sk_top)
-	blk.pressed.connect(func():
-		_play_btn_sfx()
-		_fill_desc(desc_root, skin_id))
-	overlay.add_child(blk)
-	cur_y += 20.0
-
-	# Action button (НАДЕТЬ / КУПИТЬ / АКТИВЕН)
-	_skin_action_button(overlay, cx + 12.0, cur_y, cw - 24.0, 32.0, skin_id, refresh)
+	_skin_action_button(overlay, cx + 14.0, act_y, cw - 28.0, act_h, skin_id, refresh)
 
 	# ── RIGHT: Награды за уровень (styled, clipped, scrollable) ────────────────
-	_build_rewards_column(overlay, vp.x * 0.66, body_y, vp.x * 0.30, body_h, skin_id, rewards_ctx)
+	_build_rewards_column(overlay, rx, body_y, col_w, body_h, skin_id, rewards_ctx)
 
 # White label with a black stroke outline (no shadow) — matches the reward art.
 func _strong_label(text: String, size: int, col: Color, outline: int = 3) -> Label:
@@ -4528,20 +4519,14 @@ func _strong_label(text: String, size: int, col: Color, outline: int = 3) -> Lab
 # `ctx` (if given) is filled with { scroll, cards: {lvl:Control}, step, view_h } so
 # the feed widget can scroll to + pulse the card where a fat unlocks.
 func _build_rewards_column(parent: Control, x: float, y: float, w: float, h: float, skin_id: String, ctx: Dictionary = {}) -> void:
-	var bgp := ColorRect.new()
-	bgp.color = Color(0.06, 0.05, 0.08, 0.85); bgp.size = Vector2(w, h); bgp.position = Vector2(x, y)
-	bgp.mouse_filter = Control.MOUSE_FILTER_PASS
-	parent.add_child(bgp)
-
-	var title := _strong_label("Награды\nза уровень", 15, Color(1, 1, 1), 3)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.size = Vector2(w, 44.0); title.position = Vector2(x, y + 8.0)
-	parent.add_child(title)
+	# Та же скруглённая панель, что и у двух других колонок: раньше здесь был
+	# плоский прямоугольник, и правая колонка выбивалась из карточки.
+	_detail_panel(parent, x, y, w, h, "НАГРАДЫ ЗА УРОВЕНЬ")
 
 	# Scroll viewport — clips the overflow (the bottom card is cut off) and
 	# scrolls on touch.
 	var scroll := ScrollContainer.new()
-	scroll.size = Vector2(w, h - 56.0); scroll.position = Vector2(x, y + 52.0)
+	scroll.size = Vector2(w, h - 40.0); scroll.position = Vector2(x, y + 32.0)
 	scroll.clip_contents              = true
 	scroll.horizontal_scroll_mode     = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.vertical_scroll_mode       = ScrollContainer.SCROLL_MODE_AUTO
@@ -4567,7 +4552,7 @@ func _build_rewards_column(parent: Control, x: float, y: float, w: float, h: flo
 	ctx["scroll"] = scroll
 	ctx["cards"]  = cards
 	ctx["step"]   = 86.0 + 10.0   # CH + separation
-	ctx["view_h"] = h - 56.0
+	ctx["view_h"] = h - 40.0
 
 # Smoothly scroll the rewards list so level `lvl`'s card centres in view, then
 # blink that card's size a couple of times to point the player at it.
@@ -4727,15 +4712,17 @@ func _reward_pair(parent: Control, pos: Vector2, w: float, tex_a: Texture2D, n_a
 		parent.add_child(nl)
 
 # A rounded dark panel with an optional title.
+# Колонка карточки скина: скруглённая панель с заголовком. Раньше это был
+# плоский прямоугольник впритык к краю экрана — карточка героя выглядела
+# таблицей. См. /Концепция/Карточка скина.md
 func _detail_panel(parent: Control, x: float, y: float, w: float, h: float, title: String) -> void:
-	var p := ColorRect.new()
-	p.color = Color(0.06, 0.05, 0.08, 0.85); p.size = Vector2(w, h); p.position = Vector2(x, y); p.mouse_filter = Control.MOUSE_FILTER_PASS
-	parent.add_child(p)
+	UiKit.panel(parent, Vector2(x, y), Vector2(w, h),
+		Color(0.07, 0.06, 0.09, 0.93), 12, Color(0.30, 0.26, 0.34, 0.95))
 	if title != "":
 		var t := Label.new()
 		t.add_theme_font_override("font", UI_FONT); t.add_theme_font_size_override("font_size", 12)
 		_apply_menu_caption_fx(t)
-		t.text = title; t.modulate = Color(1.0, 1.0, 1.0, 0.95); t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		t.text = title; t.modulate = Color(1.0, 0.92, 0.60); t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		t.size = Vector2(w, 18.0); t.position = Vector2(x, y + 8.0); t.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		parent.add_child(t)
 

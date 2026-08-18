@@ -300,6 +300,17 @@ func xp_level_progress_for(id: String) -> float:
 	var to_xp   = LEVEL_XP[lv]
 	return clampf(float(xp - from_xp) / float(to_xp - from_xp), 0.0, 1.0)
 
+# Сколько опыта осталось до следующего уровня КОНКРЕТНОГО скина. Карточке скина
+# нужен остаток числом: полоса без числа отвечает «скоро», а игрок спрашивает
+# «сколько ещё забегов».
+func xp_to_next_level_for(id: String) -> int:
+	var lv := get_skin_level_for(id)
+	var xp := get_skin_xp_for(id)
+	if lv >= 10:
+		var over := xp - LEVEL_XP[9]
+		return MASTERY_XP_PER_TOKEN - (over % MASTERY_XP_PER_TOKEN)
+	return maxi(0, LEVEL_XP[lv] - xp)
+
 # XP needed to reach the next level (or next mastery token)
 func xp_to_next_level() -> int:
 	if skin_level >= 10:

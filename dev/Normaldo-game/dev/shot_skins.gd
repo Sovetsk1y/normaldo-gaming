@@ -27,12 +27,17 @@ func _initialize() -> void:
 	save.dollars = 300 if poor else 12400
 	save.tokens  = 83
 	# Часть скинов куплена, часть нет — в кадр должны попасть оба состояния.
+	# Прогресс скинов сбрасываем: сейв лежит на диске и переживает прогоны, а
+	# smoke_skins.gd прокачивает КАЖДЫЙ скин до 10-го уровня. Без сброса в кадр
+	# попадает «десятый уровень» у скина, который даже не куплен.
+	save.skin_progress = {}
 	save.owned_skins = ["classic", "viking", "tyson", "harry_potter"]
 	save.active_skin = "harry_potter"
 	save.skin_level  = 4
 
 	if detail != "":
-		hud.call("_show_skin_detail", detail)
+		var reg : Node = get_root().get_node_or_null("SkinRegistry")
+		hud.call("_show_skin_detail", reg.get_skin(detail), true, null, true)
 	else:
 		hud.call("_show_shop")
 	for _i in 90:
