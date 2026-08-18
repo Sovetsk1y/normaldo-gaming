@@ -106,12 +106,26 @@ func _test_layout(hud: Node, save: Node) -> void:
 			% [skin.end.x, mach.position.x, mach.end.x, pay.position.x])
 	_check(skin.position.y > 60.0, "колонки ниже шапки: y=%.0f" % skin.position.y)
 
-	# Барабан обязан быть крупным: ради этого экран и переделывался.
+	# Автоматы — картинка, и окно барабана обязано лечь ровно на тёмный экран
+	# кабинета: разъедется — символы поедут по корпусу.
 	var reel_w : float = float(scr.get("_reel_w"))
-	_check(reel_w >= mach.size.x * 0.25,
-		"окно барабана — не меньше четверти корпуса: %.0f из %.0f" % [reel_w, mach.size.x])
-	_check(reel_w * 3.0 + 20.0 <= mach.size.x,
-		"три барабана помещаются в корпус: %.0f ≤ %.0f" % [reel_w * 3.0 + 20.0, mach.size.x])
+	var sym_h  : float = float(scr.get("_sym_h"))
+	var mach_w : float = (mach.size.x - 16.0) / 3.0
+	var rel    : Rect2 = scr.get("MACH_SCREEN_REL")
+	_check(absf(reel_w - rel.size.x * mach_w) < 0.5,
+		"окно барабана шириной с экран кабинета: %.1f ≈ %.1f" % [reel_w, rel.size.x * mach_w])
+	_check(absf(sym_h - rel.size.y * mach_w * (454.0 / 241.0)) < 0.5,
+		"и высотой с него же: %.1f" % sym_h)
+	_check(mach_w * 3.0 <= mach.size.x,
+		"три кабинета помещаются в колонку: %.0f ≤ %.0f" % [mach_w * 3.0, mach.size.x])
+	# Регрессия по размеру: до переделки барабан был 80×70, меньше делать нельзя.
+	_check(reel_w >= 74.0 and sym_h >= 70.0,
+		"барабан не мельче прежнего: %.0f×%.0f" % [reel_w, sym_h])
+
+	# Кабинет обрезан снизу, но экран и маркиза обязаны остаться в кадре.
+	var cut : float = float(scr.get("MACH_CUT"))
+	_check(cut > rel.position.y + rel.size.y,
+		"обрезка кабинета не задевает экран: %.2f > %.2f" % [cut, rel.position.y + rel.size.y])
 
 	# На входе не должно выглядеть, будто только что выпал выигрыш.
 	var faces : Array = []

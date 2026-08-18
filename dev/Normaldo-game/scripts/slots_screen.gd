@@ -12,6 +12,7 @@ const TEX_SNAKE      := preload("res://assets/items/snake.png")
 const TEX_STONE      := preload("res://assets/items/stone.png")
 const TEX_TRASH      := preload("res://assets/items/trash_bin.png")
 const TEX_BG_SLOTS   := preload("res://assets/ui/slots/bg_slots.png")
+const TEX_SLOT_MACH  := preload("res://assets/slots/slot_machine.png")
 const TEX_BACK_ARROW := preload("res://assets/ui/quests/back_arrow.png")
 
 # ── Layout (canvas pixels, 430×192) ────────────────────────────────────────
@@ -30,15 +31,25 @@ const RES_ICON_SZ     : float   = 16.0
 const RES_GAP         : float   = 2.0
 const RES_NUM_W       : float   = 36.0
 const RES_FONT_SZ     : int     = 14
-# Три колонки: скин слева, автомат по центру, призы справа (канвас-px).
+# Три колонки: скин слева, автоматы по центру, призы справа (канвас-px).
+# Центральная колонка забирает столько ширины, сколько можно: размер барабана
+# задан артом кабинета (экран — 50.6% его ширины) и растёт только вместе с ним.
 const COL_Y      : float = 34.0
 const COL_H      : float = 150.0
-const SKIN_X     : float = 12.0
-const SKIN_W     : float = 104.0
-const MACH_X     : float = 122.0
-const MACH_W     : float = 186.0
-const PAY_X      : float = 314.0
-const PAY_W      : float = 104.0
+const SKIN_X     : float = 10.0
+const SKIN_W     : float = 92.0
+const MACH_X     : float = 108.0
+const MACH_W     : float = 212.0
+const PAY_X      : float = 326.0
+const PAY_W      : float = 94.0
+# slot_machine.png — 241×454. Тёмный «экран» внутри кабинета:
+const MACH_SCREEN_REL : Rect2 = Rect2(0.241, 0.225, 0.506, 0.255)
+# Сколько высоты кабинета показываем: ниже идёт плинтус, который на этом экране
+# только съедал бы место под кнопкой. Та же величина, что в выплате мини-игр.
+const MACH_CUT   : float = 0.66
+const RESULT_H   : float = 24.0
+const SPIN_H     : float = 52.0
+const REEL_INSET : float = 4.0
 # Slide-down transition (mirrors quests_screen).
 const SLIDE_TIME      : float = 0.45
 const SLIDE_TRANS     : int   = Tween.TRANS_QUAD
@@ -108,10 +119,8 @@ const TIER_COLORS := [
 	Color(1.0,  0.65, 0.15),
 ]
 
-# Барабаны. Размер считается от ширины корпуса в `_build_ui`, а не задан
-# числом: до переделки окно было 80×70 при кабинете в 160 px, и главное на
-# экране — результат — занимало меньше места, чем декорация вокруг него.
-const REEL_GAP   := 10.0
+# Барабаны. Размер не задан числом: он берётся из арта кабинета в
+# `_build_machine`, поэтому окно всегда точно совпадает с экраном автомата.
 const N_VISIBLE  := 3                    # символов в барабане одновременно
 const START_FACES : Array = [1, 5, 10]   # змея / мусор / жетон — заведомо не приз
 const SPIN_SPEED := 920.0                # px/s на свободном вращении
@@ -334,63 +343,68 @@ func _build_ui() -> void:
 
 	SaveData.data_changed.connect(_on_data_changed)
 
-# ── Центр: ОДИН автомат с тремя барабанами ───────────────────────────────────
-# До переделки барабаны стояли в трёх отдельных кабинетах — это читалось как
-# три разных автомата, хотя комбинация у них одна на троих.
+# ── Центр: автоматы ──────────────────────────────────────────────────────────
+# Сами автоматы — пиксель-арт `slot_machine.png`, как и было: рисовать корпус
+# панелями значит терять то, ради чего экран открывают. Ниже плинтуса кабинет
+# обрезан (MACH_CUT) — та же обрезка, что в выплате мини-игр: она освобождает
+# место под кнопку и строку результата, не трогая ни маркизу, ни экран.
+# Три кабинета стоят вплотную на общей подложке — это один автомат с тремя
+# барабанами, а не три разных.
 func _build_machine() -> void:
 	var r : Rect2 = _lay["mach"]
 
-	var body := UiKit.panel(_slide_root, r.position, r.size,
-		Color(0.10, 0.05, 0.18, 0.95), 12, Color(0.62, 0.30, 1.00, 0.90), 2)
-	body.z_index = 0
+	UiKit.panel(_slide_root, r.position, r.size,
+		Color(0.10, 0.05, 0.18, 0.92), 12, Color(0.62, 0.30, 1.00, 0.85), 2)
 
-	# Маркиза с лампочками — автомат должен выглядеть автоматом.
-	var marq_h : float = 34.0
-	var marq_r := Rect2(r.position + Vector2(12.0, 10.0), Vector2(r.size.x - 24.0, marq_h))
-	UiKit.panel(_slide_root, marq_r.position, marq_r.size,
-		Color(0.20, 0.08, 0.34, 0.98), 10, Color(0.85, 0.45, 1.00, 0.85), 2)
-	var marq_lbl := _make_label("НОРМАЛЬДО-СЛОТ", 15, Color(1.0, 0.80, 0.40))
-	_apply_text_fx(marq_lbl)
-	marq_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	marq_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	marq_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	UiKit.place(_slide_root, marq_lbl, marq_r.position, marq_r.size)
-	for i in 8:
-		var lamp := Panel.new()
-		lamp.add_theme_stylebox_override("panel", UiKit.rounded(
-			Color(1.0, 0.72, 0.30, 0.85) if i % 2 == 0 else Color(0.60, 0.85, 1.0, 0.85), 3))
-		lamp.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		UiKit.place(_slide_root, lamp, marq_r.position + Vector2(
-			10.0 + float(i) * (marq_r.size.x - 20.0 - 6.0) / 7.0, marq_r.size.y - 4.0),
-			Vector2(6.0, 6.0))
+	# Кабинеты вплотную занимают всю ширину подложки за вычетом полей.
+	var pad     : float = 8.0
+	var mach_w  : float = (r.size.x - pad * 2.0) / 3.0
+	var aspect  : float = float(TEX_SLOT_MACH.get_height()) / float(TEX_SLOT_MACH.get_width())
+	var mach_h  : float = mach_w * aspect          # полная высота кабинета
+	var vis_h   : float = mach_h * MACH_CUT        # сколько от него видно
 
-	# Три окна барабанов в одном корпусе. Размер считаем от ширины корпуса,
-	# чтобы символ был крупным на любом экране.
-	var inner_w : float = r.size.x - 28.0
-	_reel_w  = floorf((inner_w - REEL_GAP * 2.0) / 3.0)
-	_sym_h   = _reel_w
-	_reel_h  = _reel_w
+	# Барабан — это ЭКРАН кабинета: его размер задан артом, а не выдуман.
+	_reel_w  = MACH_SCREEN_REL.size.x * mach_w
+	_sym_h   = MACH_SCREEN_REL.size.y * mach_h
+	_reel_h  = _sym_h
 	_strip_h = float(STRIP_SIZE) * 2.0 * _sym_h
-	var reels_w : float = _reel_w * 3.0 + REEL_GAP * 2.0
-	var reels_x : float = r.position.x + (r.size.x - reels_w) * 0.5
-	var reels_y : float = marq_r.position.y + marq_h + 12.0
+
+	# Столбец по вертикали: кабинеты, строка результата, кнопка. Считаем разом,
+	# чтобы блок стоял по центру подложки, а не «примерно там».
+	var block_h : float = vis_h + 12.0 + RESULT_H + 14.0 + SPIN_H
+	var top     : float = r.position.y + maxf(10.0, (r.size.y - block_h) * 0.5)
+	var left    : float = r.position.x + pad
+	var vis_bottom : float = top + vis_h
 
 	_reel_clips.clear()
 	_reel_tiles.clear()
 	for i in 3:
-		var wx : float = reels_x + float(i) * (_reel_w + REEL_GAP)
-		var win_pos := Vector2(wx, reels_y)
-		var win_size := Vector2(_reel_w, _reel_h)
-		UiKit.panel(_slide_root, win_pos - Vector2(3.0, 3.0), win_size + Vector2(6.0, 6.0),
-			Color(0.03, 0.02, 0.06, 0.98), 8, Color(0.75, 0.55, 0.25, 0.90), 2)
+		var mx : float = left + float(i) * mach_w
 
+		# Нижнюю часть кабинета отрезаем регионом атласа, а не масштабом: пиксели
+		# арта остаются пикселями арта.
+		var atlas := AtlasTexture.new()
+		atlas.atlas  = TEX_SLOT_MACH
+		atlas.region = Rect2(0.0, 0.0, float(TEX_SLOT_MACH.get_width()),
+			float(TEX_SLOT_MACH.get_height()) * MACH_CUT)
+		var mach := TextureRect.new()
+		mach.texture             = atlas
+		mach.stretch_mode        = TextureRect.STRETCH_SCALE
+		mach.expand_mode         = TextureRect.EXPAND_IGNORE_SIZE
+		mach.custom_minimum_size = Vector2.ZERO
+		mach.texture_filter      = CanvasItem.TEXTURE_FILTER_NEAREST
+		mach.mouse_filter        = Control.MOUSE_FILTER_IGNORE
+		UiKit.place(_slide_root, mach, Vector2(mx, top), Vector2(mach_w, vis_h))
+
+		# Окно барабана ложится ровно на тёмный экран кабинета.
 		var clip := Control.new()
-		clip.position      = win_pos
-		clip.size          = win_size
 		clip.clip_contents = true
-		clip.pivot_offset  = win_size * 0.5
 		clip.mouse_filter  = Control.MOUSE_FILTER_IGNORE
-		_slide_root.add_child(clip)
+		UiKit.place(_slide_root, clip,
+			Vector2(mx + MACH_SCREEN_REL.position.x * mach_w,
+				top + MACH_SCREEN_REL.position.y * mach_h),
+			Vector2(_reel_w, _reel_h))
+		clip.pivot_offset = Vector2(_reel_w, _reel_h) * 0.5
 		_reel_clips.append(clip)
 
 		var tiles : Array[TextureRect] = []
@@ -399,8 +413,8 @@ func _build_machine() -> void:
 			tr.texture      = _sym_textures[0]
 			tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 			tr.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
-			UiKit.place(clip, tr, Vector2(9.0, 9.0 + float(k) * _sym_h),
-				Vector2(_reel_w - 18.0, _sym_h - 18.0))
+			UiKit.place(clip, tr, Vector2(REEL_INSET, REEL_INSET + float(k) * _sym_h),
+				Vector2(_reel_w - REEL_INSET * 2.0, _sym_h - REEL_INSET * 2.0))
 			tiles.append(tr)
 		_reel_tiles.append(tiles)
 	# Стартовые позиции разные: три одинаковых символа на входе читаются как
@@ -417,14 +431,14 @@ func _build_machine() -> void:
 	_result_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	_result_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	UiKit.place(_slide_root, _result_lbl,
-		Vector2(r.position.x + 10.0, reels_y + _reel_h + 12.0), Vector2(r.size.x - 20.0, 24.0))
+		Vector2(r.position.x + 10.0, vis_bottom + 12.0), Vector2(r.size.x - 20.0, RESULT_H))
 
 	# Кнопка спина — единственное действие экрана, значит самая крупная и по
 	# центру под автоматом.
 	var spin_w : float = minf(240.0, r.size.x - 40.0)
-	var spin_h : float = 52.0
+	var spin_h : float = SPIN_H
 	var spin_pos := Vector2(r.position.x + (r.size.x - spin_w) * 0.5,
-		r.position.y + r.size.y - spin_h - 14.0)
+		vis_bottom + 12.0 + RESULT_H + 14.0)
 
 	_spin_visual = Control.new()
 	_spin_visual.size         = Vector2(spin_w, spin_h)
@@ -865,7 +879,7 @@ func _update_reel_vis(reel_idx: int) -> void:
 		var tr      := _reel_tiles[reel_idx][k] as TextureRect
 		tr.texture  = _sym_textures[sym_idx]
 		tr.modulate = Color.WHITE
-		tr.position = Vector2(9.0, 9.0 - partial + float(k) * _sym_h)
+		tr.position = Vector2(REEL_INSET, REEL_INSET - partial + float(k) * _sym_h)
 
 func _update_all_reels() -> void:
 	for i in 3:
