@@ -34,6 +34,8 @@ func _initialize() -> void:
 	await _test_abilities(hud, save, reg)
 	print("── Прокачка ──")
 	await _test_progress(hud, save, reg)
+	print("── Подпись и жир ──")
+	await _test_lore_and_fat(hud, save, reg)
 	print("── Состояния кнопки ──")
 	await _test_action(hud, save, reg)
 	print("── Все скины ──")
@@ -181,6 +183,47 @@ func _test_progress(hud: Node, save: Node, reg: Node) -> void:
 	var ov2 : Control = await _open(hud, reg, "tyson")
 	var t2 : Array = _texts(ov2, [])
 	_check(_count(t2, "ещё") == 0, "у не купленного скина полосы опыта нет")
+	await _close(ov2)
+
+# Центральную колонку заполняют подпись героя и лестница состояний жира. Без
+# них там пустовала половина панели, а о самих состояниях говорил только
+# перетаскиваемый кусок пиццы, о котором игрок не догадывался.
+func _test_lore_and_fat(hud: Node, save: Node, reg: Node) -> void:
+	# Подпись обязана быть у КАЖДОГО скина: пустая строка оставит дыру в колонке.
+	var missing : Array = []
+	var too_long : Array = []
+	for sd in reg.SKINS:
+		var id := String(sd["id"])
+		var text := String(reg.lore_for(id))
+		if text.strip_edges() == "":
+			missing.append(id)
+		elif text.length() > 90:
+			too_long.append("%s (%d)" % [id, text.length()])
+	_check(missing.is_empty(), "подпись есть у всех скинов, нет у: %s" % [missing])
+	_check(too_long.is_empty(), "подписи влезают в колонку, длинные: %s" % [too_long])
+
+	# На 1-м уровне открыты три состояния, четвёртое — с замком и уровнем.
+	_reset(save, ["classic", "pirate"], "pirate", 1)
+	var ov : Control = await _open(hud, reg, "pirate")
+	var t : Array = _texts(ov, [])
+	_check(_count(t, String(reg.lore_for("pirate"))) == 1, "подпись героя на карточке")
+	_check(_count(t, "СОСТОЯНИЯ ЖИРА") == 1, "лестница состояний жира на карточке")
+	var unlock_lvl : int = hud.call("_fat_unlock_level", 3, "pirate")
+	_check(_count(t, "ур.%d" % unlock_lvl) > 0,
+		"у закрытого состояния подписан уровень открытия (ур.%d)" % unlock_lvl)
+	await _close(ov)
+
+	# На уровне, где открыто всё, замков быть не должно.
+	_reset(save, ["classic", "pirate"], "pirate", 5)
+	var ov2 : Control = await _open(hud, reg, "pirate")
+	var t2 : Array = _texts(ov2, [])
+	var locks := 0
+	for fi in 4:
+		var lv : int = hud.call("_fat_unlock_level", fi, "pirate")
+		if lv > 1:
+			locks += _count(t2, "ур.%d" % lv)
+	_check(locks == 0 or _count(t2, "ур.5") > 0,
+		"на прокачанном скине состояния жира открыты")
 	await _close(ov2)
 
 func _test_action(hud: Node, save: Node, reg: Node) -> void:

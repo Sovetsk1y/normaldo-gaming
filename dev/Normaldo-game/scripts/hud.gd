@@ -4316,6 +4316,64 @@ func _resist_badge(parent: Control, x: float, y: float, sz: float, item: String,
 
 # Detail screen (3 columns: Описание | center | Награды), bg_skins. Slides in from
 # the RIGHT while the grid screen (`shop_overlay`) slides out to the LEFT.
+# Подпись героя под портретом. Возвращает нижнюю границу блока, чтобы следующий
+# блок встал вплотную и раскладка не зависела от длины текста.
+func _build_skin_lore(parent: Control, cx: float, cw: float, y: float, skin_id: String) -> float:
+	var text := SkinRegistry.lore_for(skin_id)
+	if text == "":
+		return y
+	var l := _strong_label(text, 11, Color(0.88, 0.86, 0.80), 2)
+	l.autowrap_mode        = TextServer.AUTOWRAP_WORD
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.size         = Vector2(cw - 32.0, 40.0)
+	l.position     = Vector2(cx + 16.0, y)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(l)
+	return y + 40.0
+
+# Лестница состояний жира: четыре портрета, закрытые — с замком и уровнем.
+# Это ровно то, о чём колонка «ПРОКАЧКА»: до сих пор о состояниях говорил только
+# перетаскиваемый кусок пиццы, о котором игрок не догадывался.
+func _build_fat_ladder(parent: Control, cx: float, cw: float, y: float, skin_id: String) -> void:
+	var cap := _strong_label("СОСТОЯНИЯ ЖИРА", 10, Color(1.0, 0.88, 0.45), 2)
+	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cap.size = Vector2(cw, 14.0); cap.position = Vector2(cx, y)
+	cap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(cap)
+
+	var lvl : int = SaveData.get_skin_level_for(skin_id)
+	var avail : int = _avail_max_fat(skin_id, lvl)
+	const SZ  := 54.0
+	const GAP := 6.0
+	var total : float = SZ * 4.0 + GAP * 3.0
+	var x0 : float = cx + (cw - total) * 0.5
+	var row_y : float = y + 18.0
+	for fi in 4:
+		var px : float = x0 + fi * (SZ + GAP)
+		var open : bool = fi <= avail
+		var icon := _skin_head_icon(skin_id, fi, SZ)
+		icon.position = Vector2(px, row_y)
+		icon.modulate = Color(1, 1, 1) if open else Color(0.35, 0.35, 0.40, 0.85)
+		parent.add_child(icon)
+		if open:
+			continue
+		# Закрытое состояние — замок И уровень открытия, а не только затемнение.
+		var lk := TextureRect.new()
+		lk.texture       = _lock_tex()
+		lk.stretch_mode  = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		lk.expand_mode   = TextureRect.EXPAND_IGNORE_SIZE
+		lk.modulate      = Color(1.0, 0.85, 0.35, 0.95)
+		lk.size          = Vector2(SZ * 0.44, SZ * 0.44)
+		lk.position      = Vector2(px + SZ * 0.28, row_y + SZ * 0.20)
+		lk.mouse_filter  = Control.MOUSE_FILTER_IGNORE
+		parent.add_child(lk)
+		var ul := _strong_label("ур.%d" % _fat_unlock_level(fi, skin_id), 9,
+			Color(0.90, 0.90, 0.95), 2)
+		ul.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		ul.size = Vector2(SZ, 12.0); ul.position = Vector2(px, row_y + SZ - 2.0)
+		ul.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		parent.add_child(ul)
+
 # Раскладка карточки скина в одном месте — её спрашивают и сборка, и прогон
 # dev/smoke_skin_card.gd, и разъезжались бы они при первой же правке отступов.
 func _skin_card_layout(vp: Vector2) -> Dictionary:
@@ -4493,6 +4551,12 @@ func _show_skin_detail(skin_data: Dictionary, from_slots: bool, shop_overlay: Co
 		need.size = Vector2(cw - 20.0, 14.0); need.position = Vector2(cx + 10.0, xby + 14.0)
 		need.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		overlay.add_child(need)
+
+	# Между портретом и полосой опыта пустовала половина колонки. Заполняем её
+	# тем, что колонке и положено: подписью героя и лестницей его состояний жира.
+	var mid_y : float = body_y + 118.0
+	mid_y = _build_skin_lore(overlay, cx, cw, mid_y, skin_id)
+	_build_fat_ladder(overlay, cx, cw, mid_y + 10.0, skin_id)
 
 	# Описание заполняем СРАЗУ: главная информация о скине не должна прятаться
 	# за неочевидным тапом.
