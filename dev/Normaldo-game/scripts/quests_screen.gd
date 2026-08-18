@@ -74,7 +74,8 @@ var _token_lbl   : Label = null
 var _dollar_target : Vector2 = Vector2.ZERO
 var _token_target  : Vector2 = Vector2.ZERO
 var _claim_busy   : bool = false
-var _scroll_content : Control = null
+var _layout      : Dictionary = {}
+var _reset_lbl   : Label = null
 # Per-slot cooldown timer labels. _process keeps them ticking down each frame
 # without rebuilding the whole card. Indexed by slot (0..2); null when that
 # slot is currently showing a normal quest card.
@@ -106,6 +107,8 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	# Per-slot cooldown countdowns. Auto-replace the placeholder with a fresh
 	# quest the moment the timer hits zero — no need to wait for another open.
+	if is_instance_valid(_reset_lbl):
+		_reset_lbl.text = _time_to_midnight()
 	for i in _cd_timer_lbls.size():
 		var lbl = _cd_timer_lbls[i]
 		if not is_instance_valid(lbl):
@@ -192,56 +195,90 @@ func _build(vp: Vector2) -> void:
 	# ── Top-right resources ────────────────────────────────────────────────
 	_build_resource_strip(vp)
 
-	# ── Central "black zone" — ScrollContainer for quest cards ─────────────
-	var zone_pos  := Vector2(ZONE_X * scale_x, ZONE_Y * scale_y)
-	var zone_size := Vector2(ZONE_W * scale_x, ZONE_H * scale_y)
-	var pad       := 12.0
-	var card_w    := zone_size.x - pad * 2.0
+	# ── Шапка: сколько осталось до сброса заданий ──────────────────────────
+	_build_reset_chip(vp)
 
-	var scroll := ScrollContainer.new()
-	scroll.name = "QuestScroll"
-	scroll.size = zone_size
-	scroll.position = zone_pos
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	# Hide the vertical scrollbar — drag-to-scroll still works, we just don't
-	# want the grey bar overlaying the cards.
-	scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_SHOW_NEVER
-	# scroll_deadzone > 0 lets the container steal a touch from its child
-	# buttons once the finger moves past the threshold — required so list
-	# scrolling works on mobile, where every tap initially hits a card. 18 px
-	# tuned for Retina: low enough to feel responsive, high enough to avoid
-	# accidentally swallowing taps.
-	scroll.set("scroll_deadzone", 18)
-	_slide_root.add_child(scroll)
+	# ── Баннер бонуса за вход + три карточки В РЯД ─────────────────────────
+	# Экран альбомный (960×430), а список был вертикальный: половина ширины
+	# пустовала, и при этом третья карточка не влезала и требовала скролла.
+	# Три задания в ряд помещаются целиком — скролл не нужен вовсе.
+	# См. /Концепция/Экран заданий.md
+	_layout = _compute_layout(vp)
+	_build_bonus_banner(_layout["banner_pos"], _layout["banner_size"])
 
-	var scroll_content := Control.new()
-	scroll_content.name = "ScrollContent"
-	scroll_content.custom_minimum_size = Vector2(zone_size.x, 0.0)
-	scroll_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.add_child(scroll_content)
-	_scroll_content = scroll_content
-
-	var inner_y := 0.0
-
-	# Entry bonus banner (inside scroll)
-	_build_bonus_banner_scrollable(Vector2(pad, inner_y), card_w)
-	if is_instance_valid(_bonus_root):
-		_passthrough_scroll_inputs(_bonus_root)
-	inner_y += 54.0
-
-	# Daily quest cards
 	_cd_timer_lbls = [null, null, null]
 	for i in 3:
-		var slot   := i
-		var card_h := 100.0
-		var node   := _build_card_scrollable(Vector2(pad, inner_y), card_w, card_h, slot)
-		scroll_content.add_child(node)
+		var node := _build_card(_card_pos(i), _layout["card_size"], i)
+		_slide_root.add_child(node)
 		_cards.append(node)
-		inner_y += card_h + 10.0
 
-	# Daily reset banner removed — each slot now shows its own per-tier
-	# cooldown when claimed, so a global "сброс через …" line is redundant.
-	scroll_content.custom_minimum_size = Vector2(zone_size.x, inner_y)
+# Все размеры экрана в одном месте: раскладку считает и сборка, и перерисовка,
+# и разъезжались они каждый раз, когда правишь одну из двух.
+func _compute_layout(vp: Vector2) -> Dictionary:
+	var margin : float = vp.x * 0.022
+	var gap    : float = vp.x * 0.016
+	var banner_y : float = vp.y * 0.145
+	var banner_h : float = vp.y * 0.115
+	var cards_y  : float = banner_y + banner_h + vp.y * 0.035
+	var cards_h  : float = vp.y - cards_y - vp.y * 0.045
+	var card_w   : float = (vp.x - margin * 2.0 - gap * 2.0) / 3.0
+	return {
+		"margin": margin, "gap": gap, "cards_y": cards_y,
+		"banner_pos":  Vector2(margin, banner_y),
+		"banner_size": Vector2(vp.x - margin * 2.0, banner_h),
+		"card_size":   Vector2(card_w, cards_h),
+	}
+
+func _card_pos(i: int) -> Vector2:
+	return Vector2(float(_layout["margin"]) + i * (float(_layout["card_size"].x) + float(_layout["gap"])),
+		float(_layout["cards_y"]))
+
+# Чип «до сброса» в шапке. Время до полуночи считалось и раньше, но нигде не
+# показывалось — на вопрос «когда появится новое» экран не отвечал.
+func _build_reset_chip(vp: Vector2) -> void:
+	var scale_x : float = vp.x / CANVAS_W
+	var scale_y : float = vp.y / CANVAS_H
+	var w : float = 150.0
+	var h : float = 24.0 * scale_y
+	# Правый край чипа обязан остаться левее строки ресурсов, иначе он налезает
+	# на мешок с деньгами.
+	var x : float = vp.x - (RES_RIGHT_PAD * -1.0) * scale_x - 224.0 - w
+	var y : float = RES_Y * scale_y - 2.0
+	var panel := Panel.new()
+	panel.add_theme_stylebox_override("panel", _rounded(Color(0.10, 0.08, 0.06, 0.85), 8, Color(0.55, 0.45, 0.22, 0.9)))
+	panel.size         = Vector2(w, h)
+	panel.position     = Vector2(x, y)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_slide_root.add_child(panel)
+
+	_reset_lbl = Label.new()
+	_reset_lbl.add_theme_font_override("font", UI_FONT)
+	_reset_lbl.add_theme_font_size_override("font_size", 12)
+	_apply_quests_text_fx(_reset_lbl)
+	_reset_lbl.text                 = _time_to_midnight()
+	_reset_lbl.modulate             = Color(1.0, 0.88, 0.50)
+	_reset_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_reset_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_reset_lbl.size                 = Vector2(w, h)
+	_reset_lbl.position             = Vector2(x, y)
+	_reset_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	_slide_root.add_child(_reset_lbl)
+
+# Скруглённая подложка с рамкой — общий кирпич всех панелей этого экрана.
+func _rounded(fill: Color, radius: int, border: Color = Color(0, 0, 0, 0), border_w: int = 2) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = fill
+	sb.corner_radius_top_left     = radius
+	sb.corner_radius_top_right    = radius
+	sb.corner_radius_bottom_left  = radius
+	sb.corner_radius_bottom_right = radius
+	if border.a > 0.0:
+		sb.border_color = border
+		sb.border_width_left   = border_w
+		sb.border_width_right  = border_w
+		sb.border_width_top    = border_w
+		sb.border_width_bottom = border_w
+	return sb
 
 func _build_resource_strip(vp: Vector2) -> void:
 	# Top-right resources: money_bag + dollars, then token + tokens. Laid out in
@@ -293,17 +330,6 @@ func _build_resource_strip(vp: Vector2) -> void:
 	_slide_root.add_child(_token_lbl)
 	_token_target = Vector2(tkn_x + icon_sz * 0.5, top_y + icon_sz * 0.5)
 
-# Walk a card subtree and force every non-Button Control to IGNORE input.
-# Decorative ColorRects default to MOUSE_FILTER_STOP, which steals finger
-# drags from the parent ScrollContainer and breaks list scrolling on touch.
-# Buttons are left alone so taps still register — the container's
-# scroll_deadzone takes the touch back when the finger moves far enough.
-func _passthrough_scroll_inputs(root: Node) -> void:
-	for child in root.get_children():
-		if child is Control and not (child is Button):
-			(child as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_passthrough_scroll_inputs(child)
-
 # Press-feedback for tap-targets — mirrors the main-menu button shrink so the
 # back arrow squeezes the same way as the chips that opened this screen.
 const _PRESS_SCALE : float = 0.90
@@ -327,331 +353,362 @@ func _apply_quests_text_fx(lbl: Label) -> void:
 	lbl.add_theme_constant_override("shadow_offset_y", 0)
 	lbl.add_theme_constant_override("shadow_outline_size", 3)
 
-func _build_bonus_banner(pos: Vector2, w: float) -> void:
+func _build_bonus_banner(pos: Vector2, size: Vector2) -> void:
 	_bonus_root = Node2D.new()
-	_overlay.add_child(_bonus_root)
+	_slide_root.add_child(_bonus_root)
+	var w : float = size.x
+	var h : float = size.y
+	var avail : bool = QuestManager.daily_bonus_avail
 
-	var h    := 44.0
-	var bg   := ColorRect.new()
-	bg.color    = Color(0.14, 0.20, 0.08, 0.95)
-	bg.size     = Vector2(w, h)
-	bg.position = pos
-	_bonus_root.add_child(bg)
+	var panel := Panel.new()
+	panel.add_theme_stylebox_override("panel", _rounded(
+		Color(0.13, 0.20, 0.08, 0.95) if avail else Color(0.09, 0.09, 0.08, 0.92), 10,
+		Color(0.55, 0.95, 0.35, 0.95) if avail else Color(0.30, 0.30, 0.28, 0.8)))
+	panel.size         = size
+	panel.position     = pos
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bonus_root.add_child(panel)
 
-	var stripe := ColorRect.new()
-	stripe.color    = Color(0.45, 0.85, 0.25, 0.70)
-	stripe.size     = Vector2(w, 2.0)
-	stripe.position = pos
-	_bonus_root.add_child(stripe)
+	var ico := _make_icon(TEX_MONEYBAG, h * 0.66)
+	ico.position     = pos + Vector2(10.0, (h - h * 0.66) * 0.5)
+	ico.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bonus_root.add_child(ico)
 
 	var lbl := Label.new()
 	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 13)
-	lbl.text                 = "БОНУС ЗА ВХОД  +%d $" % QuestManager.ENTRY_BONUS
-	lbl.modulate             = Color(0.75, 1.0, 0.45)
+	lbl.add_theme_font_size_override("font_size", 14)
+	_apply_quests_text_fx(lbl)
+	lbl.text                 = "БОНУС ЗА ВХОД   +%d $" % QuestManager.ENTRY_BONUS
+	lbl.modulate             = Color(0.85, 1.0, 0.60) if avail else Color(0.62, 0.62, 0.58)
 	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.size                 = Vector2(w - 100.0, h)
-	lbl.position             = pos + Vector2(10.0, 0.0)
+	lbl.size                 = Vector2(w - 120.0, h)
+	lbl.position             = pos + Vector2(14.0 + h * 0.66, 0.0)
+	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	_bonus_root.add_child(lbl)
 
-	if not QuestManager.daily_bonus_avail:
+	if not avail:
+		# Состояние словом и галочкой, а не одним лишь приглушением цвета.
 		var done := Label.new()
 		done.add_theme_font_override("font", UI_FONT)
-		done.add_theme_font_size_override("font_size", 11)
-		done.text                 = "✓ Забрано"
-		done.modulate             = Color(0.55, 0.75, 0.45, 0.70)
+		done.add_theme_font_size_override("font_size", 12)
+		_apply_quests_text_fx(done)
+		done.text                 = "✓ ЗАБРАНО"
+		done.modulate             = Color(0.60, 0.80, 0.50)
 		done.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		done.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		done.size                 = Vector2(w - 10.0, h)
+		done.size                 = Vector2(w - 16.0, h)
 		done.position             = pos
+		done.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 		_bonus_root.add_child(done)
 		return
 
-	var claim_w := 90.0
-	var claim_bg := ColorRect.new()
-	claim_bg.color    = Color(0.20, 0.45, 0.12, 0.95)
-	claim_bg.size     = Vector2(claim_w, h - 12.0)
-	claim_bg.position = pos + Vector2(w - claim_w - 6.0, 6.0)
-	_bonus_root.add_child(claim_bg)
+	var btn_size := Vector2(112.0, h - 12.0)
+	var btn_pos  := pos + Vector2(w - btn_size.x - 8.0, 6.0)
+	_claim_button(_bonus_root, btn_pos, btn_size, "ЗАБРАТЬ",
+		_on_claim_bonus.bind(btn_pos + btn_size * 0.5))
 
-	var claim_lbl := Label.new()
-	claim_lbl.add_theme_font_override("font", UI_FONT)
-	claim_lbl.add_theme_font_size_override("font_size", 13)
-	claim_lbl.text                 = "ЗАБРАТЬ"
-	claim_lbl.modulate             = Color(0.85, 1.0, 0.65)
-	claim_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	claim_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	claim_lbl.size                 = Vector2(claim_w, h - 12.0)
-	claim_lbl.position             = claim_bg.position
-	claim_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	_bonus_root.add_child(claim_lbl)
+# Кнопка получения награды — одна на баннер и на карточки, чтобы они не
+# разъезжались по виду и по отклику на нажатие.
+func _claim_button(root: Node, pos: Vector2, size: Vector2, text: String, action: Callable) -> void:
+	var visual := Control.new()
+	visual.size         = size
+	visual.position     = pos
+	visual.pivot_offset = size * 0.5
+	visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(visual)
 
-	var btn_pos := claim_bg.position + claim_bg.size * 0.5
-	var btn := Button.new()
-	btn.flat       = true
-	btn.focus_mode = Control.FOCUS_NONE
-	btn.size       = claim_bg.size
-	btn.position   = claim_bg.position
-	btn.pressed.connect(_on_claim_bonus.bind(btn_pos))
-	_bonus_root.add_child(btn)
-
-func _build_bonus_banner_scrollable(pos: Vector2, w: float) -> void:
-	_bonus_root = Node2D.new()
-	_scroll_content.add_child(_bonus_root)
-
-	var h    := 44.0
-	var bg   := ColorRect.new()
-	bg.color    = Color(0.14, 0.20, 0.08, 0.95)
-	bg.size     = Vector2(w, h)
-	bg.position = pos
-	_bonus_root.add_child(bg)
-
-	var stripe := ColorRect.new()
-	stripe.color    = Color(0.45, 0.85, 0.25, 0.70)
-	stripe.size     = Vector2(w, 2.0)
-	stripe.position = pos
-	_bonus_root.add_child(stripe)
+	var bg := Panel.new()
+	bg.add_theme_stylebox_override("panel", _rounded(Color(0.22, 0.52, 0.14, 0.98), 8,
+		Color(0.65, 1.0, 0.45, 0.95)))
+	bg.size         = size
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	visual.add_child(bg)
 
 	var lbl := Label.new()
 	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 13)
-	lbl.text                 = "БОНУС ЗА ВХОД  +%d $" % QuestManager.ENTRY_BONUS
-	lbl.modulate             = Color(0.75, 1.0, 0.45)
+	lbl.add_theme_font_size_override("font_size", 14)
+	_apply_quests_text_fx(lbl)
+	lbl.text                 = text
+	lbl.modulate             = Color(0.92, 1.0, 0.80)
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.size                 = Vector2(w - 100.0, h)
-	lbl.position             = pos + Vector2(10.0, 0.0)
-	_bonus_root.add_child(lbl)
+	lbl.size                 = size
+	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	visual.add_child(lbl)
 
-	if not QuestManager.daily_bonus_avail:
-		var done := Label.new()
-		done.add_theme_font_override("font", UI_FONT)
-		done.add_theme_font_size_override("font_size", 11)
-		done.text                 = "✓ Забрано"
-		done.modulate             = Color(0.55, 0.75, 0.45, 0.70)
-		done.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		done.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		done.size                 = Vector2(w - 10.0, h)
-		done.position             = pos
-		_bonus_root.add_child(done)
-		return
-
-	var claim_w := 90.0
-	var claim_bg := ColorRect.new()
-	claim_bg.color    = Color(0.20, 0.45, 0.12, 0.95)
-	claim_bg.size     = Vector2(claim_w, h - 12.0)
-	claim_bg.position = pos + Vector2(w - claim_w - 6.0, 6.0)
-	_bonus_root.add_child(claim_bg)
-
-	var claim_lbl := Label.new()
-	claim_lbl.add_theme_font_override("font", UI_FONT)
-	claim_lbl.add_theme_font_size_override("font_size", 13)
-	claim_lbl.text                 = "ЗАБРАТЬ"
-	claim_lbl.modulate             = Color(0.85, 1.0, 0.65)
-	claim_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	claim_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	claim_lbl.size                 = Vector2(claim_w, h - 12.0)
-	claim_lbl.position             = claim_bg.position
-	claim_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	_bonus_root.add_child(claim_lbl)
-
-	var btn_pos := claim_bg.position + claim_bg.size * 0.5
 	var btn := Button.new()
 	btn.flat       = true
 	btn.focus_mode = Control.FOCUS_NONE
-	btn.size       = claim_bg.size
-	btn.position   = claim_bg.position
-	btn.pressed.connect(_on_claim_bonus.bind(btn_pos))
-	_bonus_root.add_child(btn)
+	btn.size       = size
+	btn.position   = pos
+	btn.pressed.connect(action)
+	btn.button_down.connect(_press_anim.bind(visual, true))
+	btn.button_up.connect(_press_anim.bind(visual, false))
+	btn.mouse_exited.connect(_press_anim.bind(visual, false))
+	root.add_child(btn)
 
-func _build_card(pos: Vector2, w: float, h: float, slot: int) -> Node2D:
+# ── Карточка задания ─────────────────────────────────────────────────────────
+# Три состояния, и каждое различается ФОРМОЙ, ЗНАЧКОМ И СЛОВОМ, а не только
+# цветом: готовое — золотая рамка с пульсацией и кнопка «ЗАБРАТЬ», в процессе —
+# полоса прогресса с числами, забранное — галочка и таймер до нового задания.
+# Сложность тоже кодируется дважды: номер ① ② ③ в медальоне плюс слово.
+# См. /Концепция/Экран заданий.md
+func _build_card(pos: Vector2, size: Vector2, slot: int) -> Node2D:
 	var card := Node2D.new()
-	_build_card_content(card, pos, w, h, slot)
+	_build_card_content(card, pos, size, slot)
 	return card
 
-func _build_card_scrollable(pos: Vector2, w: float, h: float, slot: int) -> Node2D:
-	var card := Node2D.new()
-	_build_card_content(card, pos, w, h, slot)
-	_passthrough_scroll_inputs(card)
-	return card
-
-func _build_card_content(root: Node2D, pos: Vector2, w: float, h: float, slot: int) -> void:
-	var q     := QuestManager.daily_quests[slot] as Dictionary
-	var tier  := q["tier"] as String
-
-	var stripe_col : Color
-	var tier_label : String
+func _tier_look(tier: String) -> Dictionary:
 	match tier:
-		"easy":
-			stripe_col = CLR_STRIPE_EASY
-			tier_label = "ЛЁГКОЕ"
-		"medium":
-			stripe_col = CLR_STRIPE_MEDIUM
-			tier_label = "СРЕДНЕЕ"
-		_:
-			stripe_col = CLR_STRIPE_HARD
-			tier_label = "ТЯЖЁЛОЕ"
+		"easy":   return { "col": CLR_STRIPE_EASY,   "name": "ЛЁГКОЕ",  "num": "1" }
+		"medium": return { "col": CLR_STRIPE_MEDIUM, "name": "СРЕДНЕЕ", "num": "2" }
+	return { "col": CLR_STRIPE_HARD, "name": "ТЯЖЁЛОЕ", "num": "3" }
 
-	# Slot on per-tier cooldown — render a placeholder with the countdown to the
-	# next quest of this tier instead of the full quest card.
-	if QuestManager.is_slot_on_cooldown(slot):
-		_build_cooldown_card(root, pos, w, h, slot, tier_label, stripe_col)
+func _build_card_content(root: Node2D, pos: Vector2, size: Vector2, slot: int) -> void:
+	var q    : Dictionary = QuestManager.daily_quests[slot]
+	var look : Dictionary = _tier_look(String(q["tier"]))
+	var cd   : bool = QuestManager.is_slot_on_cooldown(slot)
+	var done : bool = bool(q["completed"])
+	var claimed : bool = bool(q["claimed"])
+	var ready : bool = done and not claimed and not cd
+
+	var w : float = size.x
+	var h : float = size.y
+
+	# Подложка. Готовая карточка — золотая рамка; остальные — спокойная тёмная.
+	var panel := Panel.new()
+	panel.add_theme_stylebox_override("panel", _rounded(
+		Color(0.12, 0.16, 0.07, 0.96) if ready else CLR_CARD, 12,
+		Color(1.0, 0.82, 0.25, 1.0) if ready else Color(0.28, 0.24, 0.20, 0.9),
+		3 if ready else 2))
+	panel.size         = size
+	panel.position     = pos
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(panel)
+	if ready:
+		# Пульсация рамки: единственный элемент экрана, который двигается, —
+		# взгляд идёт к нему сам, без чтения.
+		var tw := panel.create_tween().set_loops()
+		tw.tween_property(panel, "modulate", Color(1.15, 1.12, 1.0), 0.55)
+		tw.tween_property(panel, "modulate", Color(1.0, 1.0, 1.0), 0.55)
+
+	_build_tier_badge(root, pos + Vector2(10.0, 10.0), look)
+
+	var pad : float = 12.0
+	var def : Dictionary = QuestManager._daily_def(slot)
+
+	var title := Label.new()
+	title.add_theme_font_override("font", UI_FONT)
+	title.add_theme_font_size_override("font_size", 16)
+	_apply_quests_text_fx(title)
+	title.text          = String(def.get("title", ""))
+	title.modulate      = Color(1.0, 0.97, 0.90)
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD
+	title.size          = Vector2(w - pad * 2.0, 44.0)
+	title.position      = pos + Vector2(pad, 44.0)
+	title.mouse_filter  = Control.MOUSE_FILTER_IGNORE
+	root.add_child(title)
+
+	var desc := Label.new()
+	desc.add_theme_font_override("font", UI_FONT)
+	desc.add_theme_font_size_override("font_size", 11)
+	_apply_quests_text_fx(desc)
+	desc.text          = String(def.get("desc", ""))
+	# Не тусклее 0.80 белого — иначе описание не читается на подложке.
+	desc.modulate      = Color(0.86, 0.86, 0.82)
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD
+	desc.size          = Vector2(w - pad * 2.0, 40.0)
+	desc.position      = pos + Vector2(pad, 90.0)
+	desc.mouse_filter  = Control.MOUSE_FILTER_IGNORE
+	root.add_child(desc)
+
+	# Награда иконкой, а не текстом «+100 $»: во всей остальной игре валюта
+	# показана спрайтом, и текст здесь читался как чужеродный.
+	_build_reward_row(root, pos + Vector2(pad, h - 96.0), w - pad * 2.0, def)
+
+	if cd:
+		_build_cooldown_block(root, pos, size, slot)
 		return
 
-	var def     := QuestManager._daily_def(slot)
-	var done    := bool(q["completed"])
-	var claimed := bool(q["claimed"])
+	_build_progress_bar(root, pos + Vector2(pad, h - 132.0), w - pad * 2.0, slot,
+		Color(look["col"]))
 
-	var bg := ColorRect.new()
-	bg.color    = CLR_DONE if (done and not claimed) else CLR_CARD
-	bg.size     = Vector2(w, h)
-	bg.position = pos
+	if ready:
+		var bs := Vector2(w - pad * 2.0, 42.0)
+		var bp := pos + Vector2(pad, h - 52.0)
+		_claim_button(root, bp, bs, "ЗАБРАТЬ", _on_claim_daily.bind(slot, bp + bs * 0.5))
+	else:
+		var state := Label.new()
+		state.add_theme_font_override("font", UI_FONT)
+		state.add_theme_font_size_override("font_size", 12)
+		_apply_quests_text_fx(state)
+		state.text                 = "✓ ЗАБРАНО" if claimed else "ИДЁТ"
+		state.modulate             = Color(0.60, 0.80, 0.50) if claimed else Color(0.70, 0.70, 0.66)
+		state.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		state.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		state.size                 = Vector2(w - pad * 2.0, 42.0)
+		state.position             = pos + Vector2(pad, h - 52.0)
+		state.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+		root.add_child(state)
+
+# Медальон сложности: кружок с НОМЕРОМ плюс слово рядом. Номер обязателен —
+# по одному цвету полоски уровень сложности не различает ни дальтоник, ни
+# игрок, который видит экран впервые.
+func _build_tier_badge(root: Node2D, pos: Vector2, look: Dictionary) -> void:
+	var col : Color = look["col"]
+	const SZ := 26.0
+	var disc := Panel.new()
+	disc.add_theme_stylebox_override("panel", _rounded(
+		Color(col.r * 0.35, col.g * 0.35, col.b * 0.35, 0.98), int(SZ * 0.5), col, 2))
+	disc.size         = Vector2(SZ, SZ)
+	disc.position     = pos
+	disc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(disc)
+
+	var num := Label.new()
+	num.add_theme_font_override("font", UI_FONT)
+	num.add_theme_font_size_override("font_size", 15)
+	_apply_quests_text_fx(num)
+	num.text                 = String(look["num"])
+	num.modulate             = Color(1, 1, 1)
+	num.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	num.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	num.size                 = Vector2(SZ, SZ)
+	num.position             = pos
+	num.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	root.add_child(num)
+
+	var name_lbl := Label.new()
+	name_lbl.add_theme_font_override("font", UI_FONT)
+	name_lbl.add_theme_font_size_override("font_size", 11)
+	_apply_quests_text_fx(name_lbl)
+	name_lbl.text               = String(look["name"])
+	name_lbl.modulate           = col
+	name_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	name_lbl.size               = Vector2(120.0, SZ)
+	name_lbl.position           = pos + Vector2(SZ + 8.0, 0.0)
+	name_lbl.mouse_filter       = Control.MOUSE_FILTER_IGNORE
+	root.add_child(name_lbl)
+
+# Полоса прогресса с числами прямо на ней. Раньше прогресс был только текстом
+# «0 / 1000 пицц» — взглядом такое не читается, а именно по нему игрок решает,
+# идти ли в ещё один забег.
+func _build_progress_bar(root: Node2D, pos: Vector2, w: float, slot: int, col: Color) -> void:
+	const H := 18.0
+	var pr : Vector2i = QuestManager.daily_progress(slot)
+	var frac : float = clampf(float(pr.x) / maxf(1.0, float(pr.y)), 0.0, 1.0)
+
+	var bg := Panel.new()
+	bg.add_theme_stylebox_override("panel", _rounded(Color(0.05, 0.04, 0.03, 0.95), 6,
+		Color(0.30, 0.27, 0.22, 0.9)))
+	bg.size         = Vector2(w, H)
+	bg.position     = pos
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(bg)
 
-	var st := ColorRect.new()
-	st.color    = stripe_col
-	st.size     = Vector2(w, 2.0)
-	st.position = pos
-	root.add_child(st)
+	if frac > 0.0:
+		var fill := Panel.new()
+		fill.add_theme_stylebox_override("panel", _rounded(col, 6))
+		fill.size         = Vector2(maxf(6.0, (w - 4.0) * frac), H - 4.0)
+		fill.position     = pos + Vector2(2.0, 2.0)
+		fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		root.add_child(fill)
 
-	var tier_lbl := Label.new()
-	tier_lbl.add_theme_font_override("font", UI_FONT)
-	tier_lbl.add_theme_font_size_override("font_size", 9)
-	tier_lbl.text     = tier_label
-	tier_lbl.modulate = Color(stripe_col.r, stripe_col.g, stripe_col.b, 0.90)
-	tier_lbl.size     = Vector2(80.0, 16.0)
-	tier_lbl.position = pos + Vector2(8.0, 6.0)
-	root.add_child(tier_lbl)
+	var lbl := Label.new()
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", 10)
+	_apply_quests_text_fx(lbl)
+	# У части условий («пройди кампанию») промежуточного счётчика нет, и текст
+	# оставался «0 / 1» на полной полосе. Выполненное подписываем словом.
+	lbl.text                 = "ГОТОВО" if _slot_done(slot) else QuestManager.daily_progress_text(slot)
+	lbl.modulate             = Color(1, 1, 1)
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	lbl.size                 = Vector2(w, H)
+	lbl.position             = pos
+	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	root.add_child(lbl)
 
-	var title_lbl := Label.new()
-	title_lbl.add_theme_font_override("font", UI_FONT)
-	title_lbl.add_theme_font_size_override("font_size", 16)
-	title_lbl.text     = def.get("title", "") as String
-	title_lbl.modulate = Color(1.0, 0.95, 0.85)
-	title_lbl.clip_text = true
-	title_lbl.size     = Vector2(w - 120.0, 24.0)
-	title_lbl.position = pos + Vector2(8.0, 21.0)
-	root.add_child(title_lbl)
+func _slot_done(slot: int) -> bool:
+	return bool((QuestManager.daily_quests[slot] as Dictionary).get("completed", false))
 
-	# Description is the main "what do I have to do" line — bumped up two sizes
-	# and brighter so it's the first thing the eye lands on inside the card.
-	var desc_lbl := Label.new()
-	desc_lbl.add_theme_font_override("font", UI_FONT)
-	desc_lbl.add_theme_font_size_override("font_size", 12)
-	desc_lbl.text     = def.get("desc", "") as String
-	desc_lbl.modulate = Color(0.95, 0.95, 0.92)
-	desc_lbl.size     = Vector2(w - 110.0, 20.0)
-	desc_lbl.position = pos + Vector2(8.0, 44.0)
-	root.add_child(desc_lbl)
+func _build_reward_row(root: Node2D, pos: Vector2, w: float, def: Dictionary) -> void:
+	var d : int = int(def.get("reward_d", 0))
+	var t : int = int(def.get("reward_t", 0))
+	var x : int = int(def.get("reward_xp", 0))
+	var tex : Texture2D = TEX_DOLLAR
+	var txt : String = ""
+	if d > 0:
+		txt = "+%d" % d
+	elif t > 0:
+		tex = TEX_TOKEN
+		txt = "+%d" % t
+	elif x > 0:
+		tex = null
+		txt = "+%d ОПЫТ" % x
 
-	var prog_lbl := Label.new()
-	prog_lbl.add_theme_font_override("font", UI_FONT)
-	prog_lbl.add_theme_font_size_override("font_size", 10)
-	prog_lbl.text     = QuestManager.daily_progress_text(slot)
-	prog_lbl.modulate = Color(0.75, 0.75, 0.65)
-	prog_lbl.size     = Vector2(w - 110.0, 16.0)
-	prog_lbl.position = pos + Vector2(8.0, 64.0)
-	root.add_child(prog_lbl)
+	var ico_sz := 26.0
+	if tex != null:
+		var ico := _make_icon(tex, ico_sz)
+		ico.position     = pos
+		ico.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		root.add_child(ico)
 
-	var reward_str := _reward_str(def)
-	var rwd_lbl := Label.new()
-	rwd_lbl.add_theme_font_override("font", UI_FONT)
-	rwd_lbl.add_theme_font_size_override("font_size", 13)
-	rwd_lbl.text                 = reward_str
-	rwd_lbl.modulate             = Color(1.0, 0.85, 0.35)
-	rwd_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	rwd_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	rwd_lbl.size                 = Vector2(100.0, 24.0)
-	rwd_lbl.position             = pos + Vector2(w - 108.0, 20.0)
-	root.add_child(rwd_lbl)
+	var lbl := Label.new()
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", 18)
+	_apply_quests_text_fx(lbl)
+	lbl.text               = txt
+	lbl.modulate           = Color(1.0, 0.88, 0.35)
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.size               = Vector2(w - ico_sz - 6.0, ico_sz)
+	lbl.position           = pos + Vector2(ico_sz + 6.0 if tex != null else 0.0, 0.0)
+	lbl.mouse_filter       = Control.MOUSE_FILTER_IGNORE
+	root.add_child(lbl)
 
-	if done and not claimed:
-		var claim_w := 90.0
-		var claim_h := 44.0
-		var cbg := ColorRect.new()
-		cbg.color    = Color(0.20, 0.45, 0.12, 0.95)
-		cbg.size     = Vector2(claim_w, claim_h)
-		cbg.position = pos + Vector2(w - claim_w - 6.0, h - claim_h - 8.0)
-		root.add_child(cbg)
+# Слот на откате: вместо полосы и кнопки — часы и таймер до нового задания.
+# Метку помним, чтобы _process тикал её, не пересобирая карточку.
+func _build_cooldown_block(root: Node2D, pos: Vector2, size: Vector2, slot: int) -> void:
+	var w : float = size.x
+	var h : float = size.y
 
-		var clbl := Label.new()
-		clbl.add_theme_font_override("font", UI_FONT)
-		clbl.add_theme_font_size_override("font_size", 12)
-		clbl.text                 = "ЗАБРАТЬ"
-		clbl.modulate             = Color(0.85, 1.0, 0.65)
-		clbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		clbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		clbl.size                 = cbg.size
-		clbl.position             = cbg.position
-		clbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-		root.add_child(clbl)
-
-		var btn_pos := cbg.position + cbg.size * 0.5
-		var btn := Button.new()
-		btn.flat       = true
-		btn.focus_mode = Control.FOCUS_NONE
-		btn.size       = cbg.size
-		btn.position   = cbg.position
-		btn.pressed.connect(_on_claim_daily.bind(slot, btn_pos))
-		root.add_child(btn)
-	elif claimed:
-		var done_lbl := Label.new()
-		done_lbl.add_theme_font_override("font", UI_FONT)
-		done_lbl.add_theme_font_size_override("font_size", 11)
-		done_lbl.text                 = "✓"
-		done_lbl.modulate             = Color(0.45, 0.75, 0.35, 0.70)
-		done_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		done_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		done_lbl.size                 = Vector2(32.0, h)
-		done_lbl.position             = pos + Vector2(w - 38.0, 0.0)
-		root.add_child(done_lbl)
-
-	return
-
-# Cooldown placeholder card — shown for the slot whose quest was just claimed
-# until its tier's cooldown (1h / 3h / 6h) elapses. Stores the countdown
-# label so _process can tick it without rebuilding the whole card.
-func _build_cooldown_card(root: Node2D, pos: Vector2, w: float, h: float, slot: int, tier_label: String, stripe_col: Color) -> void:
-	var bg := ColorRect.new()
-	bg.color    = CLR_CARD
-	bg.size     = Vector2(w, h)
-	bg.position = pos
-	root.add_child(bg)
-
-	var st := ColorRect.new()
-	st.color    = Color(stripe_col.r, stripe_col.g, stripe_col.b, 0.50)
-	st.size     = Vector2(w, 2.0)
-	st.position = pos
-	root.add_child(st)
-
-	var tier_lbl := Label.new()
-	tier_lbl.add_theme_font_override("font", UI_FONT)
-	tier_lbl.add_theme_font_size_override("font_size", 9)
-	tier_lbl.text     = tier_label
-	tier_lbl.modulate = Color(stripe_col.r, stripe_col.g, stripe_col.b, 0.85)
-	tier_lbl.size     = Vector2(80.0, 16.0)
-	tier_lbl.position = pos + Vector2(8.0, 6.0)
-	root.add_child(tier_lbl)
-
-	var hint_lbl := Label.new()
-	hint_lbl.add_theme_font_override("font", UI_FONT)
-	hint_lbl.add_theme_font_size_override("font_size", 11)
-	hint_lbl.text     = "Следующее задание через"
-	hint_lbl.modulate = Color(0.75, 0.75, 0.72, 0.90)
-	hint_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint_lbl.size     = Vector2(w - 16.0, 18.0)
-	hint_lbl.position = pos + Vector2(8.0, h * 0.32)
-	root.add_child(hint_lbl)
+	var hint := Label.new()
+	hint.add_theme_font_override("font", UI_FONT)
+	hint.add_theme_font_size_override("font_size", 11)
+	_apply_quests_text_fx(hint)
+	hint.text                 = "НОВОЕ ЗАДАНИЕ ЧЕРЕЗ"
+	hint.modulate             = Color(0.80, 0.80, 0.76)
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.size                 = Vector2(w - 24.0, 18.0)
+	hint.position             = pos + Vector2(12.0, h - 132.0)
+	hint.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	root.add_child(hint)
 
 	var cd_lbl := Label.new()
 	cd_lbl.add_theme_font_override("font", UI_FONT)
 	cd_lbl.add_theme_font_size_override("font_size", 22)
-	cd_lbl.text     = _format_cooldown(QuestManager.slot_cooldown_remaining(slot))
-	cd_lbl.modulate = Color(1.0, 0.97, 0.85)
+	_apply_quests_text_fx(cd_lbl)
+	cd_lbl.text                 = _format_cooldown(QuestManager.slot_cooldown_remaining(slot))
+	cd_lbl.modulate             = Color(1.0, 0.95, 0.80)
 	cd_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	cd_lbl.size     = Vector2(w - 16.0, 28.0)
-	cd_lbl.position = pos + Vector2(8.0, h * 0.55)
+	cd_lbl.size                 = Vector2(w - 24.0, 30.0)
+	cd_lbl.position             = pos + Vector2(12.0, h - 112.0)
+	cd_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	root.add_child(cd_lbl)
 	_cd_timer_lbls[slot] = cd_lbl
+
+	var done := Label.new()
+	done.add_theme_font_override("font", UI_FONT)
+	done.add_theme_font_size_override("font_size", 12)
+	_apply_quests_text_fx(done)
+	done.text                 = "✓ ЗАБРАНО"
+	done.modulate             = Color(0.60, 0.80, 0.50)
+	done.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	done.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	done.size                 = Vector2(w - 24.0, 42.0)
+	done.position             = pos + Vector2(12.0, h - 52.0)
+	done.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	root.add_child(done)
 
 func _format_cooldown(sec: int) -> String:
 	if sec <= 0:
@@ -680,34 +737,24 @@ func _time_to_midnight() -> String:
 	var rh     := rem / 3600
 	var rm     := (rem % 3600) / 60
 	var rs     := rem % 60
-	return "Сброс через: %02d:%02d:%02d" % [rh, rm, rs]
+	return "ДО СБРОСА  %02d:%02d:%02d" % [rh, rm, rs]
 
 func _refresh() -> void:
+	if not is_instance_valid(_slide_root):
+		return
 	if is_instance_valid(_bonus_root):
 		_bonus_root.queue_free()
-	var vp       := get_viewport().get_visible_rect().size
-	var scale_x  : float = vp.x / CANVAS_W
-	var zone_w   : float = ZONE_W * scale_x
-	var pad      := 12.0
-	# Cards always live inside the central scroll content — bonus banner sits
-	# at the top of the scroll, not at a viewport-pixel offset any more.
-	_build_bonus_banner_scrollable(Vector2(pad, 0.0), zone_w - pad * 2.0)
-	if is_instance_valid(_bonus_root):
-		_passthrough_scroll_inputs(_bonus_root)
+	_build_bonus_banner(_layout["banner_pos"], _layout["banner_size"])
 
 	for c in _cards:
 		if is_instance_valid(c):
 			c.queue_free()
 	_cards.clear()
 	_cd_timer_lbls = [null, null, null]
-	var card_w    := zone_w - pad * 2.0
-	var content_y := 54.0
 	for i in 3:
-		var card_h := 100.0
-		var node   := _build_card_scrollable(Vector2(pad, content_y), card_w, card_h, i)
-		_scroll_content.add_child(node)
+		var node := _build_card(_card_pos(i), _layout["card_size"], i)
+		_slide_root.add_child(node)
 		_cards.append(node)
-		content_y += card_h + 10.0
 
 func _on_claim_bonus(src: Vector2) -> void:
 	if _claim_busy:

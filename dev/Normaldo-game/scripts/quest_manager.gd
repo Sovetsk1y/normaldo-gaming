@@ -367,6 +367,41 @@ func _daily_def(slot: int) -> Dictionary:
 		"medium": return DAILY_MEDIUM[idx]
 		_:        return DAILY_HARD[idx]
 
+# ─── Progress for UI ──────────────────────────────────────────────────────────
+
+# Числовой прогресс слота: (сделано, нужно). Нужен полосе прогресса на карточке
+# — по одному тексту «0 / 1000 пицц» полосу не нарисуешь, а взглядом игрок
+# читает именно её. Разбор условия тот же, что и в daily_progress_text.
+func daily_progress(slot: int) -> Vector2i:
+	if slot < 0 or slot >= daily_quests.size():
+		return Vector2i(0, 1)
+	var q : Dictionary = daily_quests[slot]
+	# Выполненное задание всегда показываем полным: у части условий («пройди
+	# кампанию») промежуточного счётчика нет вовсе, и полоса застревала бы на нуле.
+	if bool(q.get("completed", false)):
+		return Vector2i(1, 1)
+	var def   := _daily_def(slot)
+	var parts := (def.get("cond", "") as String).split(":")
+	var key   : String = parts[0]
+	var need  : int    = int(parts[1]) if parts.size() > 1 else 1
+	match key:
+		"pizzas_today":      return Vector2i(mini(pizzas_today, need), need)
+		"dollars_today":     return Vector2i(mini(dollars_today, need), need)
+		"runs_today":        return Vector2i(mini(runs_today, need), need)
+		"campaigns_today":   return Vector2i(mini(campaigns_today, 2), 2)
+		"dollars_run":       return Vector2i(mini(dollars_best_run, need), need)
+		"endless_secs":      return Vector2i(mini(int(endless_best_secs), need), need)
+		"campaign_phases":   return Vector2i(mini(campaign_best_phases, 3), 3)
+		"campaign_nodmg":    return Vector2i(mini(campaign_nodmg_best, 3), 3)
+		"slot_match":        return Vector2i(mini(slot_best_match, need), need)
+		"fat_run":           return Vector2i(mini(fat_best_run, 3), 3)
+		"endless_today":     return Vector2i(1 if endless_today else 0, 1)
+		"slot_today":        return Vector2i(1 if slot_today else 0, 1)
+		"campaign_today":    return Vector2i(1 if campaigns_today > 0 else 0, 1)
+		"campaign_fat":      return Vector2i(1 if campaign_fat_today else 0, 1)
+		"campaign_complete": return Vector2i(0, 1)
+	return Vector2i(0, 1)
+
 # ─── Progress text for UI ─────────────────────────────────────────────────────
 func daily_progress_text(slot: int) -> String:
 	var def  := _daily_def(slot)
