@@ -8962,11 +8962,13 @@ func _show_avatar_picker() -> void:
 	var panel_x := (vp.x - panel_w) * 0.5
 	var panel_y := (vp.y - panel_h) * 0.5
 
-	var panel := ColorRect.new()
-	panel.color    = Color(0.07, 0.06, 0.04, 0.97)
-	panel.size     = Vector2(panel_w, panel_h)
-	panel.position = Vector2(panel_x, panel_y)
-	root.add_child(panel)
+	# Скруглённая подложка — та же, что у экрана настроек, из которого диалог и
+	# открывается. См. /Концепция/Экран настроек.md
+	var panel := Panel.new()
+	panel.add_theme_stylebox_override("panel", UiKit.rounded(
+		Color(0.07, 0.07, 0.10, 0.98), 12, Color(0.42, 0.48, 0.62, 0.90), 2))
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(root, panel, Vector2(panel_x, panel_y), Vector2(panel_w, panel_h))
 
 	var stripe := ColorRect.new()
 	stripe.color    = Color(0.55, 0.85, 1.0, 0.85)
@@ -9150,11 +9152,13 @@ func _show_rename_modal() -> void:
 	var panel_x := (vp.x - panel_w) * 0.5
 	var panel_y := (vp.y - panel_h) * 0.5
 
-	var panel := ColorRect.new()
-	panel.color    = Color(0.07, 0.06, 0.04, 0.97)
-	panel.size     = Vector2(panel_w, panel_h)
-	panel.position = Vector2(panel_x, panel_y)
-	root.add_child(panel)
+	# Скруглённая подложка — та же, что у экрана настроек, из которого диалог и
+	# открывается. См. /Концепция/Экран настроек.md
+	var panel := Panel.new()
+	panel.add_theme_stylebox_override("panel", UiKit.rounded(
+		Color(0.07, 0.07, 0.10, 0.98), 12, Color(0.42, 0.48, 0.62, 0.90), 2))
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(root, panel, Vector2(panel_x, panel_y), Vector2(panel_w, panel_h))
 
 	# Tap on the empty panel area releases LineEdit focus → hides on-screen keyboard.
 	# Sits above `panel` so it absorbs clicks instead of letting `dim_btn` close the modal.
@@ -9164,13 +9168,6 @@ func _show_rename_modal() -> void:
 	dismiss_kb_btn.size       = Vector2(panel_w, panel_h)
 	dismiss_kb_btn.position   = Vector2(panel_x, panel_y)
 	root.add_child(dismiss_kb_btn)
-
-	var stripe := ColorRect.new()
-	stripe.color        = Color(0.55, 0.85, 1.0, 0.85)
-	stripe.size         = Vector2(panel_w, 2.0)
-	stripe.position     = Vector2(panel_x, panel_y)
-	stripe.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(stripe)
 
 	var title := Label.new()
 	title.add_theme_font_override("font", UI_FONT)
@@ -9230,11 +9227,10 @@ func _show_rename_modal() -> void:
 	var btn_y := panel_y + panel_h - BTN_H - 14.0
 
 	# Cancel
-	var ca_bg := ColorRect.new()
-	ca_bg.color    = Color(0.18, 0.07, 0.07, 0.95)
-	ca_bg.size     = Vector2(BTN_W, BTN_H)
-	ca_bg.position = Vector2(ca_x, btn_y)
-	root.add_child(ca_bg)
+	var ca_bg := Panel.new()
+	ca_bg.add_theme_stylebox_override("panel", UiKit.rounded(Color(0.30, 0.12, 0.12, 0.98), 8, Color(1.00, 0.55, 0.50, 0.90), 2))
+	ca_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(root, ca_bg, Vector2(ca_x, btn_y), Vector2(BTN_W, BTN_H))
 	var ca_lbl := Label.new()
 	ca_lbl.add_theme_font_override("font", UI_FONT)
 	ca_lbl.add_theme_font_size_override("font_size", 14)
@@ -9255,11 +9251,10 @@ func _show_rename_modal() -> void:
 	root.add_child(ca_btn)
 
 	# OK
-	var ok_bg := ColorRect.new()
-	ok_bg.color    = Color(0.10, 0.30, 0.14, 0.95)
-	ok_bg.size     = Vector2(BTN_W, BTN_H)
-	ok_bg.position = Vector2(ok_x, btn_y)
-	root.add_child(ok_bg)
+	var ok_bg := Panel.new()
+	ok_bg.add_theme_stylebox_override("panel", UiKit.rounded(Color(0.12, 0.32, 0.16, 0.98), 8, Color(0.60, 1.00, 0.55, 0.90), 2))
+	ok_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(root, ok_bg, Vector2(ok_x, btn_y), Vector2(BTN_W, BTN_H))
 	var ok_lbl := Label.new()
 	ok_lbl.add_theme_font_override("font", UI_FONT)
 	ok_lbl.add_theme_font_size_override("font_size", 14)
@@ -9330,571 +9325,24 @@ func _modal_panel_y_h(vp_h: float, desired_h: float) -> Vector2:
 	var h      := minf(desired_h, max_h)
 	return Vector2(top, h)
 
+# Настройки — отдельный экран-разворот (scripts/settings_screen.gd), а не
+# стопка модалок. Раньше подэкран ЗАМЕНЯЛ родителя: закрыл уведомления —
+# оказался в главном меню. См. /Концепция/Экран настроек.md
+const _SETTINGS_SCREEN_SCRIPT := preload("res://scripts/settings_screen.gd")
+var _settings_screen : Node = null
+
 func _show_settings_modal() -> void:
-	var vp := get_viewport().get_visible_rect().size
-	var root := Node2D.new()
-	root.z_index = 50
-	add_child(root)
+	if is_instance_valid(_settings_screen):
+		return
+	var scr : Node = _SETTINGS_SCREEN_SCRIPT.new()
+	scr.call("setup", self)
+	add_child(scr)
+	_settings_screen = scr
 
-	var dim := ColorRect.new()
-	dim.color    = Color(0.0, 0.0, 0.0, 0.78)
-	dim.size     = vp
-	root.add_child(dim)
-	var dim_btn := Button.new()
-	dim_btn.flat       = true
-	dim_btn.focus_mode = Control.FOCUS_NONE
-	dim_btn.size       = vp
-	dim_btn.pressed.connect(root.queue_free)
-	root.add_child(dim_btn)
-
-	var panel_w := 420.0
-	# Full body height we'd like; the helper clamps it to the viewport and the
-	# body below lives in a ScrollContainer so nothing falls off short phones.
-	var desired_h := 460.0
-	var panel_x := (vp.x - panel_w) * 0.5
-	var geom    := _modal_panel_y_h(vp.y, desired_h)
-	var panel_y := geom.x
-	var panel_h := geom.y
-
-	var panel := ColorRect.new()
-	panel.color    = Color(0.07, 0.06, 0.04, 0.97)
-	panel.size     = Vector2(panel_w, panel_h)
-	panel.position = Vector2(panel_x, panel_y)
-	root.add_child(panel)
-
-	var stripe := ColorRect.new()
-	stripe.color    = Color(0.85, 0.90, 0.95, 0.85)
-	stripe.size     = Vector2(panel_w, 2.0)
-	stripe.position = Vector2(panel_x, panel_y)
-	root.add_child(stripe)
-
-	var title := Label.new()
-	title.add_theme_font_override("font", UI_FONT)
-	title.add_theme_font_size_override("font_size", 12)
-	_apply_menu_caption_fx(title)
-	title.text                 = "НАСТРОЙКИ"
-	title.modulate             = Color(0.85, 0.95, 1.0)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.size                 = Vector2(panel_w, 24.0)
-	title.position             = Vector2(panel_x, panel_y + 10.0)
-	root.add_child(title)
-
-	# Close X (press-shrink wrapper)
-	var cx_visual := Control.new()
-	cx_visual.size         = Vector2(28.0, 22.0)
-	cx_visual.position     = Vector2(panel_x + panel_w - 32.0, panel_y + 8.0)
-	cx_visual.pivot_offset = cx_visual.size * 0.5
-	cx_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(cx_visual)
-	var cx_lbl := Label.new()
-	cx_lbl.add_theme_font_override("font", UI_FONT)
-	cx_lbl.add_theme_font_size_override("font_size", 16)
-	_apply_menu_caption_fx(cx_lbl)
-	cx_lbl.text                 = "X"
-	cx_lbl.modulate             = Color(1.0, 0.45, 0.45)
-	cx_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	cx_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	cx_lbl.size                 = cx_visual.size
-	cx_lbl.position             = Vector2.ZERO
-	cx_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	cx_visual.add_child(cx_lbl)
-	var cx_btn := Button.new()
-	cx_btn.flat       = true
-	cx_btn.focus_mode = Control.FOCUS_NONE
-	cx_btn.size       = Vector2(36.0, 30.0)
-	cx_btn.position   = Vector2(panel_x + panel_w - 38.0, panel_y + 4.0)
-	cx_btn.pressed.connect(root.queue_free)
-	cx_btn.button_down.connect(_menu_btn_press_anim.bind(cx_visual, true))
-	cx_btn.button_up.connect(_menu_btn_press_anim.bind(cx_visual, false))
-	cx_btn.mouse_exited.connect(_menu_btn_press_anim.bind(cx_visual, false))
-	root.add_child(cx_btn)
-
-	# ── Body (scrollable) ─────────────────────────────────────────────────
-	# Header (title + close X) stays pinned above; everything below scrolls so
-	# the recovery section and restore button stay reachable on short phones.
-	const HEADER_H : float = 38.0
-	var scroll := ScrollContainer.new()
-	scroll.position               = Vector2(panel_x, panel_y + HEADER_H)
-	scroll.size                   = Vector2(panel_w, panel_h - HEADER_H)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
-	scroll.clip_contents          = true
-	root.add_child(scroll)
-
-	# Content holder. PASS so empty space doesn't swallow drag gestures meant
-	# for the ScrollContainer. All positions below are relative to `content`.
-	var content := Control.new()
-	content.mouse_filter = Control.MOUSE_FILTER_PASS
-	scroll.add_child(content)
-
-	var x_pad := 16.0
-	var row_w := panel_w - 32.0
-	var cur_y := 12.0
-
-	# SFX slider
-	_build_settings_slider(content, x_pad, cur_y, row_w,
-		"Громкость звуков", SaveData.sfx_volume,
-		func(v: float):
-			SaveData.set_sfx_volume(v))
-	cur_y += 60.0
-
-	# Music slider
-	_build_settings_slider(content, x_pad, cur_y, row_w,
-		"Громкость музыки", SaveData.music_volume,
-		func(v: float):
-			SaveData.set_music_volume(v))
-	cur_y += 70.0
-
-	# Notifications entry — opens a dedicated modal with master switch, per-
-	# category toggles, and quiet hours. Sits between the audio sliders and
-	# the recovery section because it's a "behaviour" preference like volume,
-	# not an account-recovery utility.
-	_build_settings_link_row(content, x_pad, cur_y, row_w,
-		"Уведомления",
-		func():
-			root.queue_free()
-			_show_notif_settings_modal())
-	cur_y += 50.0
-
-	# Separator
-	var sep := ColorRect.new()
-	sep.color    = Color(0.20, 0.18, 0.14, 0.65)
-	sep.size     = Vector2(panel_w - 40.0, 1.0)
-	sep.position = Vector2(20.0, cur_y)
-	content.add_child(sep)
-	cur_y += 14.0
-
-	# Recovery code section
-	var rc_y := cur_y
-	var rc_title := Label.new()
-	rc_title.add_theme_font_override("font", UI_FONT)
-	rc_title.add_theme_font_size_override("font_size", 12)
-	_apply_menu_caption_fx(rc_title)
-	rc_title.text                 = "КОД ВОССТАНОВЛЕНИЯ"
-	rc_title.modulate             = Color(1.0, 0.85, 0.35)
-	rc_title.size                 = Vector2(row_w, 16.0)
-	rc_title.position             = Vector2(x_pad, rc_y)
-	content.add_child(rc_title)
-
-	var rc_box := ColorRect.new()
-	rc_box.color    = Color(0.04, 0.04, 0.06, 0.95)
-	rc_box.size     = Vector2(row_w - 90.0, 30.0)
-	rc_box.position = Vector2(x_pad, rc_y + 22.0)
-	content.add_child(rc_box)
-	var rc_text := Label.new()
-	rc_text.add_theme_font_override("font", UI_FONT)
-	rc_text.add_theme_font_size_override("font_size", 13)
-	_apply_menu_caption_fx(rc_text)
-	# Masked by default (one * per char, dashes also masked); revealed on copy.
-	var masked := ""
-	if SaveData.recovery_code != "":
-		for c in SaveData.recovery_code:
-			masked += "*"
-	else:
-		masked = "—"
-	rc_text.text                 = masked
-	rc_text.modulate             = Color(0.95, 0.95, 0.80)
-	rc_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	rc_text.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	rc_text.size                 = rc_box.size
-	rc_text.position             = rc_box.position
-	rc_text.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	content.add_child(rc_text)
-
-	# Copy button (press-shrink wrapper)
-	var copy_x := x_pad + rc_box.size.x + 8.0
-	var copy_visual := Control.new()
-	copy_visual.size         = Vector2(82.0, 30.0)
-	copy_visual.position     = Vector2(copy_x, rc_y + 22.0)
-	copy_visual.pivot_offset = copy_visual.size * 0.5
-	copy_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	content.add_child(copy_visual)
-	var copy_bg := ColorRect.new()
-	copy_bg.color    = Color(0.10, 0.20, 0.30, 0.95)
-	copy_bg.size     = copy_visual.size
-	copy_bg.position = Vector2.ZERO
-	copy_visual.add_child(copy_bg)
-	var copy_lbl := Label.new()
-	copy_lbl.add_theme_font_override("font", UI_FONT)
-	copy_lbl.add_theme_font_size_override("font_size", 11)
-	_apply_menu_caption_fx(copy_lbl)
-	copy_lbl.text                 = "КОПИЯ"
-	copy_lbl.modulate             = Color(0.65, 0.95, 1.0)
-	copy_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	copy_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	copy_lbl.size                 = copy_visual.size
-	copy_lbl.position             = Vector2.ZERO
-	copy_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	copy_visual.add_child(copy_lbl)
-	var copy_btn := Button.new()
-	copy_btn.flat       = true
-	copy_btn.focus_mode = Control.FOCUS_NONE
-	copy_btn.size       = copy_visual.size
-	copy_btn.position   = copy_visual.position
-	copy_btn.button_down.connect(_menu_btn_press_anim.bind(copy_visual, true))
-	copy_btn.button_up.connect(_menu_btn_press_anim.bind(copy_visual, false))
-	copy_btn.mouse_exited.connect(_menu_btn_press_anim.bind(copy_visual, false))
-	copy_btn.pressed.connect(func():
-		DisplayServer.clipboard_set(SaveData.recovery_code)
-		# Reveal code, turn button green with a checkmark.
-		if is_instance_valid(rc_text) and SaveData.recovery_code != "":
-			rc_text.text = SaveData.recovery_code
-		if is_instance_valid(copy_bg):
-			copy_bg.color = Color(0.18, 0.45, 0.18, 0.95)
-		if is_instance_valid(copy_lbl):
-			copy_lbl.text     = "✓"
-			copy_lbl.modulate = Color(0.85, 1.0, 0.65)
-			copy_lbl.add_theme_font_size_override("font_size", 18))
-	content.add_child(copy_btn)
-
-	# Explanation
-	var exp_lbl := Label.new()
-	exp_lbl.add_theme_font_override("font", UI_FONT)
-	exp_lbl.add_theme_font_size_override("font_size", 10)
-	_apply_menu_caption_fx(exp_lbl)
-	exp_lbl.text = "Этот код — запасной ключ к твоему аккаунту. Если поменяешь телефон или удалишь игру, введи его, и весь прогресс восстановится. Сохрани в надёжном месте и никому не показывай."
-	exp_lbl.modulate             = Color(0.70, 0.70, 0.65)
-	exp_lbl.autowrap_mode        = TextServer.AUTOWRAP_WORD
-	exp_lbl.size                 = Vector2(row_w, 60.0)
-	exp_lbl.position             = Vector2(x_pad, rc_y + 60.0)
-	exp_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	content.add_child(exp_lbl)
-	# Recovery block consumed: title(22) + box(38) + wrapped explanation(60).
-	cur_y = rc_y + 60.0 + 60.0 + 12.0
-
-	# Restore account button (press-shrink wrapper)
-	const RBTN_W : float = 240.0
-	const RBTN_H : float = 36.0
-	var rbtn_x := (panel_w - RBTN_W) * 0.5
-	var rbtn_y := cur_y
-
-	var rbtn_visual := Control.new()
-	rbtn_visual.size         = Vector2(RBTN_W, RBTN_H)
-	rbtn_visual.position     = Vector2(rbtn_x, rbtn_y)
-	rbtn_visual.pivot_offset = rbtn_visual.size * 0.5
-	rbtn_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	content.add_child(rbtn_visual)
-
-	var rbtn_bg := ColorRect.new()
-	rbtn_bg.color    = Color(0.18, 0.18, 0.34, 0.95)
-	rbtn_bg.size     = Vector2(RBTN_W, RBTN_H)
-	rbtn_bg.position = Vector2.ZERO
-	rbtn_visual.add_child(rbtn_bg)
-	var rbtn_stripe := ColorRect.new()
-	rbtn_stripe.color    = Color(0.55, 0.85, 1.0, 0.75)
-	rbtn_stripe.size     = Vector2(RBTN_W, 2.0)
-	rbtn_stripe.position = Vector2.ZERO
-	rbtn_visual.add_child(rbtn_stripe)
-	var rbtn_lbl := Label.new()
-	rbtn_lbl.add_theme_font_override("font", UI_FONT)
-	rbtn_lbl.add_theme_font_size_override("font_size", 13)
-	_apply_menu_caption_fx(rbtn_lbl)
-	rbtn_lbl.text                 = "ВОССТАНОВИТЬ АККАУНТ"
-	rbtn_lbl.modulate             = Color(0.85, 0.90, 1.0)
-	rbtn_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	rbtn_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	rbtn_lbl.size                 = Vector2(RBTN_W, RBTN_H)
-	rbtn_lbl.position             = Vector2.ZERO
-	rbtn_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	rbtn_visual.add_child(rbtn_lbl)
-	var rbtn := Button.new()
-	rbtn.flat       = true
-	rbtn.focus_mode = Control.FOCUS_NONE
-	rbtn.size       = Vector2(RBTN_W, RBTN_H)
-	rbtn.position   = Vector2(rbtn_x, rbtn_y)
-	rbtn.pressed.connect(func():
-		root.queue_free()
-		_show_restore_modal())
-	rbtn.button_down.connect(_menu_btn_press_anim.bind(rbtn_visual, true))
-	rbtn.button_up.connect(_menu_btn_press_anim.bind(rbtn_visual, false))
-	rbtn.mouse_exited.connect(_menu_btn_press_anim.bind(rbtn_visual, false))
-	content.add_child(rbtn)
-	cur_y += RBTN_H + 8.0
-
-	# Build version footer — dim and small, trailing the restore button at the
-	# bottom of the scrollable body. Sourced from ProjectSettings → Application
-	# → Config → Version (set in project.godot); empty falls back to "—" so the
-	# line always renders consistently.
-	var ver_str := str(ProjectSettings.get_setting("application/config/version", ""))
-	if ver_str == "":
-		ver_str = "—"
-	var ver_lbl := Label.new()
-	ver_lbl.add_theme_font_override("font", UI_FONT)
-	ver_lbl.add_theme_font_size_override("font_size", 9)
-	ver_lbl.text                 = "v%s" % ver_str
-	ver_lbl.modulate             = Color(0.55, 0.55, 0.55, 0.75)
-	ver_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	ver_lbl.size                 = Vector2(panel_w, 12.0)
-	ver_lbl.position             = Vector2(0.0, cur_y)
-	ver_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	content.add_child(ver_lbl)
-	cur_y += 12.0
-
-	# Tell the ScrollContainer how tall the body is so scrolling engages when
-	# the clamped panel is shorter than the content.
-	content.custom_minimum_size = Vector2(panel_w, cur_y + 12.0)
-
-# Settings-modal "link row" — a wide tappable pill that reads as a navigation
-# entry into a sub-screen. Visual matches the audio-slider rows above it (same
-# 40-px height, same background tone) so the modal reads as a single list.
-func _build_settings_link_row(parent: Node, x: float, y: float, w: float,
-		label: String, on_press: Callable) -> void:
-	const H : float = 40.0
-	var visual := Control.new()
-	visual.size         = Vector2(w, H)
-	visual.position     = Vector2(x, y)
-	visual.pivot_offset = visual.size * 0.5
-	visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	parent.add_child(visual)
-
-	var bg := ColorRect.new()
-	bg.color    = Color(0.10, 0.10, 0.13, 0.85)
-	bg.size     = Vector2(w, H)
-	bg.position = Vector2.ZERO
-	visual.add_child(bg)
-
-	var lbl := Label.new()
-	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 12)
-	_apply_menu_caption_fx(lbl)
-	lbl.text                 = label
-	lbl.modulate             = Color(0.90, 0.92, 0.95)
-	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.size                 = Vector2(w - 32.0, H)
-	lbl.position             = Vector2(12.0, 0.0)
-	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	visual.add_child(lbl)
-
-	# Chevron — same colour as label, just smaller so it reads as a secondary
-	# affordance and doesn't compete with the label for attention.
-	var arrow := Label.new()
-	arrow.add_theme_font_override("font", UI_FONT)
-	arrow.add_theme_font_size_override("font_size", 16)
-	_apply_menu_caption_fx(arrow)
-	arrow.text                 = ">"
-	arrow.modulate             = Color(0.60, 0.65, 0.70)
-	arrow.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	arrow.size                 = Vector2(24.0, H)
-	arrow.position             = Vector2(w - 32.0, 0.0)
-	arrow.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	visual.add_child(arrow)
-
-	var btn := Button.new()
-	btn.flat       = true
-	btn.focus_mode = Control.FOCUS_NONE
-	btn.size       = Vector2(w, H)
-	btn.position   = Vector2(x, y)
-	btn.button_down.connect(_menu_btn_press_anim.bind(visual, true))
-	btn.button_up.connect(_menu_btn_press_anim.bind(visual, false))
-	btn.mouse_exited.connect(_menu_btn_press_anim.bind(visual, false))
-	btn.pressed.connect(func():
-		_play_btn_sfx()
-		on_press.call())
-	parent.add_child(btn)
-
-# ── Notifications settings modal ─────────────────────────────────────────────
-# Master switch + per-category toggles + quiet-hours picker. Every change
-# writes through SaveData and fires `data_changed`, which NotifPlanner picks up
-# to rebuild the schedule on the spot.
-func _show_notif_settings_modal() -> void:
-	var vp := get_viewport().get_visible_rect().size
-	var root := Node2D.new()
-	root.z_index = 50
-	add_child(root)
-
-	var dim := ColorRect.new()
-	dim.color = Color(0.0, 0.0, 0.0, 0.78)
-	dim.size  = vp
-	root.add_child(dim)
-	var dim_btn := Button.new()
-	dim_btn.flat       = true
-	dim_btn.focus_mode = Control.FOCUS_NONE
-	dim_btn.size       = vp
-	dim_btn.pressed.connect(root.queue_free)
-	root.add_child(dim_btn)
-
-	var panel_w := 420.0
-	# Top-anchored + clamped to viewport; the body already scrolls (HEADER_H
-	# offset below) so the bottom dev row stays reachable on short phones.
-	var desired_h := 560.0
-	var panel_x := (vp.x - panel_w) * 0.5
-	var geom    := _modal_panel_y_h(vp.y, desired_h)
-	var panel_y := geom.x
-	var panel_h := geom.y
-
-	var panel := ColorRect.new()
-	panel.color    = Color(0.07, 0.06, 0.04, 0.97)
-	panel.size     = Vector2(panel_w, panel_h)
-	panel.position = Vector2(panel_x, panel_y)
-	root.add_child(panel)
-	var stripe := ColorRect.new()
-	stripe.color    = Color(0.85, 0.90, 0.95, 0.85)
-	stripe.size     = Vector2(panel_w, 2.0)
-	stripe.position = Vector2(panel_x, panel_y)
-	root.add_child(stripe)
-
-	var title := Label.new()
-	title.add_theme_font_override("font", UI_FONT)
-	title.add_theme_font_size_override("font_size", 12)
-	_apply_menu_caption_fx(title)
-	title.text                 = "УВЕДОМЛЕНИЯ"
-	title.modulate             = Color(0.85, 0.95, 1.0)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.size                 = Vector2(panel_w, 24.0)
-	title.position             = Vector2(panel_x, panel_y + 10.0)
-	root.add_child(title)
-
-	# Close X (same press-shrink pattern as the parent settings modal).
-	var cx_visual := Control.new()
-	cx_visual.size         = Vector2(28.0, 22.0)
-	cx_visual.position     = Vector2(panel_x + panel_w - 32.0, panel_y + 8.0)
-	cx_visual.pivot_offset = cx_visual.size * 0.5
-	cx_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(cx_visual)
-	var cx_lbl := Label.new()
-	cx_lbl.add_theme_font_override("font", UI_FONT)
-	cx_lbl.add_theme_font_size_override("font_size", 16)
-	_apply_menu_caption_fx(cx_lbl)
-	cx_lbl.text                 = "X"
-	cx_lbl.modulate             = Color(1.0, 0.45, 0.45)
-	cx_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	cx_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	cx_lbl.size                 = cx_visual.size
-	cx_lbl.position             = Vector2.ZERO
-	cx_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	cx_visual.add_child(cx_lbl)
-	var cx_btn := Button.new()
-	cx_btn.flat       = true
-	cx_btn.focus_mode = Control.FOCUS_NONE
-	cx_btn.size       = Vector2(36.0, 30.0)
-	cx_btn.position   = Vector2(panel_x + panel_w - 38.0, panel_y + 4.0)
-	cx_btn.pressed.connect(root.queue_free)
-	cx_btn.button_down.connect(_menu_btn_press_anim.bind(cx_visual, true))
-	cx_btn.button_up.connect(_menu_btn_press_anim.bind(cx_visual, false))
-	cx_btn.mouse_exited.connect(_menu_btn_press_anim.bind(cx_visual, false))
-	root.add_child(cx_btn)
-
-	# Body lives in a ScrollContainer so the dev row at the bottom stays
-	# reachable on shorter viewports. Header (title + close X) stays pinned
-	# above the scroll area.
-	const HEADER_H : float = 38.0
-	var scroll := ScrollContainer.new()
-	scroll.position               = Vector2(panel_x, panel_y + HEADER_H)
-	scroll.size                   = Vector2(panel_w, panel_h - HEADER_H)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
-	scroll.clip_contents          = true
-	root.add_child(scroll)
-
-	# Content holder. PASS so empty space doesn't swallow drag gestures meant
-	# for the ScrollContainer.
-	var content := Control.new()
-	content.mouse_filter = Control.MOUSE_FILTER_PASS
-	scroll.add_child(content)
-
-	# Positions below are relative to `content`, not the viewport.
-	var x_pad := 16.0
-	var row_w := panel_w - 32.0
-	var cur_y := 8.0
-
-	# Master toggle
-	_build_notif_toggle_row(content, x_pad, cur_y, row_w,
-		"Все уведомления", "_master")
-	cur_y += 34.0
-
-	# Hint under master toggle — explains the OS-permission caveat. If the
-	# player turned the master switch off here, we still need the OS to allow
-	# notifications when they flip it back on; this line surfaces that.
-	var hint := Label.new()
-	hint.add_theme_font_override("font", UI_FONT)
-	hint.add_theme_font_size_override("font_size", 9)
-	hint.text                 = "Если в системных настройках уведомления для Normaldo выключены — переключатели ничего не делают."
-	hint.modulate             = Color(0.60, 0.62, 0.65)
-	hint.autowrap_mode        = TextServer.AUTOWRAP_WORD
-	hint.size                 = Vector2(row_w, 28.0)
-	hint.position             = Vector2(x_pad, cur_y)
-	hint.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	content.add_child(hint)
-	cur_y += 34.0
-
-	# Categories section
-	var cat_title := Label.new()
-	cat_title.add_theme_font_override("font", UI_FONT)
-	cat_title.add_theme_font_size_override("font_size", 11)
-	_apply_menu_caption_fx(cat_title)
-	cat_title.text                 = "КАТЕГОРИИ"
-	cat_title.modulate             = Color(0.55, 0.85, 1.0)
-	cat_title.size                 = Vector2(row_w, 18.0)
-	cat_title.position             = Vector2(x_pad, cur_y)
-	cat_title.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	content.add_child(cat_title)
-	cur_y += 22.0
-
-	# Семь категорий с понятными подписями (D и F объединены в "Бесплатные
-	# награды" в концепции, но для тонкого контроля оставляем их раздельно —
-	# подписи всё равно дружелюбные).
-	const CAT_ROWS : Array = [
-		["A", "Возвращение в игру"],
-		["B", "Ежедневные напоминания"],
-		["C", "Прогресс скина"],
-		["D", "Бесплатный спин в автомате"],
-		["E", "Сюжет и босс"],
-		["F", "Серверные награды"],
-		["G", "Таблица лидеров"],
-		["H", "События и новый контент"],
-	]
-	for entry in CAT_ROWS:
-		_build_notif_toggle_row(content, x_pad, cur_y, row_w,
-			str(entry[1]), str(entry[0]))
-		cur_y += 28.0
-
-	# Separator
-	cur_y += 8.0
-	var qsep := ColorRect.new()
-	qsep.color    = Color(0.20, 0.18, 0.14, 0.65)
-	qsep.size     = Vector2(row_w, 1.0)
-	qsep.position = Vector2(x_pad, cur_y)
-	content.add_child(qsep)
-	cur_y += 10.0
-
-	# Quiet hours section
-	var q_title := Label.new()
-	q_title.add_theme_font_override("font", UI_FONT)
-	q_title.add_theme_font_size_override("font_size", 11)
-	_apply_menu_caption_fx(q_title)
-	q_title.text                 = "ТИХИЕ ЧАСЫ"
-	q_title.modulate             = Color(1.0, 0.85, 0.35)
-	q_title.size                 = Vector2(row_w, 18.0)
-	q_title.position             = Vector2(x_pad, cur_y)
-	q_title.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	content.add_child(q_title)
-	cur_y += 22.0
-
-	_build_quiet_hours_picker(content, x_pad, cur_y, row_w)
-	# 2 stepper rows (28) + gap (8) + stepper (28) + gap (4) + hint footer (22).
-	cur_y += 90.0
-
-	# Dev helper — simulates a tap on the soonest pending notification so the
-	# deep-link router can be smoke-tested without a real device build.
-	# Picks the first pending row from `Notifications.list_pending()` and
-	# fires its `notification_opened` signal with the stored payload.
-	if DevFlags.ENABLED:
-		cur_y += 12.0
-		_build_notif_test_row(content, x_pad, cur_y, row_w, root)
-		cur_y += 32.0
-		# Second dev row — schedules a REAL local push 8 s out (the native
-		# calendar trigger keeps second-granularity) and closes the modal so
-		# you can background the app and watch the OS banner actually arrive.
-		_build_notif_fire_row(content, x_pad, cur_y, row_w, root)
-		cur_y += 32.0
-		# Third dev row — asks the server (sendTestPush) to deliver a REAL remote
-		# push back to this device, exercising the full FCM/APNs round-trip.
-		_build_notif_remote_row(content, x_pad, cur_y, row_w)
-		cur_y += 32.0
-
-	# Tell the ScrollContainer how tall the body is so scrolling engages.
-	content.custom_minimum_size = Vector2(panel_w, cur_y + 16.0)
+# ── Уведомления ──────────────────────────────────────────────────────────────
+# Раздел уведомлений переехал в экран настроек (scripts/settings_screen.gd) —
+# отдельной модалки больше нет. Здесь остались только dev-строки, которые этот
+# раздел показывает под собой, и общие переключатели, которыми он пользуется.
 
 # Dev-only "симулировать клик" row. Fires `Notifications.simulate_open()` on
 # the soonest pending notif and closes the modal so the deep-link target
@@ -10071,172 +9519,6 @@ func _build_notif_remote_row(parent: Node, x: float, y: float, w: float) -> void
 			bg.color  = Color(0.40, 0.16, 0.16, 0.95))
 	parent.add_child(btn)
 
-# Builds a single toggle row used by the notifications modal. `key` is "_master"
-# for the global switch, or a single-letter A..H key for a specific category.
-# The row redraws its own pill on press, so callers don't need to track state.
-func _build_notif_toggle_row(parent: Node, x: float, y: float, w: float,
-		label: String, key: String) -> void:
-	const H : float = 24.0
-	var row_bg := ColorRect.new()
-	row_bg.color    = Color(0.10, 0.10, 0.13, 0.75)
-	row_bg.size     = Vector2(w, H)
-	row_bg.position = Vector2(x, y)
-	parent.add_child(row_bg)
-
-	var lbl := Label.new()
-	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 11)
-	_apply_menu_caption_fx(lbl)
-	lbl.text                 = label
-	lbl.modulate             = Color(0.90, 0.92, 0.95)
-	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.size                 = Vector2(w - 88.0, H)
-	lbl.position             = Vector2(x + 10.0, y)
-	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	parent.add_child(lbl)
-
-	var pill_w : float = 64.0
-	var pill := ColorRect.new()
-	pill.size     = Vector2(pill_w, H - 6.0)
-	pill.position = Vector2(x + w - pill_w - 8.0, y + 3.0)
-	parent.add_child(pill)
-	var pill_lbl := Label.new()
-	pill_lbl.add_theme_font_override("font", UI_FONT)
-	pill_lbl.add_theme_font_size_override("font_size", 9)
-	_apply_menu_caption_fx(pill_lbl)
-	pill_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	pill_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	pill_lbl.size                 = pill.size
-	pill_lbl.position             = pill.position
-	pill_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	parent.add_child(pill_lbl)
-
-	var refresh : Callable = func():
-		var on : bool = _notif_cat_enabled(key)
-		if on:
-			pill.color         = Color(0.18, 0.50, 0.20, 0.95)
-			pill_lbl.text      = "ВКЛ"
-			pill_lbl.modulate  = Color(0.85, 1.0, 0.65)
-			lbl.modulate       = Color(0.90, 0.92, 0.95)
-		else:
-			pill.color         = Color(0.32, 0.10, 0.10, 0.95)
-			pill_lbl.text      = "ВЫКЛ"
-			pill_lbl.modulate  = Color(1.0, 0.75, 0.70)
-			lbl.modulate       = Color(0.60, 0.60, 0.62)
-	refresh.call()
-
-	var btn := Button.new()
-	btn.flat       = true
-	btn.focus_mode = Control.FOCUS_NONE
-	btn.size       = Vector2(w, H)
-	btn.position   = Vector2(x, y)
-	btn.pressed.connect(func():
-		_play_btn_sfx()
-		_toggle_notif_category(key)
-		refresh.call())
-	parent.add_child(btn)
-
-# Two-row picker for `notif_quiet_start` / `notif_quiet_end`. Each row exposes
-# − / + chips around the current hour value. Wrapping is mod 24.
-func _build_quiet_hours_picker(parent: Node, x: float, y: float, w: float) -> void:
-	const ROW_H : float = 28.0
-	const ROW_GAP : float = 8.0
-	var start_lbl : Label
-	var end_lbl   : Label
-
-	var update_labels : Callable = func():
-		if is_instance_valid(start_lbl):
-			start_lbl.text = "%02d:00" % int(SaveData.notif_quiet_start)
-		if is_instance_valid(end_lbl):
-			end_lbl.text   = "%02d:00" % int(SaveData.notif_quiet_end)
-
-	var bump : Callable = func(key: String, delta: int):
-		var v : int = int(SaveData.get(key))
-		v = posmod(v + delta, 24)
-		SaveData.set(key, v)
-		SaveData._save()
-		SaveData.data_changed.emit()
-		update_labels.call()
-
-	start_lbl = _build_hour_stepper_row(parent, x, y, w, "Начало",
-		func():
-			bump.call("notif_quiet_start", -1),
-		func():
-			bump.call("notif_quiet_start",  1))
-	end_lbl = _build_hour_stepper_row(parent, x, y + ROW_H + ROW_GAP, w, "Конец",
-		func():
-			bump.call("notif_quiet_end", -1),
-		func():
-			bump.call("notif_quiet_end",  1))
-	update_labels.call()
-
-	# Footer hint shows the rendered window so the player can sanity-check at a
-	# glance ("С 23:00 до 09:00 пуши не приходят").
-	var hint := Label.new()
-	hint.add_theme_font_override("font", UI_FONT)
-	hint.add_theme_font_size_override("font_size", 9)
-	hint.modulate             = Color(0.60, 0.62, 0.65)
-	hint.autowrap_mode        = TextServer.AUTOWRAP_WORD
-	hint.size                 = Vector2(w, 22.0)
-	hint.position             = Vector2(x, y + (ROW_H + ROW_GAP) * 2 + 4.0)
-	hint.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	parent.add_child(hint)
-	var update_hint : Callable = func():
-		hint.text = "С %02d:00 до %02d:00 пуши не приходят." % [
-			int(SaveData.notif_quiet_start), int(SaveData.notif_quiet_end)]
-	update_hint.call()
-	# Recompute hint when either stepper bumps the value — connect to
-	# SaveData.data_changed for the lifetime of the modal, then disconnect on
-	# the hint's tree_exited so the lambda doesn't outlive the UI.
-	SaveData.data_changed.connect(update_hint)
-	hint.tree_exited.connect(func():
-		if SaveData.data_changed.is_connected(update_hint):
-			SaveData.data_changed.disconnect(update_hint))
-
-# Builds one [Label][−][value][+] row used by the quiet-hours picker. Returns
-# the centre Label so the caller can refresh its text when the stored hour
-# changes.
-func _build_hour_stepper_row(parent: Node, x: float, y: float, w: float,
-		label: String, on_minus: Callable, on_plus: Callable) -> Label:
-	const H : float = 28.0
-	var bg := ColorRect.new()
-	bg.color    = Color(0.10, 0.10, 0.13, 0.75)
-	bg.size     = Vector2(w, H)
-	bg.position = Vector2(x, y)
-	parent.add_child(bg)
-
-	var lbl := Label.new()
-	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 11)
-	_apply_menu_caption_fx(lbl)
-	lbl.text                 = label
-	lbl.modulate             = Color(0.90, 0.92, 0.95)
-	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.size                 = Vector2(w - 160.0, H)
-	lbl.position             = Vector2(x + 10.0, y)
-	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	parent.add_child(lbl)
-
-	const BTN_W : float = 30.0
-	var minus_x : float = x + w - 8.0 - BTN_W - 60.0 - BTN_W
-	var val_x   : float = minus_x + BTN_W
-	var plus_x  : float = val_x + 60.0
-
-	_build_stepper_chip(parent, minus_x, y + 2.0, BTN_W, H - 4.0, "−", on_minus)
-	var val_lbl := Label.new()
-	val_lbl.add_theme_font_override("font", UI_FONT)
-	val_lbl.add_theme_font_size_override("font_size", 14)
-	_apply_menu_caption_fx(val_lbl)
-	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	val_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	val_lbl.size                 = Vector2(60.0, H)
-	val_lbl.position             = Vector2(val_x, y)
-	val_lbl.modulate             = Color(0.95, 0.95, 0.80)
-	val_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	parent.add_child(val_lbl)
-	_build_stepper_chip(parent, plus_x, y + 2.0, BTN_W, H - 4.0, "+", on_plus)
-	return val_lbl
-
 func _build_stepper_chip(parent: Node, x: float, y: float, w: float, h: float,
 		glyph: String, on_press: Callable) -> void:
 	var visual := Control.new()
@@ -10312,21 +9594,17 @@ func _show_restore_modal() -> void:
 	root.add_child(dim_btn)
 
 	var panel_w := 420.0
-	var panel_h := 320.0
+	var panel_h := 264.0
 	var panel_x := (vp.x - panel_w) * 0.5
 	var panel_y := (vp.y - panel_h) * 0.5
 
-	var panel := ColorRect.new()
-	panel.color    = Color(0.07, 0.06, 0.04, 0.98)
-	panel.size     = Vector2(panel_w, panel_h)
-	panel.position = Vector2(panel_x, panel_y)
-	root.add_child(panel)
-
-	var stripe := ColorRect.new()
-	stripe.color    = Color(0.55, 0.85, 1.0, 0.85)
-	stripe.size     = Vector2(panel_w, 2.0)
-	stripe.position = Vector2(panel_x, panel_y)
-	root.add_child(stripe)
+	# Скруглённая подложка — та же, что у экрана настроек, из которого диалог и
+	# открывается. См. /Концепция/Экран настроек.md
+	var panel := Panel.new()
+	panel.add_theme_stylebox_override("panel", UiKit.rounded(
+		Color(0.07, 0.07, 0.10, 0.98), 12, Color(0.42, 0.48, 0.62, 0.90), 2))
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(root, panel, Vector2(panel_x, panel_y), Vector2(panel_w, panel_h))
 
 	var title := Label.new()
 	title.add_theme_font_override("font", UI_FONT)
@@ -10390,11 +9668,11 @@ func _show_restore_modal() -> void:
 	ca_visual.pivot_offset = ca_visual.size * 0.5
 	ca_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(ca_visual)
-	var ca_bg := ColorRect.new()
-	ca_bg.color    = Color(0.18, 0.07, 0.07, 0.95)
-	ca_bg.size     = Vector2(BTN_W, BTN_H)
-	ca_bg.position = Vector2.ZERO
-	ca_visual.add_child(ca_bg)
+	var ca_bg := Panel.new()
+	ca_bg.add_theme_stylebox_override("panel", UiKit.rounded(
+		Color(0.30, 0.12, 0.12, 0.98), 8, Color(1.00, 0.55, 0.50, 0.90), 2))
+	ca_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(ca_visual, ca_bg, Vector2.ZERO, Vector2(BTN_W, BTN_H))
 	var ca_lbl := Label.new()
 	ca_lbl.add_theme_font_override("font", UI_FONT)
 	ca_lbl.add_theme_font_size_override("font_size", 14)
@@ -10425,11 +9703,11 @@ func _show_restore_modal() -> void:
 	ok_visual.pivot_offset = ok_visual.size * 0.5
 	ok_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(ok_visual)
-	var ok_bg := ColorRect.new()
-	ok_bg.color    = Color(0.10, 0.25, 0.40, 0.95)
-	ok_bg.size     = Vector2(BTN_W, BTN_H)
-	ok_bg.position = Vector2.ZERO
-	ok_visual.add_child(ok_bg)
+	var ok_bg := Panel.new()
+	ok_bg.add_theme_stylebox_override("panel", UiKit.rounded(
+		Color(0.12, 0.26, 0.42, 0.98), 8, Color(0.55, 0.85, 1.00, 0.90), 2))
+	ok_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(ok_visual, ok_bg, Vector2.ZERO, Vector2(BTN_W, BTN_H))
 	var ok_lbl := Label.new()
 	ok_lbl.add_theme_font_override("font", UI_FONT)
 	ok_lbl.add_theme_font_size_override("font_size", 14)
@@ -10486,40 +9764,3 @@ func _attempt_restore(code: String, error_lbl: Label, modal_root: Node) -> void:
 			detail = detail.substr(0, 80) + "…"
 		error_lbl.text = "%s\n%s" % [ui_msg, detail]
 		Logger.err("HUD", "restore failed: %s" % msg)
-
-func _build_settings_slider(parent: Node, x: float, y: float, w: float,
-		title: String, value: float, on_changed: Callable) -> void:
-	var lbl := Label.new()
-	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 12)
-	_apply_menu_caption_fx(lbl)
-	lbl.text                 = title
-	lbl.modulate             = Color(0.85, 0.85, 0.78)
-	lbl.size                 = Vector2(w - 60.0, 16.0)
-	lbl.position             = Vector2(x, y)
-	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	parent.add_child(lbl)
-
-	var pct := Label.new()
-	pct.add_theme_font_override("font", UI_FONT)
-	pct.add_theme_font_size_override("font_size", 11)
-	_apply_menu_caption_fx(pct)
-	pct.text                 = "%d%%" % int(round(value * 100.0))
-	pct.modulate             = Color(0.55, 0.85, 1.0)
-	pct.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	pct.size                 = Vector2(54.0, 16.0)
-	pct.position             = Vector2(x + w - 54.0, y)
-	pct.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	parent.add_child(pct)
-
-	var slider := HSlider.new()
-	slider.min_value     = 0.0
-	slider.max_value     = 1.0
-	slider.step          = 0.01
-	slider.value         = value
-	slider.size          = Vector2(w, 24.0)
-	slider.position      = Vector2(x, y + 22.0)
-	slider.value_changed.connect(func(v: float):
-		pct.text = "%d%%" % int(round(v * 100.0))
-		on_changed.call(v))
-	parent.add_child(slider)
