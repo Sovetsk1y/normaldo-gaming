@@ -4325,11 +4325,33 @@ func _build_skin_lore(parent: Control, cx: float, cw: float, y: float, skin_id: 
 	var l := _strong_label(text, 11, Color(0.88, 0.86, 0.80), 2)
 	l.autowrap_mode        = TextServer.AUTOWRAP_WORD
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.size         = Vector2(cw - 32.0, 40.0)
+	l.size         = Vector2(cw - 32.0, 34.0)
 	l.position     = Vector2(cx + 16.0, y)
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(l)
-	return y + 40.0
+	return y + 34.0
+
+# Личная статистика по скину: сколько им сыграно и какой в нём рекорд. Возвращает
+# нижнюю границу блока. Коллекция без личной истории — просто список голов.
+func _build_skin_stats(parent: Control, cx: float, cw: float, y: float, skin_id: String) -> float:
+	var runs : int = SaveData.get_skin_runs_for(skin_id)
+	var best : int = SaveData.get_skin_best_for(skin_id)
+	var text : String
+	if runs <= 0:
+		# Отдельная формулировка вместо «Забегов: 0 · Рекорд: 0»: два нуля
+		# читаются как поломка, а не как «ещё не играл».
+		text = "Ещё ни одного забега"
+	else:
+		# Пиццы словом, а не эмодзи: в шрифте игры значка пиццы нет, и он вылезал
+		# бы заглушкой. Строкой ниже про опыт сказано так же — «пицц».
+		text = "Забегов: %d   ·   Рекорд: %d пицц" % [runs, best]
+	var l := _strong_label(text, 10, Color(0.72, 0.80, 0.88), 2)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.size         = Vector2(cw - 20.0, 16.0)
+	l.position     = Vector2(cx + 10.0, y)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(l)
+	return y + 18.0
 
 # Лестница состояний жира: четыре портрета, закрытые — с замком и уровнем.
 # Это ровно то, о чём колонка «ПРОКАЧКА»: до сих пор о состояниях говорил только
@@ -4554,9 +4576,10 @@ func _show_skin_detail(skin_data: Dictionary, from_slots: bool, shop_overlay: Co
 
 	# Между портретом и полосой опыта пустовала половина колонки. Заполняем её
 	# тем, что колонке и положено: подписью героя и лестницей его состояний жира.
-	var mid_y : float = body_y + 118.0
+	var mid_y : float = body_y + 108.0
 	mid_y = _build_skin_lore(overlay, cx, cw, mid_y, skin_id)
-	_build_fat_ladder(overlay, cx, cw, mid_y + 10.0, skin_id)
+	mid_y = _build_skin_stats(overlay, cx, cw, mid_y, skin_id)
+	_build_fat_ladder(overlay, cx, cw, mid_y + 6.0, skin_id)
 
 	# Описание заполняем СРАЗУ: главная информация о скине не должна прятаться
 	# за неочевидным тапом.
@@ -6623,6 +6646,9 @@ func _on_normaldo_died(total_pizzas: int, death_pos: Vector2) -> void:
 	SaveData.add_dollars(_dollars_this_run, "run_end")
 	var xp_before    := SaveData.skin_xp
 	var level_before := SaveData.skin_level
+	# Личная статистика скина: забег засчитывается ровно здесь, одновременно с
+	# начислением опыта, — другого места, где забег точно закончился, нет.
+	SaveData.note_run_finished(total_pizzas)
 	var level_rewards := SaveData.add_xp(total_pizzas, "run_end")
 	# Submit endless run to leaderboard backend (fire-and-forget; doesn't block UI)
 	if QuestManager._run_is_endless and QuestManager.is_endless_unlocked():

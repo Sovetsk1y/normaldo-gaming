@@ -36,6 +36,8 @@ func _initialize() -> void:
 	await _test_progress(hud, save, reg)
 	print("── Подпись и жир ──")
 	await _test_lore_and_fat(hud, save, reg)
+	print("── Статистика скина ──")
+	await _test_stats(hud, save, reg)
 	print("── Состояния кнопки ──")
 	await _test_action(hud, save, reg)
 	print("── Все скины ──")
@@ -224,6 +226,49 @@ func _test_lore_and_fat(hud: Node, save: Node, reg: Node) -> void:
 			locks += _count(t2, "ур.%d" % lv)
 	_check(locks == 0 or _count(t2, "ур.5") > 0,
 		"на прокачанном скине состояния жира открыты")
+	await _close(ov2)
+
+# Личная статистика скина. Счётчики лежат в той же записи, что и опыт, и главный
+# риск тут не в отображении, а в том, что сохранение затрёт их: _flush_active
+# раньше подменял запись целиком.
+func _test_stats(hud: Node, save: Node, reg: Node) -> void:
+	_reset(save, ["classic", "tyson"], "tyson", 3)
+	_check(int(save.get_skin_runs_for("tyson")) == 0 and int(save.get_skin_best_for("tyson")) == 0,
+		"у нового скина счётчики на нуле")
+
+	save.note_run_finished(120)
+	save.note_run_finished(340)
+	_check(int(save.get_skin_runs_for("tyson")) == 2, "забеги считаются: %d" % save.get_skin_runs_for("tyson"))
+	_check(int(save.get_skin_best_for("tyson")) == 340, "рекорд взят лучший: %d" % save.get_skin_best_for("tyson"))
+
+	save.note_run_finished(90)
+	_check(int(save.get_skin_best_for("tyson")) == 340, "слабый забег рекорд не сбивает")
+	_check(int(save.get_skin_runs_for("tyson")) == 3, "но в счётчик забегов попадает")
+
+	# Забег засчитывается только АКТИВНОМУ скину.
+	_check(int(save.get_skin_runs_for("classic")) == 0, "чужому скину забег не приписан")
+
+	# Сохранение и смена скина не должны стирать счётчики: они лежат в одной
+	# записи с опытом, и полная перезапись записи их убивала.
+	save.set_active_skin("classic")
+	save.set_active_skin("tyson")
+	_check(int(save.get_skin_runs_for("tyson")) == 3 and int(save.get_skin_best_for("tyson")) == 340,
+		"счётчики пережили смену скина: %d / %d"
+		% [save.get_skin_runs_for("tyson"), save.get_skin_best_for("tyson")])
+
+	# На карточке строка есть и показывает те же числа.
+	var ov : Control = await _open(hud, reg, "tyson")
+	var t : Array = _texts(ov, [])
+	_check(_count(t, "Забегов: 3") == 1, "на карточке показано число забегов")
+	_check(_count(t, "Рекорд: 340") == 1, "и рекорд")
+	await _close(ov)
+
+	# У скина без забегов — отдельная формулировка, а не два нуля.
+	_reset(save, ["classic", "pirate"], "pirate", 1)
+	var ov2 : Control = await _open(hud, reg, "pirate")
+	var t2 : Array = _texts(ov2, [])
+	_check(_count(t2, "Ещё ни одного забега") == 1, "скин без забегов подписан словами")
+	_check(_count(t2, "Рекорд: 0") == 0, "и нулей не показывает")
 	await _close(ov2)
 
 func _test_action(hud: Node, save: Node, reg: Node) -> void:

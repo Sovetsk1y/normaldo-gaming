@@ -31,6 +31,9 @@ func _initialize() -> void:
 	# smoke_skins.gd прокачивает КАЖДЫЙ скин до 10-го уровня. Без сброса в кадр
 	# попадает «десятый уровень» у скина, который даже не куплен.
 	save.skin_progress = {}
+	# Немного истории у активного скина, чтобы в кадр попала строка статистики.
+	save.skin_progress["harry_potter"] = {"xp": 1, "level": 4, "mastery": 0, "runs": 37, "best": 412}
+	save.skin_progress["pirate"]       = {"xp": 0, "level": 1, "mastery": 0, "runs": 0,  "best": 0}
 	save.owned_skins = ["classic", "viking", "tyson", "harry_potter"]
 	save.active_skin = "harry_potter"
 	save.skin_level  = 4

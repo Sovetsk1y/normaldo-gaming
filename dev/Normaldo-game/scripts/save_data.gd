@@ -119,16 +119,38 @@ func set_music_volume(v: float) -> void:
 # Returns the stored progress dict for a skin, creating defaults if absent.
 func _skin_entry(id: String) -> Dictionary:
 	if not skin_progress.has(id):
-		skin_progress[id] = {"xp": 0, "level": 1, "mastery": 0}
+		skin_progress[id] = {"xp": 0, "level": 1, "mastery": 0, "runs": 0, "best": 0}
 	return skin_progress[id]
 
 # Flush live vars back into skin_progress before any save or skin switch.
 func _flush_active() -> void:
-	skin_progress[active_skin] = {
-		"xp":      skin_xp,
-		"level":   skin_level,
-		"mastery": _mastery_tokens_given,
-	}
+	# ДОПИСЫВАЕМ в существующую запись, а не заменяем её целиком: в записи лежат
+	# ещё и счётчики забегов, и полная замена молча стирала бы их при каждом
+	# сохранении.
+	var e := _skin_entry(active_skin)
+	e["xp"]      = skin_xp
+	e["level"]   = skin_level
+	e["mastery"] = _mastery_tokens_given
+
+# ── Статистика по скину ───────────────────────────────────────────────────────
+# Сколько забегов сыграно этим скином и какой в нём рекорд по пиццам. Карточка
+# скина показывает это строкой: коллекция без личной истории — просто список.
+
+func note_run_finished(pizzas: int) -> void:
+	var e := _skin_entry(active_skin)
+	e["runs"] = int(e.get("runs", 0)) + 1
+	e["best"] = maxi(int(e.get("best", 0)), maxi(pizzas, 0))
+	_save()
+
+func get_skin_runs_for(id: String) -> int:
+	if not skin_progress.has(id):
+		return 0
+	return int((skin_progress[id] as Dictionary).get("runs", 0))
+
+func get_skin_best_for(id: String) -> int:
+	if not skin_progress.has(id):
+		return 0
+	return int((skin_progress[id] as Dictionary).get("best", 0))
 
 # Adds pizzas as XP. Returns Array of Dicts {level, dollars, tokens}.
 # level == 0 means mastery token batch (no level-up, just tokens).
@@ -405,6 +427,9 @@ func _load() -> void:
 				"xp":      int(v.get("xp",      0)),
 				"level":   int(v.get("level",   1)),
 				"mastery": int(v.get("mastery", 0)),
+				# Старые сейвы про забеги ничего не знают — начинаем с нуля.
+				"runs":    int(v.get("runs",    0)),
+				"best":    int(v.get("best",    0)),
 			}
 	elif d.has("skin_xp"):
 		# Migrate old flat format: put saved values under the active skin
