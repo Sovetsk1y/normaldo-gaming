@@ -2413,15 +2413,25 @@ func _show_shop(restore_scroll: int = 0, from_slots: bool = false, skip_open_ani
 		if not SaveData.owns_skin(sd["id"]):
 			skins.append(sd)
 
+	# Вся коллекция на одном экране: 13 скинов ложатся 5×3 и помещаются целиком.
+	# Раньше карточка была 150×156, третий ряд обрезался, и треть коллекции
+	# уезжала под скролл без всякой подсказки — при том что внутри карточки
+	# между именем и кнопкой было воздуха больше, чем сам аватар.
+	# См. /Концепция/Экран скинов.md
+	const G_GAP  := 10.0
 	const CELL_W := 150.0
-	const CELL_H := 156.0
-	const G_GAP  := 12.0
 	var cols : int = maxi(2, int((vp.x - 24.0 + G_GAP) / (CELL_W + G_GAP)))
-	var grid_total_w : float = cols * CELL_W + (cols - 1) * G_GAP
-	var start_gx : float = (vp.x - grid_total_w) * 0.5
 	var n := skins.size()
 	var rows : int = int(ceil(float(n) / float(cols)))
-	var content_h : float = G_GAP + rows * (CELL_H + G_GAP)
+	# Высота карточки подбирается под число рядов, чтобы сетка влезла без
+	# прокрутки; ниже CELL_H_MIN не ужимаем — там уже не помещается кнопка.
+	const CELL_H_MIN := 104.0
+	const CELL_H_MAX := 150.0
+	var cell_h : float = clampf((grid_h - G_GAP * float(rows + 1)) / float(rows),
+		CELL_H_MIN, CELL_H_MAX)
+	var grid_total_w : float = cols * CELL_W + (cols - 1) * G_GAP
+	var start_gx : float = (vp.x - grid_total_w) * 0.5
+	var content_h : float = G_GAP + rows * (cell_h + G_GAP)
 
 	var content := Control.new()
 	content.custom_minimum_size = Vector2(vp.x, maxf(content_h, grid_h))
@@ -2432,8 +2442,8 @@ func _show_shop(restore_scroll: int = 0, from_slots: bool = false, skip_open_ani
 		var col := i % cols
 		var row := i / cols
 		var gx := start_gx + col * (CELL_W + G_GAP)
-		var gy := G_GAP + row * (CELL_H + G_GAP)
-		_build_skin_grid_cell(content, Vector2(gx, gy), CELL_W, CELL_H, skins[i], overlay, from_slots)
+		var gy := G_GAP + row * (cell_h + G_GAP)
+		_build_skin_grid_cell(content, Vector2(gx, gy), CELL_W, cell_h, skins[i], overlay, from_slots)
 
 # Returns list of item textures relevant to a skill (for popup display).
 func _skill_item_textures(sk: Dictionary) -> Array:
@@ -4080,7 +4090,8 @@ func _skin_first_tex(skin_data: Dictionary) -> Texture2D:
 		return load(tex_dir + "state1.png") as Texture2D
 	return FAT_TEXTURES[0]
 
-# Equip / Buy / Active button. `refresh` rebuilds the host screen after a change.
+# Кнопка карточки скина: АКТИВЕН / НАДЕТЬ / цена / замок с «НЕТ ДЕНЕГ».
+# `refresh` пересобирает экран после покупки или смены скина.
 func _skin_action_button(parent: Control, x: float, y: float, w: float, h: float,
 		skin_id: String, refresh: Callable) -> void:
 	var rarity : int   = SkinRegistry.get_skin(skin_id).get("rarity", 0)
@@ -4090,69 +4101,78 @@ func _skin_action_button(parent: Control, x: float, y: float, w: float, h: float
 	var is_active := SaveData.active_skin == skin_id
 	var can_buy   := not is_owned and SaveData.dollars >= price
 
+	var pos  := Vector2(x, y)
+	var size := Vector2(w, h)
+
 	if is_active:
-		var bg := ColorRect.new()
-		bg.color = Color(rc.r, rc.g, rc.b, 0.18); bg.size = Vector2(w, h); bg.position = Vector2(x, y)
-		parent.add_child(bg)
-		var lbl := Label.new()
-		lbl.add_theme_font_override("font", UI_FONT); lbl.add_theme_font_size_override("font_size", 12)
-		_apply_menu_caption_fx(lbl)
-		lbl.text = "АКТИВЕН"; lbl.modulate = Color(rc.r, rc.g, rc.b, 1.0)
-		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		lbl.size = Vector2(w, h); lbl.position = Vector2(x, y)
-		parent.add_child(lbl)
+		UiKit.panel(parent, pos, size, Color(rc.r * 0.30, rc.g * 0.30, rc.b * 0.30, 0.95),
+			8, Color(rc.r, rc.g, rc.b, 1.0))
+		_skin_btn_label(parent, "АКТИВЕН", pos, size, Color(rc.r, rc.g, rc.b, 1.0))
 		return
 
-	var col_bg : Color
-	var col_fg : Color
-	var text   : String
-	if is_owned:
-		col_bg = Color(0.30, 0.16, 0.50, 0.92); col_fg = Color(0.92, 0.85, 1.0); text = "НАДЕТЬ"
-	elif can_buy:
-		col_bg = Color(0.05, 0.16, 0.06, 0.92); col_fg = Color(0.55, 1.0, 0.6); text = "КУПИТЬ"
-	else:
-		col_bg = Color(0.12, 0.08, 0.08, 0.80); col_fg = Color(0.5, 0.45, 0.45, 0.85); text = "НЕТ ДЕНЕГ"
+	var visual := Control.new()
+	visual.size         = size
+	visual.position     = pos
+	visual.pivot_offset = size * 0.5
+	visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(visual)
 
-	var bg2 := ColorRect.new()
-	bg2.color = col_bg; bg2.size = Vector2(w, h); bg2.position = Vector2(x, y); bg2.mouse_filter = Control.MOUSE_FILTER_PASS
-	parent.add_child(bg2)
-	if can_buy:
-		# Centered "КУПИТЬ {price}" + dollar image.
-		var cc := CenterContainer.new()
-		cc.size = Vector2(w, h); cc.position = Vector2(x, y); cc.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		parent.add_child(cc)
-		var hb := HBoxContainer.new()
-		hb.add_theme_constant_override("separation", 4); hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		cc.add_child(hb)
+	if is_owned:
+		UiKit.panel(visual, Vector2.ZERO, size, Color(0.28, 0.15, 0.48, 0.96), 8,
+			Color(0.72, 0.55, 1.0, 0.95))
+		_skin_btn_label(visual, "НАДЕТЬ", Vector2.ZERO, size, Color(0.94, 0.88, 1.0))
+	elif can_buy:
+		UiKit.panel(visual, Vector2.ZERO, size, Color(0.07, 0.20, 0.08, 0.96), 8,
+			Color(0.50, 1.0, 0.55, 0.95))
+		# Цена с иконкой доллара — валюта во всей игре показана спрайтом.
+		var dsz : float = minf(h * 0.72, 18.0)
+		var txt : String = str(price)
+		var tw  : float  = UI_FONT.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+		var bx  : float  = (w - tw - 3.0 - dsz) * 0.5
 		var pl := Label.new()
 		pl.add_theme_font_override("font", UI_FONT); pl.add_theme_font_size_override("font_size", 12)
 		_apply_menu_caption_fx(pl)
-		pl.text = "КУПИТЬ " + str(price); pl.modulate = col_fg
-		pl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER; pl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		hb.add_child(pl)
-		var dsz := minf(h * 0.7, 20.0)
+		pl.text = txt; pl.modulate = Color(0.62, 1.0, 0.66)
+		pl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		pl.size = Vector2(tw + 2.0, h); pl.position = Vector2(bx, 0.0)
+		pl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		visual.add_child(pl)
 		var dlr := _make_icon(DOLLAR_TEXTURE, dsz)
-		dlr.custom_minimum_size = Vector2(dsz, dsz)
+		dlr.position     = Vector2(bx + tw + 3.0, (h - dsz) * 0.5)
 		dlr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		hb.add_child(dlr)
+		visual.add_child(dlr)
 	else:
-		var lbl2 := Label.new()
-		lbl2.add_theme_font_override("font", UI_FONT); lbl2.add_theme_font_size_override("font_size", 12)
-		_apply_menu_caption_fx(lbl2)
-		lbl2.text = text; lbl2.modulate = col_fg
-		lbl2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; lbl2.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		lbl2.size = Vector2(w, h); lbl2.position = Vector2(x, y); lbl2.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		parent.add_child(lbl2)
+		# Недоступно: замок И слово, а не только приглушённый цвет.
+		UiKit.panel(visual, Vector2.ZERO, size, Color(0.13, 0.09, 0.09, 0.92), 8,
+			Color(0.45, 0.30, 0.30, 0.9))
+		var lock := TextureRect.new()
+		lock.texture       = _lock_tex()
+		lock.stretch_mode  = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		lock.expand_mode   = TextureRect.EXPAND_IGNORE_SIZE
+		lock.modulate      = Color(0.85, 0.55, 0.55, 0.95)
+		lock.size          = Vector2(h * 0.62, h * 0.62)
+		lock.position      = Vector2(8.0, (h - h * 0.62) * 0.5)
+		lock.mouse_filter  = Control.MOUSE_FILTER_IGNORE
+		visual.add_child(lock)
+		var nl := Label.new()
+		nl.add_theme_font_override("font", UI_FONT); nl.add_theme_font_size_override("font_size", 11)
+		_apply_menu_caption_fx(nl)
+		nl.text = "НЕТ ДЕНЕГ"; nl.modulate = Color(0.95, 0.60, 0.55)
+		nl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		nl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		nl.size = Vector2(w - h * 0.62 - 8.0, h)
+		nl.position = Vector2(h * 0.62 + 8.0, 0.0)
+		nl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		visual.add_child(nl)
 
 	if is_owned or can_buy:
 		var btn := Button.new()
 		btn.flat = true; btn.focus_mode = Control.FOCUS_NONE
-		btn.size = Vector2(w, h); btn.position = Vector2(x, y)
+		btn.size = size; btn.position = pos
 		btn.pressed.connect(func():
 			_play_btn_sfx()
 			if is_owned:
 				SaveData.set_active_skin(skin_id)
-				_refresh_fat_icons()
 				var nrm := get_parent().get_node_or_null("Normaldo")
 				if nrm and nrm.has_method("reload_skin"):
 					nrm.reload_skin()
@@ -4160,91 +4180,115 @@ func _skin_action_button(parent: Control, x: float, y: float, w: float, h: float
 				if SaveData.buy_skin(skin_id):
 					QuestManager.notify_skin_bought()
 			refresh.call())
+		btn.button_down.connect(_menu_btn_press_anim.bind(visual, true))
+		btn.button_up.connect(_menu_btn_press_anim.bind(visual, false))
+		btn.mouse_exited.connect(_menu_btn_press_anim.bind(visual, false))
 		parent.add_child(btn)
 
+func _skin_btn_label(parent: Node, text: String, pos: Vector2, size: Vector2, col: Color) -> void:
+	var l := Label.new()
+	l.add_theme_font_override("font", UI_FONT); l.add_theme_font_size_override("font_size", 12)
+	_apply_menu_caption_fx(l)
+	l.text = text; l.modulate = col
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	l.size = size; l.position = pos
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(l)
+
 # One small grid cell: avatar + name + rarity + short XP + action; tap → detail.
+# Карточка скина в сетке. Четыре состояния, и каждое названо СЛОВОМ, а не
+# передано одним лишь цветом: АКТИВЕН / НАДЕТЬ / цена / замок и «НЕТ ДЕНЕГ».
+# См. /Концепция/Экран скинов.md
 func _build_skin_grid_cell(parent: Control, pos: Vector2, w: float, h: float,
 		skin_data: Dictionary, overlay: Control, from_slots: bool) -> void:
 	var skin_id : String = skin_data["id"]
 	var rarity  : int    = skin_data.get("rarity", 0)
 	var rc      : Color  = SkinRegistry.RARITY_COLORS[rarity]
-	var is_owned := SaveData.owns_skin(skin_id)
+	var is_owned  := SaveData.owns_skin(skin_id)
 	var is_active := SaveData.active_skin == skin_id
+	var price     : int  = skin_data.get("price", 0)
+	var can_buy   := not is_owned and SaveData.dollars >= price
 
 	var cell := Control.new()
 	cell.position = pos; cell.size = Vector2(w, h); cell.mouse_filter = Control.MOUSE_FILTER_PASS
 	parent.add_child(cell)
 
-	var bg := ColorRect.new()
-	bg.color = Color(0.07, 0.06, 0.10, 0.97); bg.size = Vector2(w, h); bg.mouse_filter = Control.MOUSE_FILTER_PASS
-	cell.add_child(bg)
-	if is_active:
-		var glow := ColorRect.new()
-		glow.color = Color(rc.r, rc.g, rc.b, 0.16); glow.size = Vector2(w, h); glow.mouse_filter = Control.MOUSE_FILTER_PASS
-		cell.add_child(glow)
-	var stripe := ColorRect.new()
-	stripe.color = Color(rc.r, rc.g, rc.b, 0.92); stripe.size = Vector2(w, 3.0); stripe.mouse_filter = Control.MOUSE_FILTER_PASS
-	cell.add_child(stripe)
-
-	const AV := 52.0
-	var av := _skin_head_icon(skin_id, 0, AV)
-	av.position = Vector2((w - AV) * 0.5, 8.0)
-	cell.add_child(av)
-
-	var name_lbl := Label.new()
-	name_lbl.add_theme_font_override("font", UI_FONT); name_lbl.add_theme_font_size_override("font_size", 11)
-	_apply_menu_caption_fx(name_lbl)
-	name_lbl.text = skin_data.get("name_ru", skin_id); name_lbl.modulate = Color(1, 1, 1, 0.95)
-	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	name_lbl.size = Vector2(w, 16.0); name_lbl.position = Vector2(0.0, AV + 10.0); name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	cell.add_child(name_lbl)
+	UiKit.panel(cell, Vector2.ZERO, Vector2(w, h),
+		Color(0.10, 0.09, 0.13, 0.97) if (is_owned or can_buy) else Color(0.07, 0.06, 0.08, 0.94),
+		12, Color(1.0, 0.82, 0.25, 1.0) if is_active else Color(rc.r, rc.g, rc.b, 0.85),
+		3 if is_active else 2)
+	# Недоступный скин гасится целиком — но это ВТОРОЙ признак, первый на кнопке.
+	if not is_owned and not can_buy:
+		cell.modulate = Color(1, 1, 1, 0.62)
 
 	var rar_lbl := Label.new()
 	rar_lbl.add_theme_font_override("font", UI_FONT); rar_lbl.add_theme_font_size_override("font_size", 8)
 	_apply_menu_caption_fx(rar_lbl)
-	rar_lbl.text = SkinRegistry.RARITY_NAMES[rarity]; rar_lbl.modulate = Color(rc.r, rc.g, rc.b, 0.9)
+	rar_lbl.text = SkinRegistry.RARITY_NAMES[rarity]
+	rar_lbl.modulate = Color(rc.r, rc.g, rc.b, 1.0)
 	rar_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	rar_lbl.size = Vector2(w, 12.0); rar_lbl.position = Vector2(0.0, AV + 26.0); rar_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rar_lbl.size = Vector2(w, 12.0); rar_lbl.position = Vector2(0.0, 4.0)
+	rar_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	cell.add_child(rar_lbl)
 
-	# Short XP bar (owned) — current/next level labels + a bar with the same
-	# brightened track colour as the detail screen.
+	# Вертикальный ритм карточки жёсткий: при трёх рядах на неё остаётся 110 px,
+	# и стоит сдвинуть один блок — имя уезжает под полосу уровня.
+	var act_h : float = 24.0
+	var act_y : float = h - act_h - 4.0
+	var bar_y : float = act_y - 8.0
+	var name_y : float = bar_y - 16.0
+
+	const AV := 40.0
+	var av := _skin_head_icon(skin_id, 0, AV)
+	av.position = Vector2((w - AV) * 0.5, 17.0)
+	cell.add_child(av)
+
+	# Уровень — чипом на портрете, а не отдельной строкой: строка съедала место,
+	# которого не хватало на то, чтобы вся коллекция влезла на экран.
 	if is_owned:
 		var lvl := SaveData.get_skin_level_for(skin_id)
-		var ready := lvl >= 10
-		var bw := w - 24.0
-		var bx := 12.0
-		var lbl_y := AV + 40.0
-		var l_lbl := Label.new()
-		l_lbl.add_theme_font_override("font", UI_FONT); l_lbl.add_theme_font_size_override("font_size", 9)
-		_apply_menu_caption_fx(l_lbl)
-		l_lbl.text = "★" if ready else "ур.%d" % lvl; l_lbl.modulate = Color(0.55, 0.85, 1.0)
-		l_lbl.size = Vector2(bw * 0.5, 12.0); l_lbl.position = Vector2(bx, lbl_y)
-		l_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		cell.add_child(l_lbl)
-		var r_lbl := Label.new()
-		r_lbl.add_theme_font_override("font", UI_FONT); r_lbl.add_theme_font_size_override("font_size", 9)
-		_apply_menu_caption_fx(r_lbl)
-		r_lbl.text = "★" if ready else "ур.%d" % mini(lvl + 1, 10); r_lbl.modulate = Color(0.85, 0.95, 1.0)
-		r_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		r_lbl.size = Vector2(bw * 0.5, 12.0); r_lbl.position = Vector2(bx + bw * 0.5, lbl_y)
-		r_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		cell.add_child(r_lbl)
-		var by := lbl_y + 14.0
-		var bbg := ColorRect.new()
-		bbg.color = Color(0.32, 0.32, 0.38, 0.95); bbg.size = Vector2(bw, 6.0); bbg.position = Vector2(bx, by)
-		cell.add_child(bbg)
-		var bfl := ColorRect.new()
-		bfl.color = Color(0.45, 0.80, 1.0); bfl.size = Vector2(bw * SaveData.xp_level_progress_for(skin_id), 6.0); bfl.position = Vector2(bx, by)
-		cell.add_child(bfl)
+		var maxed := lvl >= 10
+		var chip_w : float = 34.0
+		UiKit.panel(cell, Vector2(6.0, 17.0), Vector2(chip_w, 15.0),
+			Color(0.06, 0.10, 0.16, 0.95), 6, Color(0.45, 0.80, 1.0, 0.9))
+		var lv := Label.new()
+		lv.add_theme_font_override("font", UI_FONT); lv.add_theme_font_size_override("font_size", 9)
+		_apply_menu_caption_fx(lv)
+		lv.text = "★" if maxed else "ур.%d" % lvl
+		lv.modulate = Color(0.70, 0.92, 1.0)
+		lv.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lv.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		lv.size = Vector2(chip_w, 15.0); lv.position = Vector2(6.0, 17.0)
+		lv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cell.add_child(lv)
 
-	# Action button (bottom) — extra padding above it.
-	var act_h := 24.0
-	var act_y := h - act_h - 14.0
+	var name_lbl := Label.new()
+	name_lbl.add_theme_font_override("font", UI_FONT); name_lbl.add_theme_font_size_override("font_size", 11)
+	_apply_menu_caption_fx(name_lbl)
+	name_lbl.text = skin_data.get("name_ru", skin_id); name_lbl.modulate = Color(1, 1, 1, 0.97)
+	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	name_lbl.clip_text = true
+	name_lbl.size = Vector2(w - 8.0, 15.0); name_lbl.position = Vector2(4.0, name_y)
+	name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cell.add_child(name_lbl)
+
+	# Полоса до следующего уровня — тонкая, прямо над кнопкой.
+	if is_owned:
+		var bw := w - 24.0
+		var by := bar_y
+		UiKit.panel(cell, Vector2(12.0, by), Vector2(bw, 6.0),
+			Color(0.05, 0.04, 0.03, 0.95), 3, Color(0.30, 0.30, 0.36, 0.9))
+		var frac : float = SaveData.xp_level_progress_for(skin_id)
+		if frac > 0.0:
+			UiKit.panel(cell, Vector2(13.0, by + 1.0),
+				Vector2(maxf(3.0, (bw - 2.0) * frac), 4.0), Color(0.45, 0.80, 1.0), 3)
+
 	_skin_action_button(cell, 8.0, act_y, w - 16.0, act_h, skin_id,
 		func(): if is_instance_valid(overlay): overlay.queue_free(); _show_shop(0, from_slots, true))
 
-	# Tap zone over the upper part → open detail.
+	# Тап по верхней части карточки открывает подробности.
 	var tap := Button.new()
 	tap.flat = true; tap.focus_mode = Control.FOCUS_NONE
 	tap.size = Vector2(w, act_y - 2.0); tap.position = Vector2.ZERO
@@ -5326,7 +5370,11 @@ func _on_outside_tapped() -> void:
 		_menu_tapped = false
 
 func _process(delta: float) -> void:
-	if _fps_label:
+	# is_instance_valid, а не просто «if _fps_label»: у освобождённого объекта
+	# ссылка остаётся истинной, и _process начинает сыпать ошибками присваивания
+	# каждый кадр. Ловится, когда экран, на котором висела метка, пересобирают —
+	# например после покупки скина.
+	if is_instance_valid(_fps_label):
 		_fps_label.text = "FPS: %d" % Engine.get_frames_per_second()
 	if not _timer_running:
 		return
