@@ -12,10 +12,10 @@ const PAYOUT := preload("res://scripts/minigame_payout.gd")
 # встали, «×N» вылетел, числа выросли, добыча улетает.
 const SHOTS : Array = [
 	[1.30, "1_spin"],
-	[2.20, "2_landed"],
-	[2.90, "3_mult"],
-	[3.60, "4_grown"],
-	[4.10, "5_flyout"],
+	[2.60, "2_landed"],
+	[3.10, "3_mult"],
+	[3.80, "4_grown"],
+	[4.25, "5_flyout"],
 ]
 
 func _initialize() -> void:

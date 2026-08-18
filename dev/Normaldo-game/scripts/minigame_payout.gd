@@ -30,13 +30,22 @@ const ROLL_SFX   := preload("res://assets/audio/rolling.mp3")
 const STOP_SFX   := preload("res://assets/audio/tap.mp3")
 const WIN_SFX    := preload("res://assets/audio/magic_glitter.mp3")
 const BIG_SFX    := preload("res://assets/audio/firecracker.mp3")
+const MACH_TEX   := preload("res://assets/slots/slot_machine.png")
 
 # ── Геометрия ─────────────────────────────────────────────────────────────────
-# Экран всего 960×430, поэтому барабан ровно на один символ высотой: соседние
-# позиции ленты нужны только для прокрутки и живут за границей обрезки.
-const REEL_W   : float = 62.0
-const SYM_H    : float = 56.0
-const REEL_GAP : float = 10.0
+# Корпус — тот же автомат, что стоит на экране «СЛОТЫ» (assets/slots/
+# slot_machine.png). Рисованная тумба с маркизой читается кратно лучше нарисованной
+# кодом рамки и связывает окно итогов с автоматом из меню.
+#
+# Целиком он высокий (241×454) и в забег не влезает, поэтому берём только верх:
+# маркиза, экран и панель с джойстиками. Нижняя часть отрезается регионом
+# AtlasTexture — сам файл не трогаем, «СЛОТЫ» продолжают показывать автомат целиком.
+const MACH_CUT : float = 0.66              # какую долю высоты автомата оставляем
+# Экран автомата в долях кадра — та же величина, что в slots_screen.gd. По ней
+# считается и размер барабана: символ обязан сесть ровно в нарисованный экран.
+const MACH_SCREEN_REL : Rect2 = Rect2(0.241, 0.225, 0.506, 0.255)
+# Ширина барабана = ширина экрана автомата. Дальше от неё пляшет весь размер.
+const REEL_W   : float = 76.0
 const N_TILES  : int   = 3      # символов в ленте барабана (видно всегда верхний)
 
 # Лента барабана. Результат брошен заранее, так что раскладка тут чисто
@@ -72,6 +81,8 @@ var _dollar_lbl : Label = null
 var _pizza_icon : Control = null
 var _dollar_icon: Control = null
 var _reels_mid  : Vector2 = Vector2.ZERO
+var _sym_h      : float = 56.0    # высота символа = высота экрана автомата
+var _machine_bottom : float = 0.0
 var _plaque_mid : Vector2 = Vector2.ZERO
 var _roll_audio : AudioStreamPlayer = null
 
@@ -140,10 +151,16 @@ func _build() -> void:
 	_root.add_child(_dim)
 	_dim.create_tween().tween_property(_dim, "color:a", 0.55, 0.22)
 
-	var reels_w : float = REEL_W * 3.0 + REEL_GAP * 2.0
-	var reels_x : float = (vp.x - reels_w) * 0.5
-	var reels_y : float = vp.y * 0.30
-	_reels_mid  = Vector2(vp.x * 0.5, reels_y + SYM_H * 0.5)
+	# Размер автомата задаётся его экраном: он должен быть шириной с барабан.
+	var mach_w : float = REEL_W / MACH_SCREEN_REL.size.x
+	var mach_h : float = mach_w * float(MACH_TEX.get_height()) / float(MACH_TEX.get_width())
+	_sym_h = MACH_SCREEN_REL.size.y * mach_h
+	var row_x : float = (vp.x - mach_w * 3.0) * 0.5
+	var row_y : float = vp.y * 0.10
+	# Три автомата стоят вплотную, как на экране «СЛОТЫ».
+	var scr_x : float = MACH_SCREEN_REL.position.x * mach_w
+	var scr_y : float = MACH_SCREEN_REL.position.y * mach_h
+	_reels_mid = Vector2(vp.x * 0.5, row_y + mach_h * MACH_CUT * 0.5)
 
 	# Корпус и барабаны живут в общем узле: отработав, автомат гаснет целиком,
 	# и внимание переходит на плашку. Иконки перелёта лежат вне него, иначе
@@ -152,9 +169,12 @@ func _build() -> void:
 	_machine.size         = vp
 	_machine.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.add_child(_machine)
-	_build_cabinet(reels_x, reels_y, reels_w)
 	for i in 3:
-		_build_reel(reels_x + i * (REEL_W + REEL_GAP), reels_y)
+		_build_cabinet(row_x + i * mach_w, row_y, Vector2(mach_w, mach_h))
+	_build_base(row_x, row_y + mach_h * MACH_CUT, mach_w * 3.0)
+	for i in 3:
+		_build_reel(row_x + i * mach_w + scr_x, row_y + scr_y)
+	_machine_bottom = row_y + mach_h * MACH_CUT + 6.0
 
 	_build_plaque(vp)
 
@@ -162,32 +182,42 @@ func _build() -> void:
 	_roll_audio.stream = ROLL_SFX
 	_root.add_child(_roll_audio)
 
-# Корпус автомата: тёмная панель с золотой рамкой и подписью «РЕЙТ».
-func _build_cabinet(x: float, y: float, w: float) -> void:
-	var pad := 9.0
-	var frame := ColorRect.new()
-	frame.color        = Color(1.0, 0.80, 0.25, 0.95)
-	frame.size         = Vector2(w + pad * 2.0, SYM_H + pad * 2.0)
-	frame.position     = Vector2(x - pad, y - pad)
-	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_machine.add_child(frame)
+# Один автомат: спрайт, обрезанный регионом по MACH_CUT.
+func _build_cabinet(x: float, y: float, sz: Vector2) -> void:
+	var atlas := AtlasTexture.new()
+	atlas.atlas       = MACH_TEX
+	atlas.region      = Rect2(0.0, 0.0, MACH_TEX.get_width(), MACH_TEX.get_height() * MACH_CUT)
+	atlas.filter_clip = true
 
-	var inner := ColorRect.new()
-	inner.color        = Color(0.06, 0.05, 0.09, 0.98)
-	inner.size         = frame.size - Vector2(6.0, 6.0)
-	inner.position     = frame.position + Vector2(3.0, 3.0)
-	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_machine.add_child(inner)
+	var r := TextureRect.new()
+	r.texture        = atlas
+	r.stretch_mode   = TextureRect.STRETCH_SCALE
+	r.expand_mode    = TextureRect.EXPAND_IGNORE_SIZE
+	r.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	r.size           = Vector2(sz.x, sz.y * MACH_CUT)
+	r.position       = Vector2(x, y)
+	r.mouse_filter   = Control.MOUSE_FILTER_IGNORE
+	_machine.add_child(r)
 
-	var cap := _label("РЕЙТ", 16, Color(1.0, 0.88, 0.35))
-	cap.size     = Vector2(w, 20.0)
-	cap.position = Vector2(x, y - pad - 24.0)
-	_machine.add_child(cap)
+# Тумба под срезом: без неё автоматы выглядят обрубленными по линии.
+func _build_base(x: float, y: float, w: float) -> void:
+	var shelf := ColorRect.new()
+	shelf.color        = Color(0.16, 0.07, 0.20, 0.98)
+	shelf.size         = Vector2(w + 10.0, 9.0)
+	shelf.position     = Vector2(x - 5.0, y - 1.0)
+	shelf.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_machine.add_child(shelf)
+	var lip := ColorRect.new()
+	lip.color        = Color(0.44, 0.20, 0.52, 0.98)
+	lip.size         = Vector2(w + 10.0, 2.0)
+	lip.position     = Vector2(x - 5.0, y - 1.0)
+	lip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_machine.add_child(lip)
 
 func _build_reel(x: float, y: float) -> void:
 	var clip := Control.new()
 	clip.position      = Vector2(x, y)
-	clip.size          = Vector2(REEL_W, SYM_H)
+	clip.size          = Vector2(REEL_W, _sym_h)
 	clip.clip_contents = true
 	clip.pivot_offset  = clip.size * 0.5
 	clip.mouse_filter  = Control.MOUSE_FILTER_IGNORE
@@ -196,9 +226,9 @@ func _build_reel(x: float, y: float) -> void:
 
 	var tiles : Array = []
 	for k in N_TILES:
-		var l := _label("×1", 30, Color.WHITE)
-		l.size     = Vector2(REEL_W, SYM_H)
-		l.position = Vector2(0.0, k * SYM_H)
+		var l := _label("×1", 34, Color.WHITE)
+		l.size     = Vector2(REEL_W, _sym_h)
+		l.position = Vector2(0.0, k * _sym_h)
 		clip.add_child(l)
 		tiles.append(l)
 	_tiles.append(tiles)
@@ -208,7 +238,7 @@ func _build_reel(x: float, y: float) -> void:
 func _build_plaque(vp: Vector2) -> void:
 	var pw : float = 226.0
 	var ph : float = 54.0
-	_plaque_mid = Vector2(vp.x * 0.5, vp.y * 0.70)
+	_plaque_mid = Vector2(vp.x * 0.5, vp.y * 0.80)
 	_plaque = Control.new()
 	_plaque.size         = Vector2(pw, ph)
 	_plaque.position     = _plaque_mid - _plaque.size * 0.5
@@ -266,16 +296,35 @@ func _build_plaque(vp: Vector2) -> void:
 
 func _paint_reel(idx: int) -> void:
 	var sy      : float = float(_scroll_y[idx])
-	var partial : float = fposmod(sy, SYM_H)
-	var base    : int   = int(floor(sy / SYM_H)) % STRIP.size()
+	# Эпсилон обязателен. Доводка барабана тянет float до ТОЧНОЙ границы символа,
+	# и floor() там промахивается на единицу: лента оказывается сдвинута на один
+	# шаг, и в окошке видно СОСЕДНИЙ множитель, а не выпавший. Числа при этом
+	# начисляются правильные — расходится только картинка, и поймать это можно
+	# лишь глазами.
+	var steps   : float = floor(sy / _sym_h + 1e-4)
+	var partial : float = sy - steps * _sym_h
+	var base    : int   = int(steps) % STRIP.size()
 	if base < 0:
 		base += STRIP.size()
 	for k in N_TILES:
 		var v : int = int(STRIP[(base + k) % STRIP.size()])
 		var l : Label = _tiles[idx][k]
 		l.text     = "×%d" % v
-		l.position = Vector2(0.0, -partial + k * SYM_H)
+		l.position = Vector2(0.0, -partial + k * _sym_h)
 		l.add_theme_color_override("font_color", _tier_color(v))
+
+# Что игрок ВИДИТ в окошке барабана: символ той плитки, которая сейчас стоит в
+# рамке. Тест обязан спрашивать именно это, а не первую плитку ленты, — иначе
+# сдвиг на один шаг проходит мимо проверки.
+func visible_face(idx: int) -> String:
+	var best : Label = null
+	var best_d : float = 1e9
+	for l in _tiles[idx]:
+		var d : float = absf((l as Label).position.y)
+		if d < best_d:
+			best_d = d
+			best = l
+	return best.text if best != null else ""
 
 func _tier_color(v: int) -> Color:
 	var t : Array = LootMultiplier.TIER_COLORS
@@ -306,9 +355,9 @@ func _spin() -> void:
 func _stop_reel(idx: int) -> void:
 	_scroll_spd[idx] = 0.0
 	var cur : float = float(_scroll_y[idx])
-	var strip_h : float = STRIP.size() * SYM_H
+	var strip_h : float = STRIP.size() * _sym_h
 	# Доводим ВПЕРЁД и минимум на пол-ленты, иначе барабан дёрнется назад.
-	var target : float = float(_target_pos(_mult)) * SYM_H
+	var target : float = float(_target_pos(_mult)) * _sym_h
 	while target < cur + strip_h * 0.5:
 		target += strip_h
 	var tw := create_tween()
@@ -323,6 +372,10 @@ func _scroll_to(v: float, idx: int) -> void:
 	_paint_reel(idx)
 
 func _reel_landed(idx: int) -> void:
+	# Прибиваем ленту ровно к символу: дальше она уже не двигается, и накопленная
+	# за доводку погрешность не должна оставаться в кадре.
+	_scroll_y[idx] = roundf(float(_scroll_y[idx]) / _sym_h) * _sym_h
+	_paint_reel(idx)
 	_play_once(STOP_SFX, -4.0)
 	var clip : Control = _clips[idx]
 	var tw := clip.create_tween()
@@ -355,7 +408,7 @@ func _fly_mult_into_plaque() -> void:
 	var big := _label("×%d" % _mult, 46, _tier_color(_mult))
 	big.size         = Vector2(180.0, 60.0)
 	big.pivot_offset = big.size * 0.5
-	big.position     = _reels_mid + Vector2(-90.0, SYM_H * 0.5 + 6.0)
+	big.position     = Vector2(_reels_mid.x - 90.0, _machine_bottom + 4.0)
 	big.scale        = Vector2.ZERO
 	_root.add_child(big)
 	_play_once(BIG_SFX if _mult >= 4 else WIN_SFX, -6.0)

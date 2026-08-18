@@ -218,9 +218,10 @@ func _test_payout(game: Node) -> void:
 		await process_frame
 		t2 += 1.0 / 60.0
 	var faces : Array = []
-	for reel in w2.get("_tiles"):
-		faces.append(String(reel[0].text))
-	_check(faces == ["×4", "×4", "×4"], "три барабана встали одинаково: %s" % [faces])
+	for i in 3:
+		faces.append(String(w2.call("visible_face", i)))
+	_check(faces == ["×4", "×4", "×4"],
+		"в окошках стоит ровно выпавший множитель: %s" % [faces])
 	# Числа прокручиваются позже барабанов, поэтому ждём событие, а не таймер:
 	# фиксированная пауза развалилась бы от любой правки длительностей.
 	var pl : Label = w2.get("_pizza_lbl")
