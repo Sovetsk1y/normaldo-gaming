@@ -25,6 +25,19 @@ static func rounded(fill: Color, radius: int,
 		sb.border_width_bottom = border_w
 	return sb
 
+# Положить узел в родителя и ТОЛЬКО ПОТОМ задать размер.
+#
+# Пока Control не в дереве, он не видит темы сцены и зажимает `size` по
+# минимальному размеру ТЕМЫ ПО УМОЛЧАНИЮ. Для подписи это 48 px по высоте:
+# выставленные до add_child() 24 молча превращаются в 48, а обратно Godot
+# размер уже не ужимает. Видно это только там, где строки стоят вплотную —
+# в таблице призов автомата последняя строка вылезала за панель.
+static func place(parent: Node, ctrl: Control, pos: Vector2, size: Vector2) -> Control:
+	parent.add_child(ctrl)
+	ctrl.position = pos
+	ctrl.size     = size
+	return ctrl
+
 # Панель со скруглением — самый частый вызов, чтобы не писать три строки подряд.
 static func panel(parent: Node, pos: Vector2, size: Vector2, fill: Color,
 		radius: int, border: Color = Color(0, 0, 0, 0), border_w: int = 2) -> Panel:

@@ -5,7 +5,6 @@ const UI_FONT        := preload("res://assets/fonts/RussoOne-Regular.ttf")
 
 const TEX_PIZZA      := preload("res://assets/items/pizza.png")
 const TEX_DOLLAR     := preload("res://assets/items/dollar.png")
-const TEX_MONEYBAG   := preload("res://assets/items/money_bag.png")
 const TEX_TOKEN      := preload("res://assets/items/token.png")
 const TEX_PACK       := preload("res://assets/items/pizza_pack_closed.png")
 const TEX_SKIN1      := preload("res://assets/normaldo/normaldo1.png")
@@ -13,7 +12,6 @@ const TEX_SNAKE      := preload("res://assets/items/snake.png")
 const TEX_STONE      := preload("res://assets/items/stone.png")
 const TEX_TRASH      := preload("res://assets/items/trash_bin.png")
 const TEX_BG_SLOTS   := preload("res://assets/ui/slots/bg_slots.png")
-const TEX_SLOT_MACH  := preload("res://assets/slots/slot_machine.png")
 const TEX_BACK_ARROW := preload("res://assets/ui/quests/back_arrow.png")
 
 # ── Layout (canvas pixels, 430×192) ────────────────────────────────────────
@@ -32,12 +30,15 @@ const RES_ICON_SZ     : float   = 16.0
 const RES_GAP         : float   = 2.0
 const RES_NUM_W       : float   = 36.0
 const RES_FONT_SZ     : int     = 14
-# 3 slot machines, centred horizontally below the chrome.
-const MACHINES_Y      : float   = 35.0     # top in canvas px
-const MACHINES_W      : float   = 70.0     # per-machine canvas width
-const MACHINES_GAP    : float   = 0.0      # "впритык" — flush against each other
-# Slot_machine.png is 241×454. The dark "screen" rect inside is roughly:
-const MACH_SCREEN_REL : Rect2   = Rect2(0.241, 0.225, 0.506, 0.255)
+# Три колонки: скин слева, автомат по центру, призы справа (канвас-px).
+const COL_Y      : float = 34.0
+const COL_H      : float = 150.0
+const SKIN_X     : float = 12.0
+const SKIN_W     : float = 104.0
+const MACH_X     : float = 122.0
+const MACH_W     : float = 186.0
+const PAY_X      : float = 314.0
+const PAY_W      : float = 104.0
 # Slide-down transition (mirrors quests_screen).
 const SLIDE_TIME      : float = 0.45
 const SLIDE_TRANS     : int   = Tween.TRANS_QUAD
@@ -107,15 +108,17 @@ const TIER_COLORS := [
 	Color(1.0,  0.65, 0.15),
 ]
 
-# Reel dimensions
-const REEL_W     := 80.0
-const SYMBOL_H   := 70.0
-const REEL_H     := 70.0
-const REEL_GAP   := 12.0
-const CENTER_OFF := (REEL_H - SYMBOL_H) * 0.5
-const STRIP_H    := 40.0 * SYMBOL_H      # 2 × 20 strip positions
-const N_VISIBLE  := 3                    # symbols visible at once per reel
-const SPIN_SPEED := 920.0               # px/s during free spin
+# Барабаны. Размер считается от ширины корпуса в `_build_ui`, а не задан
+# числом: до переделки окно было 80×70 при кабинете в 160 px, и главное на
+# экране — результат — занимало меньше места, чем декорация вокруг него.
+const REEL_GAP   := 10.0
+const N_VISIBLE  := 3                    # символов в барабане одновременно
+const START_FACES : Array = [1, 5, 10]   # змея / мусор / жетон — заведомо не приз
+const SPIN_SPEED := 920.0                # px/s на свободном вращении
+var _reel_w    : float = 80.0
+var _sym_h     : float = 70.0
+var _reel_h    : float = 70.0
+var _strip_h   : float = 40.0 * 70.0     # 2 × 20 позиций ленты
 
 var _hud          : Node    = null
 # Slide-down container — everything visible lives inside so the entrance and
@@ -128,13 +131,23 @@ var _tv_orig_db   : float = 0.0
 # Legacy alias used by the reel / paytable / fly-icons code below.
 var _overlay      : Control = null
 var _token_lbl    : Label
-var _spin_btn_bg  : ColorRect
+var _spin_btn_bg  : Panel
+var _spin_visual  : Control = null
 var _spin_lbl     : Label
+var _spin_token   : TextureRect = null
+var _spin_pulse   : Tween = null
+var _result_lbl   : Label = null
 var _skin_avatar  : TextureRect
 var _skin_name_lbl: Label
 var _skin_lvl_lbl : Label
-var _skin_bar_fill: ColorRect
+var _skin_xp_lbl  : Label = null
+var _skin_bar_fill: Panel
 var _skin_bar_w   : float = 0.0
+# Лента последних спинов сессии — заполняет низ левой колонки и отвечает на
+# «что там выпало минуту назад». В сейв не пишется: это память экрана.
+var _history      : Array = []
+var _history_root : Control = null
+var _lay          : Dictionary = {}
 var _win_popup    : Node2D = null
 var _win_applied  : bool   = true
 
@@ -272,10 +285,24 @@ func _stop_music() -> void:
 		_spin_audio.queue_free()
 		_spin_audio = null
 
+# ── Геометрия трёх колонок ───────────────────────────────────────────────────
+func _layout(vp: Vector2) -> Dictionary:
+	var sx : float = vp.x / CANVAS_W
+	var sy : float = vp.y / CANVAS_H
+	var top : float = COL_Y * sy
+	var hgt : float = COL_H * sy
+	return {
+		"sx": sx, "sy": sy,
+		"skin": Rect2(SKIN_X * sx, top, SKIN_W * sx, hgt),
+		"mach": Rect2(MACH_X * sx, top, MACH_W * sx, hgt),
+		"pay":  Rect2(PAY_X  * sx, top, PAY_W  * sx, hgt),
+	}
+
 func _build_ui() -> void:
 	var vp      := get_viewport().get_visible_rect().size
 	var scale_x : float = vp.x / CANVAS_W
 	var scale_y : float = vp.y / CANVAS_H
+	_lay = _layout(vp)
 
 	# Slide-root holds every visible element — entrance / exit tween moves it
 	# all together (camera-pan effect, identical to the quests screen).
@@ -301,43 +328,67 @@ func _build_ui() -> void:
 	# ── Top chrome (back arrow, title, resources) — same spec as quests ─────
 	_build_top_chrome(vp, scale_x, scale_y)
 
-	# ── 3 slot machines side by side (centre) ───────────────────────────────
-	# Size each machine so its source "screen" rect lines up with REEL_W /
-	# REEL_H — that way the existing reel logic positions tiles correctly
-	# without per-instance rescaling.
-	var machine_w_vp : float = REEL_W / MACH_SCREEN_REL.size.x
-	var machine_h_vp : float = machine_w_vp / (float(TEX_SLOT_MACH.get_width()) / float(TEX_SLOT_MACH.get_height()))
-	var total_w_vp   : float = machine_w_vp * 3.0 + MACHINES_GAP * scale_x * 2.0
-	var machines_x   : float = (vp.x - total_w_vp) * 0.5
-	var machines_y   : float = MACHINES_Y * scale_y
+	_build_machine()
+	_build_skin_panel()
+	_build_paytable_panel()
 
-	# Screen-rect offset within each machine PNG.
-	var scr_off_x : float = MACH_SCREEN_REL.position.x * machine_w_vp
-	var scr_off_y : float = MACH_SCREEN_REL.position.y * machine_h_vp
+	SaveData.data_changed.connect(_on_data_changed)
+
+# ── Центр: ОДИН автомат с тремя барабанами ───────────────────────────────────
+# До переделки барабаны стояли в трёх отдельных кабинетах — это читалось как
+# три разных автомата, хотя комбинация у них одна на троих.
+func _build_machine() -> void:
+	var r : Rect2 = _lay["mach"]
+
+	var body := UiKit.panel(_slide_root, r.position, r.size,
+		Color(0.10, 0.05, 0.18, 0.95), 12, Color(0.62, 0.30, 1.00, 0.90), 2)
+	body.z_index = 0
+
+	# Маркиза с лампочками — автомат должен выглядеть автоматом.
+	var marq_h : float = 34.0
+	var marq_r := Rect2(r.position + Vector2(12.0, 10.0), Vector2(r.size.x - 24.0, marq_h))
+	UiKit.panel(_slide_root, marq_r.position, marq_r.size,
+		Color(0.20, 0.08, 0.34, 0.98), 10, Color(0.85, 0.45, 1.00, 0.85), 2)
+	var marq_lbl := _make_label("НОРМАЛЬДО-СЛОТ", 15, Color(1.0, 0.80, 0.40))
+	_apply_text_fx(marq_lbl)
+	marq_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	marq_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	marq_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_slide_root, marq_lbl, marq_r.position, marq_r.size)
+	for i in 8:
+		var lamp := Panel.new()
+		lamp.add_theme_stylebox_override("panel", UiKit.rounded(
+			Color(1.0, 0.72, 0.30, 0.85) if i % 2 == 0 else Color(0.60, 0.85, 1.0, 0.85), 3))
+		lamp.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		UiKit.place(_slide_root, lamp, marq_r.position + Vector2(
+			10.0 + float(i) * (marq_r.size.x - 20.0 - 6.0) / 7.0, marq_r.size.y - 4.0),
+			Vector2(6.0, 6.0))
+
+	# Три окна барабанов в одном корпусе. Размер считаем от ширины корпуса,
+	# чтобы символ был крупным на любом экране.
+	var inner_w : float = r.size.x - 28.0
+	_reel_w  = floorf((inner_w - REEL_GAP * 2.0) / 3.0)
+	_sym_h   = _reel_w
+	_reel_h  = _reel_w
+	_strip_h = float(STRIP_SIZE) * 2.0 * _sym_h
+	var reels_w : float = _reel_w * 3.0 + REEL_GAP * 2.0
+	var reels_x : float = r.position.x + (r.size.x - reels_w) * 0.5
+	var reels_y : float = marq_r.position.y + marq_h + 12.0
 
 	_reel_clips.clear()
 	_reel_tiles.clear()
 	for i in 3:
-		var mx : float = machines_x + i * (machine_w_vp + MACHINES_GAP * scale_x)
+		var wx : float = reels_x + float(i) * (_reel_w + REEL_GAP)
+		var win_pos := Vector2(wx, reels_y)
+		var win_size := Vector2(_reel_w, _reel_h)
+		UiKit.panel(_slide_root, win_pos - Vector2(3.0, 3.0), win_size + Vector2(6.0, 6.0),
+			Color(0.03, 0.02, 0.06, 0.98), 8, Color(0.75, 0.55, 0.25, 0.90), 2)
 
-		var mach := TextureRect.new()
-		mach.texture             = TEX_SLOT_MACH
-		mach.stretch_mode        = TextureRect.STRETCH_SCALE
-		mach.expand_mode         = TextureRect.EXPAND_IGNORE_SIZE
-		mach.custom_minimum_size = Vector2.ZERO
-		mach.size                = Vector2(machine_w_vp, machine_h_vp)
-		mach.position            = Vector2(mx, machines_y)
-		mach.texture_filter      = CanvasItem.TEXTURE_FILTER_NEAREST
-		mach.mouse_filter        = Control.MOUSE_FILTER_IGNORE
-		_slide_root.add_child(mach)
-
-		# Reel clip overlaid on the machine's screen rect.
 		var clip := Control.new()
-		# +2 vp-px nudge so the symbols sit visually centred on the machine's
-		# dark screen rectangle (sampled value was slightly high).
-		clip.position      = Vector2(mx + scr_off_x, machines_y + scr_off_y + 4.0)
-		clip.size          = Vector2(REEL_W, REEL_H)
+		clip.position      = win_pos
+		clip.size          = win_size
 		clip.clip_contents = true
+		clip.pivot_offset  = win_size * 0.5
 		clip.mouse_filter  = Control.MOUSE_FILTER_IGNORE
 		_slide_root.add_child(clip)
 		_reel_clips.append(clip)
@@ -348,50 +399,55 @@ func _build_ui() -> void:
 			tr.texture      = _sym_textures[0]
 			tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 			tr.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
-			tr.size         = Vector2((REEL_W - 6.0) * 0.95, (SYMBOL_H - 6.0) * 0.95)
-			tr.position     = Vector2(3.0, CENTER_OFF + k * SYMBOL_H)
-			clip.add_child(tr)
+			UiKit.place(clip, tr, Vector2(9.0, 9.0 + float(k) * _sym_h),
+				Vector2(_reel_w - 18.0, _sym_h - 18.0))
 			tiles.append(tr)
 		_reel_tiles.append(tiles)
-
+	# Стартовые позиции разные: три одинаковых символа на входе читаются как
+	# только что выпавший выигрыш.
+	for i in 3:
+		_scroll_y[i] = float(START_FACES[i]) * _sym_h
 	_update_all_reels()
 
-	# Spin button — sits just below the machines, centred. Wrapped in a
-	# press-scale Control so it gets the same shrink feedback as menu chips.
-	var spin_w  : float = 170.0
-	var spin_h  : float = 46.0
-	var spin_y  : float = machines_y + machine_h_vp + 12.0
-	spin_y = mini(spin_y, vp.y - spin_h - 8.0)
-	var spin_pos := Vector2((vp.x - spin_w) * 0.06, spin_y * 0.8)
-	var spin_visual := Control.new()
-	spin_visual.size         = Vector2(spin_w, spin_h)
-	spin_visual.position     = spin_pos
-	spin_visual.pivot_offset = spin_visual.size * 0.5
-	spin_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_slide_root.add_child(spin_visual)
+	# Строка результата — окно выигрыша игрок закрывает и забывает, а строка
+	# держит ответ «что там было» до следующего спина.
+	_result_lbl = _make_label("ТРИ ОДИНАКОВЫХ — КРУПНЫЙ ПРИЗ", 12, Color(0.80, 0.72, 0.95))
+	_apply_text_fx(_result_lbl)
+	_result_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_result_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_result_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_slide_root, _result_lbl,
+		Vector2(r.position.x + 10.0, reels_y + _reel_h + 12.0), Vector2(r.size.x - 20.0, 24.0))
 
-	_spin_btn_bg = ColorRect.new()
-	_spin_btn_bg.color    = Color(0.18, 0.08, 0.35, 0.95)
-	_spin_btn_bg.size     = Vector2(spin_w, spin_h)
-	_spin_btn_bg.position = Vector2.ZERO
-	spin_visual.add_child(_spin_btn_bg)
-	var spin_stripe := ColorRect.new()
-	spin_stripe.color    = Color(0.65, 0.25, 1.0, 0.75)
-	spin_stripe.size     = Vector2(spin_w, 3.0)
-	spin_stripe.position = Vector2.ZERO
-	spin_visual.add_child(spin_stripe)
-	# Layout: text "КРУТИТЬ  1" + small token icon on the right.
-	_spin_lbl = _make_label("КРУТИТЬ  1", 16, Color(0.88, 0.65, 1.0))
-	_spin_lbl.add_theme_font_override("font", UI_FONT)
+	# Кнопка спина — единственное действие экрана, значит самая крупная и по
+	# центру под автоматом.
+	var spin_w : float = minf(240.0, r.size.x - 40.0)
+	var spin_h : float = 52.0
+	var spin_pos := Vector2(r.position.x + (r.size.x - spin_w) * 0.5,
+		r.position.y + r.size.y - spin_h - 14.0)
+
+	_spin_visual = Control.new()
+	_spin_visual.size         = Vector2(spin_w, spin_h)
+	_spin_visual.position     = spin_pos
+	_spin_visual.pivot_offset = _spin_visual.size * 0.5
+	_spin_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_slide_root.add_child(_spin_visual)
+
+	_spin_btn_bg = Panel.new()
+	_spin_btn_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_spin_visual, _spin_btn_bg, Vector2.ZERO, Vector2(spin_w, spin_h))
+
+	_spin_lbl = _make_label("КРУТИТЬ", 18, Color(1.0, 0.92, 0.70))
 	_apply_text_fx(_spin_lbl)
 	_spin_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_spin_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	_spin_lbl.size                 = Vector2(spin_w - 28.0, spin_h)
-	_spin_lbl.position             = Vector2(-12.0, 0.0)
-	spin_visual.add_child(_spin_lbl)
-	var spin_token := _make_icon(TEX_TOKEN, 22.0)
-	spin_token.position = Vector2(spin_w * 0.5 + 38.0, (spin_h - 22.0) * 0.5)
-	spin_visual.add_child(spin_token)
+	_spin_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_spin_visual, _spin_lbl, Vector2.ZERO, Vector2(spin_w - 34.0, spin_h))
+
+	_spin_token = _make_icon(TEX_TOKEN, 24.0)
+	_spin_token.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_spin_visual, _spin_token,
+		Vector2(spin_w - 34.0, (spin_h - 24.0) * 0.5), Vector2(24.0, 24.0))
 
 	var spin_btn := Button.new()
 	spin_btn.flat       = true
@@ -399,18 +455,291 @@ func _build_ui() -> void:
 	spin_btn.size       = Vector2(spin_w, spin_h)
 	spin_btn.position   = spin_pos
 	spin_btn.pressed.connect(_on_spin_pressed)
-	spin_btn.button_down.connect(_press_anim.bind(spin_visual, true))
-	spin_btn.button_up.connect(_press_anim.bind(spin_visual, false))
-	spin_btn.mouse_exited.connect(_press_anim.bind(spin_visual, false))
+	spin_btn.button_down.connect(_press_anim.bind(_spin_visual, true))
+	spin_btn.button_up.connect(_press_anim.bind(_spin_visual, false))
+	spin_btn.mouse_exited.connect(_press_anim.bind(_spin_visual, false))
 	_slide_root.add_child(spin_btn)
 
-	# ── Left column: skin + level + change-skin button ─────────────────────
-	_build_skin_panel(vp, machines_x)
+	_refresh_spin_button()
 
-	# ── Right column: prize table ──────────────────────────────────────────
-	_build_paytable_panel(vp, machines_x + total_w_vp)
+# Состояние кнопки словом, а не одной лишь яркостью: «КРУТИТЬ 1» — можно,
+# «НЕТ ЖЕТОНОВ» — нечем, «...» — крутится.
+func _refresh_spin_button() -> void:
+	if not is_instance_valid(_spin_btn_bg):
+		return
+	var can : bool = SaveData.tokens >= 1
+	if _spinning:
+		_spin_btn_bg.add_theme_stylebox_override("panel", UiKit.rounded(
+			Color(0.10, 0.05, 0.20, 0.95), 10, Color(0.45, 0.30, 0.65, 0.80), 2))
+		_spin_lbl.text     = "..."
+		_spin_lbl.modulate = Color(0.75, 0.70, 0.85)
+		_spin_token.visible = false
+	elif can:
+		_spin_btn_bg.add_theme_stylebox_override("panel", UiKit.rounded(
+			Color(0.42, 0.12, 0.62, 0.98), 10, Color(1.00, 0.72, 0.30, 0.95), 2))
+		_spin_lbl.text     = "КРУТИТЬ  1"
+		_spin_lbl.modulate = Color(1.0, 0.92, 0.70)
+		_spin_token.visible = true
+	else:
+		_spin_btn_bg.add_theme_stylebox_override("panel", UiKit.rounded(
+			Color(0.14, 0.10, 0.16, 0.95), 10, Color(0.45, 0.35, 0.40, 0.75), 2))
+		_spin_lbl.text     = "НЕТ ЖЕТОНОВ"
+		_spin_lbl.modulate = Color(0.85, 0.62, 0.62)
+		_spin_token.visible = false
+	_set_spin_pulse(can and not _spinning)
 
-	SaveData.data_changed.connect(_on_data_changed)
+# Пульсирует ровно одно на экране — кнопка, когда её действительно можно нажать.
+func _set_spin_pulse(on: bool) -> void:
+	if _spin_pulse != null and _spin_pulse.is_valid():
+		_spin_pulse.kill()
+		_spin_pulse = null
+	if not is_instance_valid(_spin_visual):
+		return
+	_spin_visual.scale = Vector2.ONE
+	if not on:
+		return
+	_spin_pulse = _spin_visual.create_tween().set_loops()
+	_spin_pulse.tween_property(_spin_visual, "scale", Vector2(1.04, 1.04), 0.55)\
+		.set_trans(Tween.TRANS_SINE)
+	_spin_pulse.tween_property(_spin_visual, "scale", Vector2.ONE, 0.55)\
+		.set_trans(Tween.TRANS_SINE)
+
+# ── Левая колонка: скин, опыт, последние спины ───────────────────────────────
+# Скин живёт на экране автомата потому, что главный приз автомата — опыт, а
+# опыт идёт активному скину.
+func _build_skin_panel() -> void:
+	var r : Rect2 = _lay["skin"]
+	UiKit.panel(_slide_root, r.position, r.size,
+		Color(0.08, 0.05, 0.14, 0.94), 12, Color(0.50, 0.28, 0.80, 0.85), 2)
+
+	var skin_data    = SkinRegistry.get_skin(SaveData.active_skin)
+	var skin_rarity  := skin_data.get("rarity", 0) as int
+	var rarity_color := SkinRegistry.RARITY_COLORS[skin_rarity] as Color
+
+	const AVATAR_SZ := 54.0
+	var skin_tex_dir: String = skin_data.get("tex_dir", "")
+	var avatar_tex: Texture2D
+	if skin_tex_dir.is_empty():
+		avatar_tex = FAT_TEXTURES[0]
+	else:
+		avatar_tex = load(skin_tex_dir + "state1.png")
+	var av_pos := r.position + Vector2(10.0, 10.0)
+	UiKit.panel(_slide_root, av_pos, Vector2(AVATAR_SZ, AVATAR_SZ),
+		Color(0.04, 0.03, 0.08, 0.95), 10,
+		Color(rarity_color.r, rarity_color.g, rarity_color.b, 0.90), 2)
+	_skin_avatar = _make_icon(avatar_tex, AVATAR_SZ - 8.0)
+	_skin_avatar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_slide_root, _skin_avatar, av_pos + Vector2(4.0, 4.0),
+		Vector2(AVATAR_SZ - 8.0, AVATAR_SZ - 8.0))
+
+	var name_x : float = av_pos.x + AVATAR_SZ + 10.0
+	var name_w : float = r.position.x + r.size.x - 10.0 - name_x
+	_skin_name_lbl = _make_label(skin_data.get("name_ru", "НОРМАЛЬДО") as String, 13)
+	_apply_text_fx(_skin_name_lbl)
+	_skin_name_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_skin_name_lbl.vertical_alignment    = VERTICAL_ALIGNMENT_CENTER
+	_skin_name_lbl.mouse_filter          = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_slide_root, _skin_name_lbl, Vector2(name_x, av_pos.y + 4.0),
+		Vector2(name_w, 20.0))
+
+	var is_mastery := SaveData.skin_level >= 10
+	_skin_lvl_lbl = _make_label("МАСТЕРСТВО" if is_mastery else "УР. %d" % SaveData.skin_level,
+		11, Color(0.55, 0.85, 1.0))
+	_apply_text_fx(_skin_lvl_lbl)
+	_skin_lvl_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_skin_lvl_lbl.mouse_filter       = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_slide_root, _skin_lvl_lbl, Vector2(name_x, av_pos.y + 26.0),
+		Vector2(name_w, 16.0))
+
+	# Полоса опыта С ЧИСЛОМ: приз «+1500 XP» не с чем сравнить, если не сказано,
+	# сколько осталось до уровня.
+	var bar_w : float = r.size.x - 20.0
+	var bar_y : float = av_pos.y + AVATAR_SZ + 10.0
+	_skin_bar_w = bar_w
+	UiKit.panel(_slide_root, Vector2(r.position.x + 10.0, bar_y), Vector2(bar_w, 12.0),
+		Color(0.03, 0.03, 0.05, 0.95), 6, Color(0.30, 0.26, 0.35, 0.90), 1)
+	_skin_bar_fill = Panel.new()
+	_skin_bar_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_slide_root, _skin_bar_fill, Vector2(r.position.x + 12.0, bar_y + 2.0),
+		Vector2(maxf(2.0, (bar_w - 4.0) * SaveData.xp_level_progress()), 8.0))
+	_set_bar_color(Color(0.45, 0.80, 1.0))
+	_xp_bar_target = Vector2(r.position.x + 10.0 + bar_w * 0.5, bar_y + 6.0)
+
+	_skin_xp_lbl = _make_label(_xp_hint(), 10, Color(0.86, 0.86, 0.92))
+	_apply_text_fx(_skin_xp_lbl)
+	_skin_xp_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_skin_xp_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_skin_xp_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_slide_root, _skin_xp_lbl, Vector2(r.position.x + 10.0, bar_y + 16.0),
+		Vector2(bar_w, 14.0))
+
+	# СМЕНИТЬ СКИН
+	var chg_h   : float = 30.0
+	var chg_pos := Vector2(r.position.x + 10.0, bar_y + 32.0)
+	var chg_size := Vector2(bar_w, chg_h)
+	var chg_visual := Control.new()
+	chg_visual.size         = chg_size
+	chg_visual.position     = chg_pos
+	chg_visual.pivot_offset = chg_size * 0.5
+	chg_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_slide_root.add_child(chg_visual)
+	var chg_bg := Panel.new()
+	chg_bg.add_theme_stylebox_override("panel", UiKit.rounded(
+		Color(0.16, 0.09, 0.30, 0.96), 8, Color(0.60, 0.35, 0.95, 0.90), 2))
+	chg_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(chg_visual, chg_bg, Vector2.ZERO, chg_size)
+	var chg_lbl := _make_label("СМЕНИТЬ СКИН", 11, Color(0.88, 0.75, 1.0))
+	_apply_text_fx(chg_lbl)
+	chg_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	chg_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	chg_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(chg_visual, chg_lbl, Vector2.ZERO, chg_size)
+	var chg_btn := Button.new()
+	chg_btn.flat       = true
+	chg_btn.focus_mode = Control.FOCUS_NONE
+	chg_btn.size       = chg_size
+	chg_btn.position   = chg_pos
+	chg_btn.pressed.connect(_on_change_skin)
+	chg_btn.button_down.connect(_press_anim.bind(chg_visual, true))
+	chg_btn.button_up.connect(_press_anim.bind(chg_visual, false))
+	chg_btn.mouse_exited.connect(_press_anim.bind(chg_visual, false))
+	_slide_root.add_child(chg_btn)
+
+	# Лента последних спинов — раньше на этом месте была пустая треть колонки.
+	var hist_y : float = chg_pos.y + chg_h + 12.0
+	var hist_lbl := _make_label("ПОСЛЕДНИЕ СПИНЫ", 10, Color(0.72, 0.62, 0.90))
+	_apply_text_fx(hist_lbl)
+	hist_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	hist_lbl.mouse_filter       = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_slide_root, hist_lbl, Vector2(r.position.x + 10.0, hist_y),
+		Vector2(bar_w, 14.0))
+
+	_history_root = Control.new()
+	_history_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_slide_root, _history_root, Vector2(r.position.x + 10.0, hist_y + 18.0),
+		Vector2(bar_w, r.position.y + r.size.y - 10.0 - (hist_y + 18.0)))
+	_refresh_history()
+
+func _set_bar_color(col: Color) -> void:
+	if is_instance_valid(_skin_bar_fill):
+		_skin_bar_fill.add_theme_stylebox_override("panel", UiKit.rounded(col, 4))
+
+func _xp_hint() -> String:
+	if SaveData.skin_level >= 10:
+		return "ещё %d XP до жетона" % SaveData.xp_to_next_level()
+	return "ещё %d XP до ур. %d" % [SaveData.xp_to_next_level(), SaveData.skin_level + 1]
+
+const HISTORY_MAX : int = 3
+
+func _refresh_history() -> void:
+	if not is_instance_valid(_history_root):
+		return
+	for c in _history_root.get_children():
+		c.queue_free()
+	var w : float = _history_root.size.x
+	if _history.is_empty():
+		var empty := _make_label("пока ни одного", 10, Color(0.62, 0.60, 0.70))
+		_apply_text_fx(empty)
+		empty.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		empty.mouse_filter       = Control.MOUSE_FILTER_IGNORE
+		UiKit.place(_history_root, empty, Vector2.ZERO, Vector2(w, 16.0))
+		return
+	const ICO := 14.0
+	const ROW := 22.0
+	for i in _history.size():
+		var e : Dictionary = _history[i]
+		var y : float = float(i) * ROW
+		var row := Panel.new()
+		row.add_theme_stylebox_override("panel", UiKit.rounded(
+			Color(0.05, 0.04, 0.09, 0.85), 6))
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		UiKit.place(_history_root, row, Vector2(0.0, y), Vector2(w, ROW - 3.0))
+		# Три значка = три барабана: совпавшие символом приза, остальные тусклые.
+		for k in 3:
+			var ico := _make_icon(_tex_for(String(e["sym"])) if k < int(e["count"]) else TEX_STONE, ICO)
+			ico.modulate     = Color(1, 1, 1, 1.0 if k < int(e["count"]) else 0.35)
+			ico.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			UiKit.place(_history_root, ico,
+				Vector2(4.0 + float(k) * (ICO + 2.0), y + (ROW - 3.0 - ICO) * 0.5),
+				Vector2(ICO, ICO))
+		var lbl := _make_label(String(e["label"]), 10, e["col"] as Color)
+		_apply_text_fx(lbl)
+		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+		UiKit.place(_history_root, lbl, Vector2(4.0 + 3.0 * (ICO + 2.0), y),
+			Vector2(w - (4.0 + 3.0 * (ICO + 2.0)) - 6.0, ROW - 3.0))
+
+# ── Правая колонка: таблица призов ───────────────────────────────────────────
+# Сгруппирована заголовками: что значки в строке — это количество совпавших
+# барабанов, раньше нигде не говорилось.
+func _build_paytable_panel() -> void:
+	var r : Rect2 = _lay["pay"]
+	UiKit.panel(_slide_root, r.position, r.size,
+		Color(0.06, 0.04, 0.12, 0.94), 12, Color(0.50, 0.28, 0.80, 0.85), 2)
+
+	var pt_title := _make_label("ПРИЗЫ", 13, Color(0.90, 0.75, 1.0))
+	_apply_text_fx(pt_title)
+	pt_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pt_title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	pt_title.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_slide_root, pt_title, r.position + Vector2(0.0, 8.0), Vector2(r.size.x, 20.0))
+
+	# Джекпот сверху отдельной строкой, дальше группы по числу совпадений.
+	var groups : Array = [
+		{"cap": "ДЖЕКПОТ",  "rows": [{"sym": "normaldo", "count": 3, "prize": PRIZES["normaldo"][0]}]},
+		{"cap": "ТРИ В РЯД", "rows": _pay_rows(3)},
+		{"cap": "ДВА В РЯД", "rows": _pay_rows(2)},
+		{"cap": "ОДИН",      "rows": _pay_rows(1)},
+	]
+
+	var inner_x : float = r.position.x + 8.0
+	var inner_w : float = r.size.x - 16.0
+	var top     : float = r.position.y + 30.0
+	var avail   : float = r.position.y + r.size.y - 8.0 - top
+	# 4 заголовка + 10 строк призов делят колонку без остатка — таблица обязана
+	# помещаться целиком, ничего важного за скроллом.
+	var n_rows  : int = 0
+	for g in groups:
+		n_rows += (g["rows"] as Array).size()
+	var cap_h : float = 15.0
+	var row_h : float = (avail - cap_h * float(groups.size())) / float(n_rows)
+
+	const ICO_SZ  := 13.0
+	const ICO_GAP := 3.0
+	var y : float = top
+	for g in groups:
+		var cap := _make_label(String(g["cap"]), 10, Color(0.72, 0.60, 0.92))
+		_apply_text_fx(cap)
+		cap.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		cap.mouse_filter       = Control.MOUSE_FILTER_IGNORE
+		UiKit.place(_slide_root, cap, Vector2(inner_x, y), Vector2(inner_w, cap_h))
+		y += cap_h
+		for e in (g["rows"] as Array):
+			var prize : Dictionary = e["prize"]
+			var col   := TIER_COLORS[int(prize.tier)] as Color
+			var count : int = int(e["count"])
+			for p in count:
+				var ico := _make_icon(_tex_for(String(e["sym"])), ICO_SZ)
+				ico.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				UiKit.place(_slide_root, ico,
+					Vector2(inner_x + float(p) * (ICO_SZ + ICO_GAP), y + (row_h - ICO_SZ) * 0.5),
+					Vector2(ICO_SZ, ICO_SZ))
+			var icons_end : float = inner_x + 3.0 * (ICO_SZ + ICO_GAP) + 2.0
+			var lbl := _make_label(String(prize.label), 11, col)
+			_apply_text_fx(lbl)
+			lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+			lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+			UiKit.place(_slide_root, lbl, Vector2(icons_end, y),
+				Vector2(inner_x + inner_w - icons_end, row_h))
+			y += row_h
+
+func _pay_rows(count: int) -> Array:
+	var out : Array = []
+	for sym in ["pizza", "dollar", "token"]:
+		out.append({"sym": sym, "count": count, "prize": (PRIZES[sym] as Array)[count - 1]})
+	return out
 
 # ── Top chrome (back arrow + title + resources) ─────────────────────────────
 
@@ -521,201 +850,32 @@ func _press_anim(visual_root: Control, pressed: bool) -> void:
 	tw.tween_property(visual_root, "scale", target, _PRESS_TIME)\
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
-# ── Left column: skin + level ───────────────────────────────────────────────
-
-func _build_skin_panel(vp: Vector2, machines_left_x: float) -> void:
-	var pad_l : float = 8.0
-	var panel_x : float = pad_l
-	var panel_y : float = 70.0
-	var panel_w : float = max(60.0, machines_left_x - pad_l - 12.0)
-	var panel_h : float = 110.0
-
-	var bg := ColorRect.new()
-	bg.color    = Color(0.07, 0.05, 0.12, 0.95)
-	bg.size     = Vector2(panel_w, panel_h)
-	bg.position = Vector2(panel_x, panel_y)
-	_slide_root.add_child(bg)
-
-	var skin_data    = SkinRegistry.get_skin(SaveData.active_skin)
-	var skin_rarity  := skin_data.get("rarity", 0) as int
-	var rarity_color := SkinRegistry.RARITY_COLORS[skin_rarity] as Color
-	var skin_accent := ColorRect.new()
-	skin_accent.color    = Color(rarity_color.r, rarity_color.g, rarity_color.b, 0.85)
-	skin_accent.size     = Vector2(panel_w, 2.0)
-	skin_accent.position = Vector2(panel_x, panel_y)
-	_slide_root.add_child(skin_accent)
-
-	const AVATAR_SZ := 56.0
-	var skin_tex_dir: String = skin_data.get("tex_dir", "")
-	var avatar_tex: Texture2D
-	if skin_tex_dir.is_empty():
-		avatar_tex = FAT_TEXTURES[0]
-	else:
-		avatar_tex = load(skin_tex_dir + "state1.png")
-	_skin_avatar = _make_icon(avatar_tex, AVATAR_SZ)
-	_skin_avatar.position = Vector2(panel_x + 6.0, panel_y + 8.0)
-	_slide_root.add_child(_skin_avatar)
-
-	var name_x := panel_x + AVATAR_SZ + 12.0
-	_skin_name_lbl = _make_label(skin_data.get("name_ru", "НОРМАЛЬДО") as String, 11)
-	_skin_name_lbl.add_theme_font_override("font", UI_FONT)
-	_apply_text_fx(_skin_name_lbl)
-	_skin_name_lbl.size     = Vector2(panel_w - AVATAR_SZ - 14.0, 18.0)
-	_skin_name_lbl.position = Vector2(name_x, panel_y + 10.0)
-	_slide_root.add_child(_skin_name_lbl)
-
-	var is_mastery := SaveData.skin_level >= 10
-	var lvl_str    := "МАСТЕРСТВО" if is_mastery else "УР. %d" % SaveData.skin_level
-	_skin_lvl_lbl = _make_label(lvl_str, 9, Color(0.50, 0.80, 1.0))
-	_skin_lvl_lbl.add_theme_font_override("font", UI_FONT)
-	_apply_text_fx(_skin_lvl_lbl)
-	_skin_lvl_lbl.size     = Vector2(panel_w - AVATAR_SZ - 14.0, 15.0)
-	_skin_lvl_lbl.position = Vector2(name_x, panel_y + 29.0)
-	_slide_root.add_child(_skin_lvl_lbl)
-
-	var bar_w := panel_w - AVATAR_SZ - 16.0
-	_skin_bar_w = bar_w
-	var bar_bg := ColorRect.new()
-	bar_bg.color    = Color(0.08, 0.08, 0.08, 0.70)
-	bar_bg.size     = Vector2(bar_w, 7.0)
-	bar_bg.position = Vector2(name_x, panel_y + 48.0)
-	_slide_root.add_child(bar_bg)
-	_skin_bar_fill = ColorRect.new()
-	_skin_bar_fill.color    = Color(0.45, 0.80, 1.0)
-	_skin_bar_fill.size     = Vector2(bar_w * SaveData.xp_level_progress(), 5.0)
-	_skin_bar_fill.position = Vector2(name_x, panel_y + 49.0)
-	_slide_root.add_child(_skin_bar_fill)
-	_xp_bar_target = Vector2(name_x + bar_w * 0.5, panel_y + 52.5)
-
-	# СМЕНИТЬ СКИН — wrapped in a press-scale Control like the other buttons.
-	var chg_w   : float = panel_w - 12.0
-	var chg_h   : float = 28.0
-	var chg_pos := Vector2(panel_x + 6.0, panel_y + 74.0)
-	var chg_visual := Control.new()
-	chg_visual.size         = Vector2(chg_w, chg_h)
-	chg_visual.position     = chg_pos
-	chg_visual.pivot_offset = chg_visual.size * 0.5
-	chg_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_slide_root.add_child(chg_visual)
-
-	var chg_bg := ColorRect.new()
-	chg_bg.color    = Color(0.08, 0.06, 0.20, 0.92)
-	chg_bg.size     = Vector2(chg_w, chg_h)
-	chg_bg.position = Vector2.ZERO
-	chg_visual.add_child(chg_bg)
-	var chg_stripe := ColorRect.new()
-	chg_stripe.color    = Color(0.40, 0.20, 0.85, 0.70)
-	chg_stripe.size     = Vector2(chg_w, 2.0)
-	chg_stripe.position = Vector2.ZERO
-	chg_visual.add_child(chg_stripe)
-	var chg_lbl := _make_label("СМЕНИТЬ СКИН", 10, Color(0.75, 0.55, 1.0))
-	chg_lbl.add_theme_font_override("font", UI_FONT)
-	_apply_text_fx(chg_lbl)
-	chg_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	chg_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	chg_lbl.size                 = Vector2(chg_w, chg_h)
-	chg_lbl.position             = Vector2.ZERO
-	chg_visual.add_child(chg_lbl)
-
-	var chg_btn := Button.new()
-	chg_btn.flat       = true
-	chg_btn.focus_mode = Control.FOCUS_NONE
-	chg_btn.size       = Vector2(chg_w, chg_h)
-	chg_btn.position   = chg_pos
-	chg_btn.pressed.connect(_on_change_skin)
-	chg_btn.button_down.connect(_press_anim.bind(chg_visual, true))
-	chg_btn.button_up.connect(_press_anim.bind(chg_visual, false))
-	chg_btn.mouse_exited.connect(_press_anim.bind(chg_visual, false))
-	_slide_root.add_child(chg_btn)
-
-# ── Right column: paytable ──────────────────────────────────────────────────
-
-func _build_paytable_panel(vp: Vector2, machines_right_x: float) -> void:
-	var pad_r : float = 8.0
-	var pt_x  : float = machines_right_x + 12.0
-	var pt_y  : float = 70.0
-	var pt_w  : float = max(60.0, vp.x - pt_x - pad_r)
-	var pt_h  : float = vp.y - pt_y - 8.0
-
-	var pt_bg := ColorRect.new()
-	pt_bg.color    = Color(0.05, 0.03, 0.10, 0.92)
-	pt_bg.size     = Vector2(pt_w, pt_h)
-	pt_bg.position = Vector2(pt_x, pt_y)
-	_slide_root.add_child(pt_bg)
-	var pt_stripe := ColorRect.new()
-	pt_stripe.color    = Color(0.55, 0.15, 1.0, 0.45)
-	pt_stripe.size     = Vector2(pt_w, 2.0)
-	pt_stripe.position = Vector2(pt_x, pt_y)
-	_slide_root.add_child(pt_stripe)
-
-	var pt_title := _make_label("ПРИЗЫ", 11, Color(0.85, 0.70, 1.0))
-	pt_title.add_theme_font_override("font", UI_FONT)
-	_apply_text_fx(pt_title)
-	pt_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	pt_title.size                 = Vector2(pt_w, 20.0)
-	pt_title.position             = Vector2(pt_x, pt_y + 8.0)
-	_slide_root.add_child(pt_title)
-
-	var pt_entries : Array = []
-	for count in [1, 2, 3]:
-		for sym in ["pizza", "dollar", "token"]:
-			var sym_prizes := PRIZES[sym] as Array
-			pt_entries.append({sym=sym, count=count, prize=sym_prizes[count - 1]})
-	pt_entries.append({sym="normaldo", count=3, prize=PRIZES["normaldo"][0]})
-
-	const ICO_SZ  := 16.0
-	const ICO_GAP := 2.5
-	var row_h := (pt_h - 32.0) / float(pt_entries.size())
-
-	for i in pt_entries.size():
-		var e     : Dictionary = pt_entries[i]
-		var prize : Dictionary = e.prize
-		var tier  : int        = prize.tier
-		var col   := TIER_COLORS[tier] as Color
-		var ry    := pt_y + 32.0 + i * row_h
-
-		var row_bg := ColorRect.new()
-		row_bg.color    = Color(0.07, 0.05, 0.10, 0.55) if i % 2 == 0 else Color(0.05, 0.03, 0.08, 0.55)
-		row_bg.size     = Vector2(pt_w, row_h - 1.0)
-		row_bg.position = Vector2(pt_x, ry)
-		_slide_root.add_child(row_bg)
-
-		var count : int = e.count
-		for p in count:
-			var ico := _make_icon(_tex_for(e.sym as String), ICO_SZ)
-			ico.position = Vector2(
-				pt_x + 3.0 + p * (ICO_SZ + ICO_GAP),
-				ry + (row_h - ICO_SZ) * 0.5
-			)
-			_slide_root.add_child(ico)
-
-		var icons_end := pt_x + 3.0 + count * (ICO_SZ + ICO_GAP) + 2.0
-		var lbl := _make_label(prize.label as String, 11, col)
-		lbl.add_theme_font_override("font", UI_FONT)
-		_apply_text_fx(lbl)
-		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		lbl.size                 = Vector2(pt_x + pt_w - icons_end - 4.0, row_h)
-		lbl.position             = Vector2(icons_end, ry)
-		_slide_root.add_child(lbl)
-
-
 # ── Reel update ──────────────────────────────────────────────────────────────
 
 func _update_reel_vis(reel_idx: int) -> void:
-	var sy      := _scroll_y[reel_idx]
-	var partial := fmod(sy, SYMBOL_H)
-	var base    := int(sy / SYMBOL_H) % STRIP_SIZE
+	var sy : float = _scroll_y[reel_idx]
+	# Эпсилон обязателен: барабан останавливается ровно на кратном _sym_h, и без
+	# него floor() на границе символа даёт на единицу меньше — в окне оказывается
+	# СОСЕД выпавшего символа. Тот же баг ловили в выплате мини-игр.
+	var steps   : float = floor(sy / _sym_h + 1e-4)
+	var partial : float = sy - steps * _sym_h
+	var base    : int   = int(steps) % STRIP_SIZE
 	for k in N_VISIBLE:
 		var sym_idx := (base + k) % STRIP_SIZE
 		var tr      := _reel_tiles[reel_idx][k] as TextureRect
 		tr.texture  = _sym_textures[sym_idx]
 		tr.modulate = Color.WHITE
-		tr.position = Vector2(3.0, -partial + k * SYMBOL_H + CENTER_OFF)
+		tr.position = Vector2(9.0, 9.0 - partial + float(k) * _sym_h)
 
 func _update_all_reels() -> void:
 	for i in 3:
 		_update_reel_vis(i)
+
+# Что РЕАЛЬНО видно в окне барабана. Тест обязан проверять именно это, а не
+# намерение `_reel_target`: между ними и живёт ошибка на один символ.
+func visible_face(reel_idx: int) -> String:
+	var steps : float = floor(_scroll_y[reel_idx] / _sym_h + 1e-4)
+	return STRIP[int(steps) % STRIP_SIZE]
 
 # ── Spin logic ───────────────────────────────────────────────────────────────
 
@@ -784,8 +944,7 @@ func _start_spin() -> void:
 	for i in 3:
 		_reel_stopped[i] = false
 		_scroll_spd[i]   = SPIN_SPEED
-	_spin_btn_bg.color = Color(0.08, 0.04, 0.16, 0.95)
-	_spin_lbl.text     = "..."
+	_refresh_spin_button()
 	# Looping rolling SFX — rewinds + plays each spin.
 	if _spin_audio and is_instance_valid(_spin_audio):
 		_spin_audio.stop()
@@ -807,9 +966,9 @@ func _stop_reel_smooth(idx: int) -> void:
 	var target_sym := _reel_target[idx]
 	var current    := _scroll_y[idx]
 	# Find target scroll position: target symbol at center, always forward
-	var target_y   := float(target_sym) * SYMBOL_H
-	while target_y < current + STRIP_H * 0.5:
-		target_y += STRIP_H
+	var target_y   := float(target_sym) * _sym_h
+	while target_y < current + _strip_h * 0.5:
+		target_y += _strip_h
 
 	var tw := create_tween()
 	tw.tween_method(
@@ -822,6 +981,10 @@ func _stop_reel_smooth(idx: int) -> void:
 
 func _on_reel_landed(idx: int) -> void:
 	_reel_stopped[idx] = true
+	# Прибиваем позицию к целому символу: твин заканчивается «почти» на месте, и
+	# накопленная погрешность уводит окно на соседний символ.
+	_scroll_y[idx] = roundf(_scroll_y[idx] / _sym_h) * _sym_h
+	_update_reel_vis(idx)
 	if _hud and _hud.has_method("_play_btn_sfx"):
 		_hud._play_btn_sfx()
 
@@ -838,13 +1001,43 @@ func _on_reel_landed(idx: int) -> void:
 
 func _on_all_reels_stopped() -> void:
 	_spinning = false
-	_spin_btn_bg.color = Color(0.18, 0.08, 0.35, 0.95)
-	_spin_lbl.text     = "КРУТИТЬ  1"
+	_refresh_spin_button()
 	# Reels landed — kill the rolling whoosh.
 	if _spin_audio and is_instance_valid(_spin_audio):
 		_spin_audio.stop()
+	_note_result(_last_result)
 	QuestManager.notify_slot_spin(int(_last_result.get("count", 1)))
 	_show_win_popup(_last_result)
+
+# Строка результата под автоматом и лента слева. Окно выигрыша игрок закроет и
+# забудет, а «что там выпало» спрашивают уже через минуту.
+func _note_result(result: Dictionary) -> void:
+	var prize := _get_prize(result)
+	if prize.is_empty():
+		return
+	var count : int    = int(result.get("count", 1))
+	var sym   : String = String(result.get("sym", "pizza"))
+	var col   := TIER_COLORS[int(prize.tier)] as Color
+	var label : String = String(prize.label)
+	if is_instance_valid(_result_lbl):
+		_result_lbl.text     = "%s — %s" % [_combo_name(sym, count), label]
+		_result_lbl.modulate = col
+	_history.push_front({"sym": sym, "count": count, "label": label, "col": col})
+	while _history.size() > HISTORY_MAX:
+		_history.pop_back()
+	_refresh_history()
+
+func _combo_name(sym: String, count: int) -> String:
+	if sym == "normaldo":
+		return "ДЖЕКПОТ"
+	var names := {
+		"pizza":  ["ПИЦЦА", "ДВЕ ПИЦЦЫ", "ТРИ ПИЦЦЫ"],
+		"dollar": ["ДОЛЛАР", "ДВА ДОЛЛАРА", "ТРИ ДОЛЛАРА"],
+		"token":  ["ЖЕТОН", "ДВА ЖЕТОНА", "ТРИ ЖЕТОНА"],
+	}
+	if not names.has(sym):
+		return "ВЫИГРЫШ"
+	return String((names[sym] as Array)[clampi(count - 1, 0, 2)])
 
 func _get_prize(result: Dictionary) -> Dictionary:
 	if result.is_empty():
@@ -866,6 +1059,7 @@ func _on_data_changed() -> void:
 	if _dollar_lbl and is_instance_valid(_dollar_lbl):
 		_dollar_lbl.text = str(SaveData.dollars)
 	_refresh_skin_panel()
+	_refresh_spin_button()
 
 func _refresh_skin_panel() -> void:
 	if not is_instance_valid(_skin_name_lbl):
@@ -881,7 +1075,9 @@ func _refresh_skin_panel() -> void:
 	_skin_name_lbl.text   = skin_data.get("name_ru", "НОРМАЛЬДО") as String
 	var is_mastery := SaveData.skin_level >= 10
 	_skin_lvl_lbl.text    = "МАСТЕРСТВО" if is_mastery else "УР. %d" % SaveData.skin_level
-	_skin_bar_fill.size.x = _skin_bar_w * SaveData.xp_level_progress()
+	_skin_bar_fill.size.x = maxf(2.0, (_skin_bar_w - 4.0) * SaveData.xp_level_progress())
+	if is_instance_valid(_skin_xp_lbl):
+		_skin_xp_lbl.text = _xp_hint()
 
 # ── Win popup ─────────────────────────────────────────────────────────────────
 
@@ -913,16 +1109,13 @@ func _show_win_popup(result: Dictionary) -> void:
 	dim.position = Vector2.ZERO
 	_win_popup.add_child(dim)
 
-	var bg := ColorRect.new()
-	bg.color    = Color(0.07, 0.04, 0.14, 0.98)
-	bg.size     = Vector2(pop_w, pop_h)
-	bg.position = Vector2(pop_x, pop_y)
+	var bg := Panel.new()
+	bg.add_theme_stylebox_override("panel", UiKit.rounded(
+		Color(0.09, 0.05, 0.17, 0.98), 12, Color(col.r, col.g, col.b, 0.95), 3))
+	bg.size         = Vector2(pop_w, pop_h)
+	bg.position     = Vector2(pop_x, pop_y)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_win_popup.add_child(bg)
-	var st := ColorRect.new()
-	st.color    = col
-	st.size     = Vector2(pop_w, 3.0)
-	st.position = Vector2(pop_x, pop_y)
-	_win_popup.add_child(st)
 
 	var cur_y := pop_y + 14.0
 
@@ -963,10 +1156,13 @@ func _show_win_popup(result: Dictionary) -> void:
 	ok_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_win_popup.add_child(ok_visual)
 
-	var ok_bg := ColorRect.new()
-	ok_bg.color    = Color(col.r * 0.35, col.g * 0.25, col.b * 0.55, 0.95)
-	ok_bg.size     = Vector2(ok_w, ok_h)
-	ok_bg.position = Vector2.ZERO
+	var ok_bg := Panel.new()
+	ok_bg.add_theme_stylebox_override("panel", UiKit.rounded(
+		Color(col.r * 0.35, col.g * 0.25, col.b * 0.55, 0.96), 8,
+		Color(col.r, col.g, col.b, 0.90), 2))
+	ok_bg.size         = Vector2(ok_w, ok_h)
+	ok_bg.position     = Vector2.ZERO
+	ok_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ok_visual.add_child(ok_bg)
 	var ok_lbl := _make_label("OK", 18, col)
 	ok_lbl.add_theme_font_override("font", UI_FONT)
@@ -1058,24 +1254,25 @@ func _do_apply_xp(amount: int) -> void:
 	if rewards.is_empty():
 		var tw := create_tween()
 		tw.tween_property(_skin_bar_fill, "size:x",
-			maxf(2.0, _skin_bar_w * new_p), 0.65) \
+			maxf(2.0, (_skin_bar_w - 4.0) * new_p), 0.65) \
 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	else:
 		var tw := create_tween()
-		tw.tween_property(_skin_bar_fill, "size:x", _skin_bar_w, 0.40) \
+		tw.tween_property(_skin_bar_fill, "size:x", _skin_bar_w - 4.0, 0.40) \
 			.set_trans(Tween.TRANS_CUBIC)
 		tw.tween_callback(func():
-			_skin_bar_fill.color = Color(1.0, 0.85, 0.20)
+			_set_bar_color(Color(1.0, 0.85, 0.20))
 			var tw2 := create_tween()
-			tw2.tween_property(_skin_bar_fill, "color", Color(0.45, 0.80, 1.0), 0.45)
+			tw2.tween_method(_set_bar_color, Color(1.0, 0.85, 0.20),
+				Color(0.45, 0.80, 1.0), 0.45)
 			_show_next_level_reward(rewards, 0, new_p)
 		)
 
 func _show_next_level_reward(rewards: Array, i: int, final_progress: float) -> void:
 	if i >= rewards.size():
 		if _skin_bar_fill and is_instance_valid(_skin_bar_fill):
-			_skin_bar_fill.size.x = maxf(2.0, _skin_bar_w * final_progress)
-			_skin_bar_fill.color  = Color(0.45, 0.80, 1.0)
+			_skin_bar_fill.size.x = maxf(2.0, (_skin_bar_w - 4.0) * final_progress)
+			_set_bar_color(Color(0.45, 0.80, 1.0))
 		_refresh_skin_panel()
 		return
 	var r : Dictionary = rewards[i]
@@ -1296,19 +1493,39 @@ func _show_level_up_popup_slots(new_level: int, reward_d: int, reward_t: int, on
 	tw_in.tween_property(popup, "modulate:a",     1.0,         0.18)
 
 func _show_no_tokens() -> void:
-	var vp := get_viewport().get_visible_rect().size
+	# Тост поверх арта раньше терялся; теперь он висит под кнопкой, у которой уже
+	# написано «НЕТ ЖЕТОНОВ», и только объясняет, где жетоны взять.
+	var r : Rect2 = _lay["mach"]
+	var w : float = r.size.x - 20.0
+	var root := Control.new()
+	root.position     = Vector2(r.position.x + 10.0, r.position.y + r.size.y - 92.0)
+	root.size         = Vector2(w, 26.0)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_overlay.add_child(root)
+
+	var box := Panel.new()
+	box.add_theme_stylebox_override("panel", UiKit.rounded(
+		Color(0.22, 0.06, 0.08, 0.96), 8, Color(1.0, 0.45, 0.45, 0.90), 2))
+	box.size         = root.size
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(box)
+
 	var toast := Label.new()
 	toast.add_theme_font_override("font", UI_FONT)
-	toast.add_theme_font_size_override("font_size", 14)
-	toast.text                 = "Нет жетонов!"
+	toast.add_theme_font_size_override("font_size", 12)
+	_apply_text_fx(toast)
+	toast.text                 = "Жетоны дают за задания и уровни скина"
 	toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	toast.modulate             = Color(1.0, 0.45, 0.45)
-	toast.size                 = Vector2(200.0, 28.0)
-	toast.position             = Vector2((vp.x - 200.0) * 0.5, vp.y * 0.70)
-	_overlay.add_child(toast)
-	var tw := toast.create_tween()
-	tw.tween_property(toast, "modulate:a", 0.0, 1.2).set_delay(0.6)
-	tw.tween_callback(toast.queue_free)
+	toast.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	toast.modulate             = Color(1.0, 0.85, 0.85)
+	toast.size                 = root.size
+	toast.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	root.add_child(toast)
+
+	var tw := root.create_tween()
+	tw.tween_interval(1.0)
+	tw.tween_property(root, "modulate:a", 0.0, 1.0)
+	tw.tween_callback(root.queue_free)
 
 func _on_change_skin() -> void:
 	if _hud and _hud.has_method("_show_shop_from_slots"):
