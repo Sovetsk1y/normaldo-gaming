@@ -114,6 +114,8 @@ var _fat_bar_width : float = 0.0
 # panels anchor themselves below this so nothing overlaps.
 var _left_stack_bottom_y : float = 0.0
 var _fat_icons     : Array[TextureRect] = []
+var _fat_name_lbl  : Label = null
+var _fat_left_lbl  : Label = null
 var _prev_fat_state : int = 0
 
 var _elapsed_time     : float = 0.0
@@ -624,7 +626,10 @@ func _build_ui() -> void:
 	# width below them. Looks more compact + bar is bigger.
 	const FAT_ICON_SZ  : float = 28.0
 	const FAT_ICON_PAD : float = 2.0   # horizontal inset of icon from bar edge
-	const FAT_BAR_H    : float = 9.0
+	# Полоса выросла с 9 до 16 px: на ней теперь написано СОСТОЯНИЕ СЛОВОМ и
+	# остаток до следующего числом. Две иконки без подписи не отвечали ни на
+	# один вопрос игрока. См. /Концепция/Интерфейс забега.md
+	const FAT_BAR_H    : float = 16.0
 	const FAT_ICON_BAR_GAP : float = 2.0
 	const FAT_PANEL_PAD: float = 6.0
 	const FAT_BLOCK_GAP: float = 4.0   # gap between resources block and fat panel
@@ -633,7 +638,7 @@ func _build_ui() -> void:
 	# stack vertically beneath pause.
 	const PAUSE_H      : float = 28.0
 
-	var fat_panel_w : float = FAT_PANEL_PAD * 2 + FAT_ICON_SZ * 2 + 28.0   # min icon span + bar gap
+	var fat_panel_w : float = FAT_PANEL_PAD * 2 + FAT_ICON_SZ * 2 + 52.0   # icons + место под подпись
 	var fat_panel_h : float = FAT_PANEL_PAD * 2 + FAT_ICON_SZ + FAT_ICON_BAR_GAP + FAT_BAR_H
 
 	_left_w = maxf(PAD + 24.0 + 4.0 + 48.0 + PAD, fat_panel_w)
@@ -764,6 +769,31 @@ func _build_ui() -> void:
 	_fat_bar_fill.size     = Vector2(0.0, FAT_BAR_H - 2.0)
 	_fat_bar_fill.position = Vector2(bar_x + 1.0, bar_y + 1.0)
 	_left_container.add_child(_fat_bar_fill)
+
+	# Подпись ПОВЕРХ полосы: слово состояния слева, остаток до следующего
+	# справа. Числа на полосе — общий приём всех экранов игры.
+	_fat_name_lbl = Label.new()
+	_fat_name_lbl.add_theme_font_override("font", UI_FONT)
+	_fat_name_lbl.add_theme_font_size_override("font_size", 10)
+	_fat_name_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	_fat_name_lbl.add_theme_constant_override("outline_size", 3)
+	_fat_name_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_fat_name_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	_left_container.add_child(_fat_name_lbl)
+	_fat_name_lbl.position = Vector2(bar_x + 5.0, bar_y)
+	_fat_name_lbl.size     = Vector2(bar_w - 10.0, FAT_BAR_H)
+
+	_fat_left_lbl = Label.new()
+	_fat_left_lbl.add_theme_font_override("font", UI_FONT)
+	_fat_left_lbl.add_theme_font_size_override("font_size", 10)
+	_fat_left_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	_fat_left_lbl.add_theme_constant_override("outline_size", 3)
+	_fat_left_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_fat_left_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_fat_left_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	_left_container.add_child(_fat_left_lbl)
+	_fat_left_lbl.position = Vector2(bar_x + 5.0, bar_y)
+	_fat_left_lbl.size     = Vector2(bar_w - 10.0, FAT_BAR_H)
 
 	# Stash both — _refresh_fat_icons / _on_stats_changed swap textures on
 	# them based on the current fat_state.
@@ -1018,6 +1048,24 @@ func _build_skill_badges(normaldo: Node) -> void:
 	add_child(layer)
 	layer.call("setup", normaldo)
 	_skill_badges_layer = layer
+
+const _RESIST_MARKS_SCRIPT := preload("res://scripts/resist_marks.gd")
+var _resist_marks_layer : Node2D = null
+
+# Метки резиста живут в МИРЕ, а не в HUD: они рисуются на летящих предметах, и
+# координаты у них игровые. Поэтому слой вешается на сцену игры, а не сюда.
+# См. /Концепция/Интерфейс забега.md
+func _build_resist_marks(normaldo: Node) -> void:
+	if is_instance_valid(_resist_marks_layer):
+		_resist_marks_layer.queue_free()
+	var scene := get_parent()
+	if scene == null:
+		return
+	var layer := Node2D.new()
+	layer.set_script(_RESIST_MARKS_SCRIPT)
+	scene.add_child(layer)
+	layer.call("setup", normaldo)
+	_resist_marks_layer = layer
 
 func _slide_in_hud() -> void:
 	var tw := create_tween()
@@ -5514,6 +5562,7 @@ func _start_game() -> void:
 	if normaldo:
 		normaldo.enable_input()
 		_build_skill_badges(normaldo)
+		_build_resist_marks(normaldo)
 	var music := get_parent().get_node_or_null("Music")
 	if music and music.has_method("start"):
 		music.start()
@@ -7947,15 +7996,23 @@ func _on_stats_changed(fat_state: int, pizza_count: int, total_pizzas: int) -> v
 	var max_fat := _max_unlocked_fat()
 
 	var ratio := 1.0
+	var left_txt := "МАКСИМУМ"
 	if fat_state < FAT_THRESHOLDS.size() and fat_state < max_fat:
 		var tier_start  = 0 if fat_state == 0 else FAT_THRESHOLDS[fat_state - 1]
 		var local_count = pizza_count - tier_start
 		var tier_size   = FAT_THRESHOLDS[fat_state] - tier_start
 		ratio = clampf(float(local_count) / float(tier_size), 0.0, 1.0)
 		_fat_bar_fill.color = Color(1.0, 0.55, 0.1, 1.0)
+		left_txt = "%d / %d" % [clampi(local_count, 0, tier_size), tier_size]
 	else:
 		_fat_bar_fill.color = Color(1.0, 0.85, 0.2, 1.0)
 	_fat_bar_fill.size.x = ratio * _fat_bar_width
+	# Состояние словом и остаток числом — иначе полоса отвечает «примерно вот
+	# столько», а игрок спрашивает «сколько ещё пицц».
+	if is_instance_valid(_fat_name_lbl):
+		_fat_name_lbl.text = _FAT_NAMES[clampi(fat_state, 0, _FAT_NAMES.size() - 1)]
+	if is_instance_valid(_fat_left_lbl):
+		_fat_left_lbl.text = left_txt
 
 	# Swap textures on the two-icon panel: left = current state, right =
 	# next reachable state. Both render at full brightness — the bar tells

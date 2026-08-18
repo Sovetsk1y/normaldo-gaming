@@ -15,9 +15,10 @@ const COMPASS_TEX := preload("res://assets/items/compass.png")
 const HAT_TEX     := preload("res://assets/items/magic_hat.png")
 const COLA_TEX    := preload("res://assets/items/cola.png")
 
-const D    : float = 34.0
+# 34 было мало: кружок в углу экрана и так на периферии зрения.
+const D    : float = 40.0
 const PAD  : float = 10.0
-const GAP  : float = 8.0
+const GAP  : float = 9.0
 
 const RING_RESIST := Color(0.90, 0.20, 0.18)
 const RING_ACTIVE := Color(0.35, 1.00, 0.45)
@@ -75,27 +76,17 @@ func setup(nrm: Node) -> void:
 			specs.append({ "key": "active", "tex": null, "sym": "✦",
 				"mod": Color(1, 1, 1), "ring": RING_ACTIVE, "title": a_title, "desc": a_desc, "chg": a_charges })
 
-	# Passive. «scars» (Joker) is a TIMED buff — its badge only appears while the
-	# effect is running (mask icon + countdown), so mark it dynamic. Other
-	# passives get a static ★ indicator.
+	# Пассивка. Раньше она висела статичным ★ весь забег: один и тот же кружок,
+	# который ничего не сообщает, а ряд неподвижных кружков глаз перестаёт
+	# замечать целиком. Постоянно включённая пассивка («аэродинамика»,
+	# «ловкость») из ряда убрана — про неё игрок читает на карточке скина ДО
+	# забега. В ряду остаются только пассивки со СРОКОМ: они появляются на время
+	# действия и этим что-то сообщают.
 	var pas : Dictionary = SkinSkills.get_passive(sid)
-	if not pas.is_empty():
-		var pid : String = str(pas.get("id", ""))
-		var p_title : String = "ПАССИВКА · " + str(pas.get("label", ""))
-		var p_desc  : String = str(pas.get("desc", "")).replace("\n", " ")
-		if pid == "scars":
-			# Permanent passive indicator (always on screen)...
-			specs.append({ "key": "passive:scars_static", "tex": null, "sym": "★",
-				"mod": Color(1, 1, 1), "ring": RING_PASS, "dyn": false,
-				"title": p_title, "desc": p_desc })
-			# ...plus the Casey-mask circle that appears only while the mask is on.
-			specs.append({ "key": "passive:scars", "tex": CASEY_TEX, "sym": "",
-				"mod": Color(1, 1, 1), "ring": RING_PASS, "dyn": true,
-				"title": "НЕУЯЗВИМОСТЬ", "desc": "Маска Кейси — неуязвимость к урону." })
-		else:
-			specs.append({ "key": "passive:" + pid, "tex": null,
-				"sym": "★", "mod": Color(1, 1, 1), "ring": RING_PASS, "dyn": false,
-				"title": p_title, "desc": p_desc })
+	if not pas.is_empty() and str(pas.get("id", "")) == "scars":
+		specs.append({ "key": "passive:scars", "tex": CASEY_TEX, "sym": "",
+			"mod": Color(1, 1, 1), "ring": RING_PASS, "dyn": true,
+			"title": "НЕУЯЗВИМОСТЬ", "desc": "Маска Кейси — неуязвимость к урону." })
 
 	# Компас-дебафф (реверс управления) — динамический кружок для ЛЮБОГО скина,
 	# появляется только пока действует реверс (ключ "compass" в normaldo._skill_cd).
@@ -310,7 +301,9 @@ class Badge extends Control:
 	func _draw() -> void:
 		var c := size * 0.5
 		var r := D * 0.5
-		# Ring + black disc.
+		# Кольцо + тёмный диск. Тонкая чёрная окантовка снаружи — кружок висит
+		# поверх кирпичной стены, и без неё цветное кольцо на ней теряется.
+		draw_circle(c, r + 1.5, Color(0, 0, 0, 0.55))
 		draw_circle(c, r, ring_col)
 		draw_circle(c, r - 3.0, Color(0.05, 0.05, 0.06, 0.96))
 		# Icon (texture) or symbol. The item is drawn a bit LARGER than the disc so

@@ -1440,6 +1440,33 @@ func active_charges() -> int:
 func active_max_charges() -> int:
 	return _active_max_charges
 
+# ── Метки резиста на предметах (scripts/resist_marks.gd) ─────────────────────
+# Главный вопрос забега — «этот предмет мне страшен?» — задаётся за полсекунды
+# до столкновения, когда смотреть в угол экрана некогда. Ответ рисуется на
+# самом предмете, а состояние резиста для него отдаёт вот это.
+enum ResistState { NONE = 0, READY = 1, COOLING = 2 }
+
+func resist_state_for(area: Area2D) -> int:
+	return resist_state_for_tag(resist_tag_for(area))
+
+# Тег резиста для предмета, или "" если этот скин его не ломает. Слой меток
+# спрашивает это ОДИН раз при появлении предмета: разбор тега идёт перебором
+# групп, и гонять его каждый кадр по всем предметам на экране незачем.
+func resist_tag_for(area: Area2D) -> String:
+	if _resist_cd_for.is_empty() or not is_instance_valid(area):
+		return ""
+	var tag := _area_tag(area)
+	return tag if _resist_cd_for.has(tag) else ""
+
+func resist_state_for_tag(tag: String) -> int:
+	if tag == "":
+		return ResistState.NONE
+	return ResistState.READY if is_skill_ready("resist:" + tag) else ResistState.COOLING
+
+# Есть ли у скина резисты вообще — слой меток не запускается, если их нет.
+func has_any_resist() -> bool:
+	return not _resist_cd_for.is_empty()
+
 func start_skill_cd(key: String, total: float) -> void:
 	if total <= 0.0:
 		return
