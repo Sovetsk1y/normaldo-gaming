@@ -37,6 +37,10 @@ func _initialize() -> void:
 	await _test_shrink(boss, normaldo)
 	print("── Тапаешь — держишься жирным ──")
 	await _test_tap_holds(boss, normaldo)
+	print("── Амплитуда тапа и потолок ──")
+	await _test_tap_punch(boss, normaldo)
+	print("── Раздувание слабеет со временем ──")
+	await _test_stamina(boss, normaldo)
 	print("── Тап разгоняет поток ──")
 	await _test_stream(boss, normaldo)
 	print("── Мини-игра всегда кончается ──")
@@ -147,13 +151,60 @@ func _test_tap_holds(boss: Node, normaldo: Node) -> void:
 	_check(tap_bar >= 0.45,
 		"тапая, остаёшься жирным: %.2f" % tap_bar)
 
-	# Отдача падает с ростом жира — иначе максимум держался бы бесконечно.
+	# Отдача чуть падает с ростом жира, но основную работу делают потолок сверху
+	# и затухание со временем (см. ниже) — иначе тап перестаёт ощущаться.
 	boss.set("_bar", 0.0)
 	var gain_low : float = float(boss.call("tap_gain"))
 	boss.set("_bar", 1.0)
 	var gain_high : float = float(boss.call("tap_gain"))
-	_check(gain_high < gain_low * 0.5,
-		"у полного жира тап даёт меньше: %.3f против %.3f" % [gain_high, gain_low])
+	_check(gain_high < gain_low and gain_high > gain_low * 0.3,
+		"у полного жира тап даёт меньше, но не в ноль: %.3f против %.3f"
+			% [gain_high, gain_low])
+	boss.call("_end_minigame")
+	await _await_idle(boss)
+
+# То, ради чего этот заход и делался: тап обязан ЗАМЕТНО вспухать голову.
+# Раньше импульс был 0.03 — «еле трясётся», и ощущения «получается» не было.
+func _test_tap_punch(boss: Node, normaldo: Node) -> void:
+	await _begin(boss, 0.55)
+	await _play(boss, 0.4, 0.0)
+	var calm : float = _factor(normaldo)
+	# Несколько тапов подряд — импульс накапливается.
+	for _i in 4:
+		boss.call("_on_tap")
+		await process_frame
+	var punched : float = _factor(normaldo)
+	_check(punched > calm * 1.10,
+		"тап заметно вспухает голову: ×%.2f → ×%.2f" % [calm, punched])
+	boss.call("_end_minigame")
+	await _await_idle(boss)
+
+	# И при этом есть ПОТОЛОК: сколько ни мэшь, выше пика на OVERSHOOT_MAX не
+	# раздуться. Иначе голова уезжает за пределы кадра и мини-игра ломается.
+	await _begin(boss, 1.0)
+	var peak : float = float(boss.get("_max_factor"))
+	var cap  : float = peak * float(boss.get("OVERSHOOT_MAX"))
+	var worst := 0.0
+	for _i in 240:
+		boss.call("_on_tap")
+		await process_frame
+		worst = maxf(worst, _factor(normaldo))
+	_check(worst <= cap + 0.01,
+		"потолок раздувания держится: ×%.2f при пределе ×%.2f" % [worst, cap])
+	_check(worst > peak,
+		"но выше пика раздуться всё-таки можно: ×%.2f при пике ×%.2f" % [worst, peak])
+	boss.call("_end_minigame")
+	await _await_idle(boss)
+
+# Заявленный способ закончить мини-игру: раздувание с тапа слабеет со временем.
+func _test_stamina(boss: Node, _normaldo: Node) -> void:
+	await _begin(boss, 0.5)
+	boss.set("_play_time", 0.0)
+	var early : float = float(boss.call("tap_gain"))
+	boss.set("_play_time", 100.0)
+	var late : float = float(boss.call("tap_gain"))
+	_check(late < early * 0.2,
+		"со временем тап раздувает заметно слабее: %.4f против %.4f" % [late, early])
 	boss.call("_end_minigame")
 	await _await_idle(boss)
 

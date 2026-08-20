@@ -99,12 +99,18 @@ func _initialize() -> void:
 		var bar : float = 1.0
 		if String(argv[5]) == "boss_mid": bar = 0.5
 		if String(argv[5]) == "boss_low": bar = 0.08
+		if String(argv[5]) == "boss_pop": bar = 0.55
 		boss.call("dev_begin_play", bar)
 		for _i in 8:
 			await process_frame
 		boss.set("_bar", bar)
 		boss.call("_update_bar_hud")
 		normaldo.call("set_fat_boss_factor", boss.call("fat_factor_for", bar))
+		# «pop» — кадр сразу после серии тапов: видно, насколько тап вспухает.
+		if String(argv[5]) == "boss_pop":
+			for _t in 4:
+				boss.call("_on_tap")
+				await process_frame
 		await process_frame
 		await RenderingServer.frame_post_draw
 		var bimg := get_root().get_texture().get_image()

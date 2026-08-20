@@ -71,25 +71,33 @@ const BAR_START     : float = 1.0            # мутаген взят — ты 
 # Пол размера: даже на нуле жира голова заметно больше обычной, иначе последние
 # секунды босс уже не босс, а предметы летят сквозь маленькую голову.
 const FAT_FLOOR     : float = 0.40
-# Слив растёт с набранным жиром (квадратично) и со временем в мини-игре. База
-# небольшая: у самого низа сдувание замедляется, и концовка не обрывается.
-const BAR_DECAY     : float = 0.10
-const BAR_DECAY_RAMP: float = 0.42
-const BAR_TAP_GAIN  : float = 0.075          # прибавка за тап у пустой полосы
-# Отдача от тапа падает по мере набора: у полного жира тап даёт вчетверо меньше.
-# Без этого мэшер держал бы максимум бесконечно.
-const BAR_TAP_FALLOFF : float = 0.25
+# ПОТОЛОК: выше пика можно раздуться ещё на 10 %, и всё. Дальше тап не растит
+# размер — он только дольше удерживает набранное, а с течением времени и это
+# слабеет (см. `tap_stamina`). Так у мэшинга есть видимая верхняя точка.
+const OVERSHOOT_MAX : float = 1.10
+# Сдувание БЫСТРОЕ: без тапов пик уходит примерно за 2.5 c. Мини-игра должна
+# ощущаться как удержание, а не как медленное таяние.
+const BAR_DECAY     : float = 0.22
+const BAR_DECAY_RAMP: float = 0.75
+# И тап даёт МНОГО: голова заметно вспухает на каждом. Раньше прибавка была
+# 0.075 при медленном сливе — вместе это читалось как «он еле трясётся».
+const BAR_TAP_GAIN  : float = 0.16
+# Отдача чуть падает по мере набора — но основную работу делает не она, а
+# потолок сверху и затухание со временем.
+const BAR_TAP_FALLOFF : float = 0.55
 # Со временем слив нарастает, А ОТДАЧА ОТ ТАПА ПАДАЕТ — Нормальдо выдыхается.
 # Второе обязательно: одного нарастающего слива мало. Пока тап у пустой полосы
 # даёт больше, чем стекает у самого дна, у мэшера есть равновесие выше нуля, и
 # мини-игра не кончается ВООБЩЕ — при 14 тапах в секунду она честно висела 40
 # секунд, пока в неё не упёрся тест.
 const DECAY_GRACE     : float = 5.0
-const DECAY_RAMP_T    : float = 12.0
+const DECAY_RAMP_T    : float = 14.0
 # ×3 не хватало: при 14 тапах в секунду слив и прибавка сходились на середине
 # полосы, и мини-игра не кончалась вовсе. ×6 перекрывает любой человеческий темп.
-const DECAY_TIME_MULT : float = 6.0
-const TAP_STAMINA_MIN : float = 0.25         # во что вырождается отдача от тапа
+const DECAY_TIME_MULT : float = 2.0
+# Главный тормоз — именно он: со временем тап раздувает всё слабее, и в какой-то
+# момент удержать жир нельзя никаким темпом.
+const TAP_STAMINA_MIN : float = 0.10
 # Аварийный потолок: даже при полностью сломанной математике игрок не должен
 # застрять в мини-игре навсегда.
 const FRENZY_HARD_CAP : float = 45.0
@@ -117,6 +125,11 @@ const ZOOM_PER_AMP  : float = 0.006
 # Deflation at the end: he sags back to normal size over this long instead of
 # snapping, then puffs out the parting speech bubble.
 const DEFLATE_T : float = 0.6
+
+# Скачок размера на тап: накапливается, стухает за пару кадров. Именно он даёт
+# ощущение «получается» — без него тап виден только по полоске.
+const TAP_PULSE_GAIN : float = 0.07
+const TAP_PULSE_MAX  : float = 0.16
 
 const PROMPT_REAPPEAR : float = 0.55         # idle gap before the tap-prompt returns
 
@@ -439,7 +452,7 @@ func _tick_play(delta: float) -> void:
 	_update_stage_fx(delta)
 
 	# Tap feedback decays back to rest.
-	_tap_pulse = lerpf(_tap_pulse, 0.0, delta * 12.0)
+	_tap_pulse = lerpf(_tap_pulse, 0.0, delta * 7.0)
 	_tap_rot   = lerpf(_tap_rot, 0.0, delta * 9.0)
 
 	# СДУВАЯСЬ, БОСС ОТЪЕЗЖАЕТ ОТ КРАЯ. На пике голова стоит центром на левом
@@ -456,7 +469,8 @@ func _tick_play(delta: float) -> void:
 	_breathe_t += delta * 5.0
 	if _normaldo.has_method("set_fat_boss_factor"):
 		var wobble := 1.0 + sin(_breathe_t) * 0.012 + _tap_pulse
-		_normaldo.set_fat_boss_factor(fat_factor_for(_bar) * wobble)
+		_normaldo.set_fat_boss_factor(
+			minf(fat_factor_for(_bar) * wobble, _max_factor * OVERSHOOT_MAX))
 	if _normaldo.has_method("set_fat_boss_rotation"):
 		_normaldo.set_fat_boss_rotation(_tap_rot)
 
@@ -500,8 +514,10 @@ func _on_tap() -> void:
 	# Тап делает ровно две вещи разом: держит жир (а значит и размер) и разгоняет
 	# поток. Отдача падает по мере набора — удержать максимум нельзя.
 	_bar = clampf(_bar + tap_gain(), 0.0, 1.0)
-	_tap_pulse = 0.03   # transient jolt, decays in a few frames (reads as a shudder)
-	_tap_rot   = randf_range(0.05, 0.10) * (1.0 if randf() < 0.5 else -1.0)
+	# Импульс НАКАПЛИВАЕТСЯ и заметно вспухает голову — 0.03 читались как дрожь,
+	# и «получается» не ощущалось вовсе. Сверху всё равно стоит OVERSHOOT_MAX.
+	_tap_pulse = minf(_tap_pulse + TAP_PULSE_GAIN, TAP_PULSE_MAX)
+	_tap_rot   = randf_range(0.09, 0.16) * (1.0 if randf() < 0.5 else -1.0)
 	# Tap feedback: tap.mp3 (if present) + a green particle puff.
 	if _tap_player.stream:
 		_tap_player.play()
