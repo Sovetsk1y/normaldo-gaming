@@ -92,6 +92,21 @@ func _initialize() -> void:
 		for _i in 30:
 			await process_frame
 
+	# Пауза снимается тем же путём, что открывает игрок.
+	if argv.size() > 5 and String(argv[5]).begins_with("pause"):
+		hud.call("_open_pause_menu")
+		for _i in 30:
+			await process_frame
+		var pscr : Node = hud.get("_pause_overlay")
+		if String(argv[5]) == "pause_exit":
+			pscr.call("_on_quit")
+			for _i in 30:
+				await process_frame
+		elif String(argv[5]) == "pause_settings":
+			pscr.call("_on_settings")
+			for _i in 60:
+				await process_frame
+
 	await RenderingServer.frame_post_draw
 	var img := get_root().get_texture().get_image()
 	img.save_png("%s/%s.png" % [out, name])

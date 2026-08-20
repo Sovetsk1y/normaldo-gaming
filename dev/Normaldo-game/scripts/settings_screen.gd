@@ -102,10 +102,16 @@ func setup(hud: Node, section: String = "sound") -> void:
 	_sel = section
 
 func _ready() -> void:
+	# Настройки открываются и С ПАУЗЫ, где дерево стоит: без ALWAYS экран замрёт
+	# вместе с игрой и кнопки перестанут нажиматься. z_index выше паузы (90),
+	# чтобы лечь поверх неё, а не под.
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	z_index      = 95
 	var vp := get_viewport().get_visible_rect().size
 	_build(vp)
 	_slide_root.position = Vector2(0.0, vp.y)
 	var tw := create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
 	tw.tween_property(_slide_root, "position", Vector2.ZERO, SLIDE_TIME)\
 		.set_trans(SLIDE_TRANS).set_ease(SLIDE_EASE_IN)
 	if _hud != null and _hud.has_method("_on_settings_open_anim_start"):
@@ -814,6 +820,7 @@ func _press_anim(visual_root: Control, pressed: bool) -> void:
 		return
 	var target := Vector2.ONE * (_PRESS_SCALE if pressed else 1.0)
 	var tw := create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
 	tw.tween_property(visual_root, "scale", target, _PRESS_TIME)\
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
@@ -835,6 +842,7 @@ func _on_close() -> void:
 		return
 	var vp := get_viewport().get_visible_rect().size
 	var tw := create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
 	tw.tween_property(_slide_root, "position", Vector2(0.0, vp.y), SLIDE_TIME)\
 		.set_trans(SLIDE_TRANS).set_ease(SLIDE_EASE_OUT)
 	tw.tween_callback(Callable(self, "queue_free"))

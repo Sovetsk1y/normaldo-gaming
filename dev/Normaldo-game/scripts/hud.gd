@@ -5699,256 +5699,20 @@ func _notification(what: int) -> void:
 				return
 			_open_pause_menu()
 
+# Пауза — отдельный экран в две колонки (scripts/pause_screen.gd): слева ЭТОТ
+# ЗАБЕГ и действия, справа задания дня. Раньше пауза показывала задания и
+# молчала про сам забег, а убавить звук с неё было нельзя вовсе.
+# См. /Концепция/Экран паузы.md
+const _PAUSE_SCREEN_SCRIPT := preload("res://scripts/pause_screen.gd")
+
 func _open_pause_menu() -> void:
 	if is_instance_valid(_pause_overlay):
 		return
-	var vp  : Vector2 = get_viewport().get_visible_rect().size
-	var _pm : int     = Node.PROCESS_MODE_ALWAYS
-
-	_pause_overlay = Control.new()
-	_pause_overlay.size         = vp
-	_pause_overlay.process_mode = _pm
-	_pause_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	_pause_overlay.z_index      = 90
-	add_child(_pause_overlay)
-
-	var dim := ColorRect.new()
-	dim.color        = Color(0.0, 0.0, 0.0, 0.72)
-	dim.size         = vp
-	dim.process_mode = _pm
-	dim.mouse_filter = Control.MOUSE_FILTER_STOP
-	_pause_overlay.add_child(dim)
-
-	# Widen the panel and grow vertically to fit a 3-row daily-quest status
-	# block between the title and the action buttons.
-	const PW       : float = 320.0
-	const TITLE_H  : float = 34.0
-	const ROW_H    : float = 64.0   # title row + desc row + status row
-	const BTN_H    : float = 38.0
-	const BTN_GAP  : float = 12.0
-	var rows : int = QuestManager.daily_quests.size()
-	if rows == 0:
-		rows = 3
-	var PH : float = TITLE_H + 24.0 + rows * (ROW_H + 6.0) + 14.0 + BTN_H * 2.0 + BTN_GAP + 24.0
-	var px : float = (vp.x - PW) * 0.5
-	var py : float = (vp.y - PH) * 0.5
-
-	var panel := ColorRect.new()
-	panel.color        = Color(0.07, 0.07, 0.10, 0.97)
-	panel.size         = Vector2(PW, PH)
-	panel.position     = Vector2(px, py)
-	panel.process_mode = _pm
-	_pause_overlay.add_child(panel)
-
-	var top_stripe := ColorRect.new()
-	top_stripe.color        = Color(0.55, 0.85, 1.0, 0.90)
-	top_stripe.size         = Vector2(PW, 3.0)
-	top_stripe.position     = Vector2(px, py)
-	top_stripe.process_mode = _pm
-	_pause_overlay.add_child(top_stripe)
-
-	var title := Label.new()
-	title.add_theme_font_override("font", UI_FONT)
-	title.add_theme_font_size_override("font_size", 22)
-	_apply_menu_caption_fx(title)
-	title.text                 = "ПАУЗА"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.modulate             = Color(0.85, 0.95, 1.0)
-	title.size                 = Vector2(PW, TITLE_H)
-	title.position             = Vector2(px, py + 14.0)
-	title.process_mode         = _pm
-	_pause_overlay.add_child(title)
-
-	# Daily-quest status — one row per slot, each shows tier + title + state.
-	var quests_y : float = py + TITLE_H + 24.0
-	_build_pause_quests_block(px + 16.0, quests_y, PW - 32.0, ROW_H, _pm)
-	var quests_h : float = float(rows) * (ROW_H + 6.0)
-
-	var btn_w   : float = PW - 48.0
-	var btn_y   : float = quests_y + quests_h + 8.0
-
-	_build_pause_action_btn(Vector2(px + 24.0, btn_y), Vector2(btn_w, BTN_H),
-		"ПРОДОЛЖИТЬ", Color(0.55, 1.0, 0.65), Color(0.08, 0.22, 0.10),
-		_close_pause_menu, _pm)
-	_build_pause_action_btn(Vector2(px + 24.0, btn_y + (BTN_H + BTN_GAP)), Vector2(btn_w, BTN_H),
-		"ВЫХОД", Color(1.0, 0.55, 0.55), Color(0.20, 0.07, 0.07),
-		_on_pause_exit_tapped, _pm)
-
+	var scr : Control = _PAUSE_SCREEN_SCRIPT.new()
+	scr.call("setup", self)
+	add_child(scr)
+	_pause_overlay = scr
 	get_tree().paused = true
-
-# Renders one card per daily quest slot inside the pause panel. Each row
-# shows tier (LIGHT/MID/HARD colour bar), title, current state (Готово /
-# в процессе / На кулдауне), and the reward at the right edge.
-func _build_pause_quests_block(x: float, y: float, w: float, row_h: float, pm: int) -> void:
-	const TIER_STR : Dictionary = { "easy": "ЛЁГКОЕ", "medium": "СРЕДНЕЕ", "hard": "ТЯЖЁЛОЕ" }
-	const TIER_COL : Dictionary = {
-		"easy":   Color(0.55, 0.85, 1.0),
-		"medium": Color(1.0,  0.78, 0.30),
-		"hard":   Color(1.0,  0.45, 0.45),
-	}
-	var cy : float = y
-	for slot in QuestManager.daily_quests.size():
-		var q         : Dictionary = QuestManager.daily_quests[slot]
-		var on_cd     : bool       = QuestManager.is_slot_on_cooldown(slot)
-		var completed : bool       = bool(q.get("completed", false))
-		var claimed   : bool       = bool(q.get("claimed",   false))
-		var tier      : String     = str(q.get("tier", "easy"))
-		var tier_col  : Color      = TIER_COL.get(tier, Color.WHITE) as Color
-		var tier_lbl  : String     = TIER_STR.get(tier, tier.to_upper()) as String
-
-		var def       : Dictionary = QuestManager._daily_def(slot)
-		var title     : String     = str(def.get("title", ""))
-		var desc      : String     = str(def.get("desc",  ""))
-		var status_text : String
-		var status_col  : Color
-		if on_cd:
-			status_text = "новое через %s" % _fmt_cooldown_short(QuestManager.slot_cooldown_remaining(slot))
-			status_col  = Color(0.70, 0.70, 0.78, 0.85)
-		elif claimed:
-			status_text = "забрано"
-			status_col  = Color(0.55, 0.85, 0.55, 0.90)
-		elif completed:
-			status_text = "готово — забери награду"
-			status_col  = Color(0.45, 1.0,  0.55, 0.95)
-		else:
-			status_text = QuestManager.daily_progress_text(slot)
-			status_col  = Color(0.85, 0.88, 0.95, 0.85)
-
-		var bg := ColorRect.new()
-		bg.color        = Color(0.10, 0.10, 0.14, 0.92) if not on_cd else Color(0.06, 0.06, 0.09, 0.90)
-		bg.size         = Vector2(w, row_h)
-		bg.position     = Vector2(x, cy)
-		bg.process_mode = pm
-		_pause_overlay.add_child(bg)
-
-		# Left-edge tier stripe.
-		var stripe := ColorRect.new()
-		stripe.color        = Color(tier_col.r, tier_col.g, tier_col.b, 0.95)
-		stripe.size         = Vector2(3.0, row_h)
-		stripe.position     = Vector2(x, cy)
-		stripe.process_mode = pm
-		_pause_overlay.add_child(stripe)
-
-		# Right-aligned tier badge — sits opposite the title on row 1.
-		var tier_badge_w : float = 76.0
-		var tier_text_lbl := Label.new()
-		tier_text_lbl.add_theme_font_override("font", UI_FONT)
-		tier_text_lbl.add_theme_font_size_override("font_size", 9)
-		_apply_menu_caption_fx(tier_text_lbl)
-		tier_text_lbl.text                 = tier_lbl
-		tier_text_lbl.modulate             = Color(tier_col.r, tier_col.g, tier_col.b, 0.95)
-		tier_text_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		tier_text_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		tier_text_lbl.size                 = Vector2(tier_badge_w, 16.0)
-		tier_text_lbl.position             = Vector2(x + w - tier_badge_w - 8.0, cy + 4.0)
-		tier_text_lbl.process_mode         = pm
-		_pause_overlay.add_child(tier_text_lbl)
-
-		# Row 1: title — left side of the same row as the tier badge.
-		var title_lbl := Label.new()
-		title_lbl.add_theme_font_override("font", UI_FONT)
-		title_lbl.add_theme_font_size_override("font_size", 12)
-		_apply_menu_caption_fx(title_lbl)
-		title_lbl.text                 = title if not on_cd else "—"
-		title_lbl.modulate             = Color(1.0, 0.95, 0.85) if not on_cd else Color(0.65, 0.65, 0.72, 0.85)
-		title_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		title_lbl.clip_text            = true
-		title_lbl.size                 = Vector2(w - tier_badge_w - 24.0, 16.0)
-		title_lbl.position             = Vector2(x + 10.0, cy + 4.0)
-		title_lbl.process_mode         = pm
-		_pause_overlay.add_child(title_lbl)
-
-		# Row 2: description — only when we actually have a quest (not on CD).
-		var desc_lbl := Label.new()
-		desc_lbl.add_theme_font_override("font", UI_FONT)
-		desc_lbl.add_theme_font_size_override("font_size", 10)
-		_apply_menu_caption_fx(desc_lbl)
-		desc_lbl.text                 = desc if not on_cd else "Слот на кулдауне"
-		desc_lbl.modulate             = Color(0.85, 0.85, 0.88, 0.90)
-		desc_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		desc_lbl.clip_text            = true
-		desc_lbl.size                 = Vector2(w - 16.0, 16.0)
-		desc_lbl.position             = Vector2(x + 10.0, cy + 22.0)
-		desc_lbl.process_mode         = pm
-		_pause_overlay.add_child(desc_lbl)
-
-		# Row 3: short status / progress / cooldown countdown.
-		var status_lbl := Label.new()
-		status_lbl.add_theme_font_override("font", UI_FONT)
-		status_lbl.add_theme_font_size_override("font_size", 9)
-		_apply_menu_caption_fx(status_lbl)
-		status_lbl.text                 = status_text
-		status_lbl.modulate             = status_col
-		status_lbl.size                 = Vector2(w - 16.0, 14.0)
-		status_lbl.position             = Vector2(x + 10.0, cy + row_h - 16.0)
-		status_lbl.process_mode         = pm
-		_pause_overlay.add_child(status_lbl)
-
-		cy += row_h + 6.0
-
-# Short HH:MM:SS-ish helper for the cooldown line. Drops the hour part if zero
-# so quick refreshes read cleanly as "новое через 12:30".
-func _fmt_cooldown_short(sec_total: int) -> String:
-	if sec_total <= 0:
-		return "0:00"
-	var h : int = sec_total / 3600
-	var m : int = (sec_total % 3600) / 60
-	var s : int = sec_total % 60
-	if h > 0:
-		return "%d:%02d:%02d" % [h, m, s]
-	return "%d:%02d" % [m, s]
-
-func _build_pause_action_btn(pos: Vector2, sz: Vector2, caption: String,
-		fg: Color, bg: Color, action: Callable, pm: int) -> void:
-	var visual := Control.new()
-	visual.size         = sz
-	visual.position     = pos
-	visual.pivot_offset = sz * 0.5
-	visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	visual.process_mode = pm
-	_pause_overlay.add_child(visual)
-
-	var bg_rect := ColorRect.new()
-	bg_rect.color        = bg
-	bg_rect.size         = sz
-	bg_rect.position     = Vector2.ZERO
-	bg_rect.process_mode = pm
-	visual.add_child(bg_rect)
-
-	var stripe := ColorRect.new()
-	stripe.color        = Color(fg.r, fg.g, fg.b, 0.80)
-	stripe.size         = Vector2(sz.x, 2.0)
-	stripe.position     = Vector2.ZERO
-	stripe.process_mode = pm
-	visual.add_child(stripe)
-
-	var lbl := Label.new()
-	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 14)
-	_apply_menu_caption_fx(lbl)
-	lbl.text                 = caption
-	lbl.modulate             = fg
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.size                 = sz
-	lbl.position             = Vector2.ZERO
-	lbl.process_mode         = pm
-	visual.add_child(lbl)
-
-	var hit := Button.new()
-	hit.flat         = true
-	hit.focus_mode   = Control.FOCUS_NONE
-	hit.size         = sz
-	hit.position     = pos
-	hit.process_mode = pm
-	hit.pressed.connect(func():
-		_play_btn_sfx()
-		action.call()
-	)
-	hit.button_down.connect(_menu_btn_press_anim.bind(visual, true))
-	hit.button_up.connect(_menu_btn_press_anim.bind(visual, false))
-	hit.mouse_exited.connect(_menu_btn_press_anim.bind(visual, false))
-	_pause_overlay.add_child(hit)
 
 func _close_pause_menu() -> void:
 	if is_instance_valid(_pause_overlay):
@@ -5956,147 +5720,11 @@ func _close_pause_menu() -> void:
 	_pause_overlay = null
 	get_tree().paused = false
 
-func _on_pause_exit_tapped() -> void:
-	# Confirm first — exiting wipes the current run (pizzas/dollars in flight,
-	# bonuses) so the player should knowingly opt in.
-	_show_pause_exit_confirm()
-
-func _show_pause_exit_confirm() -> void:
-	if not is_instance_valid(_pause_overlay):
-		return
-	var vp  : Vector2 = get_viewport().get_visible_rect().size
-	var _pm : int     = Node.PROCESS_MODE_ALWAYS
-
-	var confirm := Control.new()
-	confirm.size         = vp
-	confirm.process_mode = _pm
-	confirm.mouse_filter = Control.MOUSE_FILTER_STOP
-	confirm.z_index      = 5     # above the pause panel inside the same overlay
-	_pause_overlay.add_child(confirm)
-
-	var dim := ColorRect.new()
-	dim.color        = Color(0.0, 0.0, 0.0, 0.55)
-	dim.size         = vp
-	dim.process_mode = _pm
-	dim.mouse_filter = Control.MOUSE_FILTER_STOP
-	confirm.add_child(dim)
-
-	const PW : float = 290.0
-	const PH : float = 200.0
-	var px : float = (vp.x - PW) * 0.5
-	var py : float = (vp.y - PH) * 0.5
-
-	var panel := ColorRect.new()
-	panel.color        = Color(0.07, 0.07, 0.10, 0.97)
-	panel.size         = Vector2(PW, PH)
-	panel.position     = Vector2(px, py)
-	panel.process_mode = _pm
-	confirm.add_child(panel)
-
-	var top_stripe := ColorRect.new()
-	top_stripe.color        = Color(1.0, 0.55, 0.45, 0.90)
-	top_stripe.size         = Vector2(PW, 3.0)
-	top_stripe.position     = Vector2(px, py)
-	top_stripe.process_mode = _pm
-	confirm.add_child(top_stripe)
-
-	var title := Label.new()
-	title.add_theme_font_override("font", UI_FONT)
-	title.add_theme_font_size_override("font_size", 18)
-	_apply_menu_caption_fx(title)
-	title.text                 = "ВЫЙТИ?"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.modulate             = Color(1.0, 0.65, 0.55)
-	title.size                 = Vector2(PW, 30.0)
-	title.position             = Vector2(px, py + 12.0)
-	title.process_mode         = _pm
-	confirm.add_child(title)
-
-	var msg := Label.new()
-	msg.add_theme_font_override("font", UI_FONT)
-	msg.add_theme_font_size_override("font_size", 11)
-	_apply_menu_caption_fx(msg)
-	msg.text                 = "Весь прогресс забега\nбудет потерян"
-	msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	msg.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	msg.modulate             = Color(0.90, 0.92, 0.95, 0.90)
-	msg.size                 = Vector2(PW - 32.0, 48.0)
-	msg.position             = Vector2(px + 16.0, py + 50.0)
-	msg.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
-	msg.process_mode         = _pm
-	confirm.add_child(msg)
-
-	var btn_w   : float = (PW - 48.0 - 12.0) * 0.5
-	var btn_h   : float = 38.0
-	var btn_y   : float = py + PH - btn_h - 18.0
-
-	# OTMEHA — closes only the confirm dialog, leaves the pause menu up.
-	_build_pause_confirm_btn(confirm, Vector2(px + 24.0, btn_y), Vector2(btn_w, btn_h),
-		"ОТМЕНА", Color(0.85, 0.95, 1.0), Color(0.12, 0.14, 0.20),
-		func():
-			if is_instance_valid(confirm):
-				confirm.queue_free(),
-		_pm)
-
-	# Confirmed exit — unpause + reload scene (same as the old direct path).
-	_build_pause_confirm_btn(confirm, Vector2(px + 24.0 + btn_w + 12.0, btn_y), Vector2(btn_w, btn_h),
-		"ВЫЙТИ", Color(1.0, 0.55, 0.55), Color(0.22, 0.07, 0.07),
-		func():
-			get_tree().paused = false
-			get_tree().reload_current_scene(),
-		_pm)
-
-func _build_pause_confirm_btn(parent: Control, pos: Vector2, sz: Vector2, caption: String,
-		fg: Color, bg: Color, action: Callable, pm: int) -> void:
-	var visual := Control.new()
-	visual.size         = sz
-	visual.position     = pos
-	visual.pivot_offset = sz * 0.5
-	visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	visual.process_mode = pm
-	parent.add_child(visual)
-
-	var bg_rect := ColorRect.new()
-	bg_rect.color        = bg
-	bg_rect.size         = sz
-	bg_rect.position     = Vector2.ZERO
-	bg_rect.process_mode = pm
-	visual.add_child(bg_rect)
-
-	var stripe := ColorRect.new()
-	stripe.color        = Color(fg.r, fg.g, fg.b, 0.80)
-	stripe.size         = Vector2(sz.x, 2.0)
-	stripe.position     = Vector2.ZERO
-	stripe.process_mode = pm
-	visual.add_child(stripe)
-
-	var lbl := Label.new()
-	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 13)
-	_apply_menu_caption_fx(lbl)
-	lbl.text                 = caption
-	lbl.modulate             = fg
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.size                 = sz
-	lbl.position             = Vector2.ZERO
-	lbl.process_mode         = pm
-	visual.add_child(lbl)
-
-	var hit := Button.new()
-	hit.flat         = true
-	hit.focus_mode   = Control.FOCUS_NONE
-	hit.size         = sz
-	hit.position     = pos
-	hit.process_mode = pm
-	hit.pressed.connect(func():
-		_play_btn_sfx()
-		action.call()
-	)
-	hit.button_down.connect(_menu_btn_press_anim.bind(visual, true))
-	hit.button_up.connect(_menu_btn_press_anim.bind(visual, false))
-	hit.mouse_exited.connect(_menu_btn_press_anim.bind(visual, false))
-	parent.add_child(hit)
+# Выход из забега по подтверждению: снять паузу и перезапустить сцену — тот же
+# путь, что был у старой кнопки «ВЫЙТИ».
+func _exit_run_to_menu() -> void:
+	get_tree().paused = false
+	get_tree().reload_current_scene()
 
 func _build_dev_btn() -> void:
 	var vp     := get_viewport().get_visible_rect().size
@@ -8943,7 +8571,8 @@ func _show_quest_complete_toast(slot: int, title: String, desc: String) -> void:
 func _show_avatar_picker() -> void:
 	var vp := get_viewport().get_visible_rect().size
 	var root := Node2D.new()
-	root.z_index = 50
+	root.z_index = 100   # поверх экрана настроек (95) и паузы (90)
+	root.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(root)
 
 	var dim := ColorRect.new()
@@ -9133,7 +8762,8 @@ func _build_skin_avatar_row(parent: Control, cy: float, w: float,
 func _show_rename_modal() -> void:
 	var vp := get_viewport().get_visible_rect().size
 	var root := Node2D.new()
-	root.z_index = 50
+	root.z_index = 100   # поверх экрана настроек (95) и паузы (90)
+	root.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(root)
 
 	var dim := ColorRect.new()
@@ -9579,7 +9209,8 @@ func _toggle_notif_category(key: String) -> void:
 func _show_restore_modal() -> void:
 	var vp := get_viewport().get_visible_rect().size
 	var root := Node2D.new()
-	root.z_index = 50
+	root.z_index = 100   # поверх экрана настроек (95) и паузы (90)
+	root.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(root)
 
 	var dim := ColorRect.new()
