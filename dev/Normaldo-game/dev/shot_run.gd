@@ -92,6 +92,32 @@ func _initialize() -> void:
 		for _i in 30:
 			await process_frame
 
+	# Экран смерти собирается своим настоящим строителем: аргументы — это то,
+	# что ему передаёт `_on_normaldo_died`.
+	if argv.size() > 5 and String(argv[5]).begins_with("death"):
+		save.dollars = 12400
+		hud.set("_dollars_this_run", 86)
+		hud.set("_elapsed_time", 134.0)
+		save.skin_xp    = 3400
+		save.skin_level = 4
+		var rewards : Array = []
+		if String(argv[5]) == "death_levelup":
+			rewards = [{"level": 5, "dollars": 500, "tokens": 1}]
+		# Рекорд ДО забега: экран сравнивает результат именно с ним.
+		hud.set("_go_best_before", 340 if String(argv[5]) == "death_record" else 480)
+		save.skin_progress[String(save.active_skin)] = {
+			"xp": 3400, "level": 4, "mastery": 0, "runs": 37, "best": 480}
+		paused = true
+		hud.call("_show_game_over", 411, rewards, 3200, 4)
+		for _i in 90:
+			await process_frame
+		await RenderingServer.frame_post_draw
+		var dimg := get_root().get_texture().get_image()
+		dimg.save_png("%s/%s.png" % [out, name])
+		print("saved ", name)
+		quit(0)
+		return
+
 	# Пауза снимается тем же путём, что открывает игрок.
 	if argv.size() > 5 and String(argv[5]).begins_with("pause"):
 		hud.call("_open_pause_menu")

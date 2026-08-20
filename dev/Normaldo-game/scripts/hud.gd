@@ -144,6 +144,10 @@ var _chest_anchor    : Vector2 = Vector2.ZERO
 var _chest_tooltip   : Node2D  = null
 
 var _go_overlay       : ColorRect = null  # death screen overlay
+# Рекорд скина ДО текущего забега — снимается в `_on_normaldo_died` до того,
+# как забег обновит рекорд.
+var _go_best_before   : int = 0
+var _go_layout        : Dictionary = {}
 # Set when the boss defeats him while endless is freshly unlocked; consumed
 # by _show_game_over to drop an extra "ENDLESS MODE UNLOCKED" badge.
 var _endless_unlock_pending : bool = false
@@ -6325,12 +6329,15 @@ func _on_normaldo_died(total_pizzas: int, death_pos: Vector2) -> void:
 	var level_before := SaveData.skin_level
 	# Личная статистика скина: забег засчитывается ровно здесь, одновременно с
 	# начислением опыта, — другого места, где забег точно закончился, нет.
+	# Рекорд ДО забега: `note_run_finished` перезапишет его прямо сейчас, и без
+	# снимка экран смерти всегда сравнивал бы результат сам с собой и всегда
+	# рапортовал «новый рекорд». См. /Концепция/Экран смерти.md
+	_go_best_before = SaveData.get_skin_best_for(SaveData.active_skin)
 	SaveData.note_run_finished(total_pizzas)
 	var level_rewards := SaveData.add_xp(total_pizzas, "run_end")
 	# Submit endless run to leaderboard backend (fire-and-forget; doesn't block UI)
 	if QuestManager._run_is_endless and QuestManager.is_endless_unlocked():
 		_submit_endless_score_async(total_pizzas, _elapsed_time)
-	get_tree().paused = true
 	_show_game_over(total_pizzas, level_rewards, xp_before, level_before)
 	_maybe_prompt_notif_permission()
 
@@ -6486,21 +6493,37 @@ func _submit_endless_score_async(score: int, run_seconds: float) -> void:
 		int(resp.data.get("total_endless", 0)),
 	])
 
-func _show_game_over(total_pizzas: int, level_rewards: Array, xp_before: int, level_before: int) -> void:
-	var vp      := get_viewport().get_visible_rect().size
-	var panel_w := 310.0
-	var show_rank_block := QuestManager._run_is_endless and QuestManager.is_endless_unlocked()
-	var panel_h : float = 388.0 if show_rank_block else 332.0
-	var panel_x := (vp.x - panel_w) * 0.5
-	var panel_y := (vp.y - panel_h) * 0.5
-	var _pm     := Node.PROCESS_MODE_ALWAYS
-	var skin_data := SkinRegistry.get_skin(SaveData.active_skin)
-	var rarity    : int   = skin_data.get("rarity", 0)
-	var rc        : Color = SkinRegistry.RARITY_COLORS[rarity]
+# ── Экран смерти ─────────────────────────────────────────────────────────────
+# Две колонки: слева итог забега и действия, справа задания дня и баланс.
+# Единственное решение игрока здесь — «ещё раз или хватит», и всё на экране
+# существует, чтобы это решение было осознанным. Раньше панель в 310 px стояла
+# колонкой по центру экрана 960, рекорд не показывался вовсе, а времени забега
+# не было. См. /Концепция/Экран смерти.md
+const GO_LEFT_X  : float = 26.0
+const GO_LEFT_W  : float = 200.0
+const GO_RIGHT_X : float = 234.0
+const GO_RIGHT_W : float = 170.0
+const GO_COL_Y   : float = 34.0
+const GO_COL_H   : float = 150.0
+const GO_PAD     : float = 12.0
 
-	# Run earnings are credited up front in _on_normaldo_died — we compute
-	# what the wallet looked like BEFORE this run so the fly-in animation has
-	# a believable starting number to count up from.
+func _show_game_over(total_pizzas: int, level_rewards: Array, xp_before: int, level_before: int) -> void:
+	# Экран смерти сам останавливает игру: раньше это делал вызывающий, и
+	# гарантия «пока открыт этот экран, забег стоит» держалась на одной строке
+	# в другом месте.
+	get_tree().paused = true
+	var vp  := get_viewport().get_visible_rect().size
+	var sx  : float = vp.x / MENU_CANVAS_W
+	var sy  : float = vp.y / MENU_CANVAS_H
+	var _pm := Node.PROCESS_MODE_ALWAYS
+	var show_rank_block := QuestManager._run_is_endless and QuestManager.is_endless_unlocked()
+
+	var left  := Rect2(GO_LEFT_X  * sx, GO_COL_Y * sy, GO_LEFT_W  * sx, GO_COL_H * sy)
+	var right := Rect2(GO_RIGHT_X * sx, GO_COL_Y * sy, GO_RIGHT_W * sx, GO_COL_H * sy)
+	_go_layout = { "left": left, "right": right }
+
+	# Начисления уже применены в `_on_normaldo_died` — восстанавливаем, каким
+	# кошелёк был ДО забега, чтобы прилёт монет считал от правдоподобного числа.
 	var level_reward_d : int = 0
 	var level_reward_t : int = 0
 	for r in level_rewards:
@@ -6509,149 +6532,226 @@ func _show_game_over(total_pizzas: int, level_rewards: Array, xp_before: int, le
 	var balance_before_run : int = SaveData.dollars - _dollars_this_run - level_reward_d
 
 	var overlay := ColorRect.new()
-	overlay.color        = Color(0, 0, 0, 0.72)
-	overlay.size         = vp
+	overlay.color        = Color(0, 0, 0, 0.78)
 	overlay.process_mode = _pm
-	add_child(overlay)
+	UiKit.place(self, overlay, Vector2.ZERO, vp)
 	_go_overlay = overlay
-
-	var panel := ColorRect.new()
-	panel.color        = Color(0.07, 0.07, 0.10, 0.97)
-	panel.size         = Vector2(panel_w, panel_h)
-	panel.position     = Vector2(panel_x, panel_y)
-	panel.process_mode = _pm
-	add_child(panel)
-
-	var top_stripe := ColorRect.new()
-	top_stripe.color        = Color(1.0, 0.30, 0.30, 0.90)
-	top_stripe.size         = Vector2(panel_w, 3.0)
-	top_stripe.position     = Vector2(panel_x, panel_y)
-	top_stripe.process_mode = _pm
-	add_child(top_stripe)
 
 	var title := Label.new()
 	title.add_theme_font_override("font", UI_FONT)
 	title.add_theme_font_size_override("font_size", 22)
 	_apply_menu_caption_fx(title)
-	title.text                 = "GAME OVER"
+	title.text                 = "ЗАБЕГ ОКОНЧЕН"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.modulate             = Color(1.0, 0.30, 0.30)
-	title.size                 = Vector2(panel_w, 34)
-	title.position             = Vector2(panel_x, panel_y + 10)
+	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	title.modulate             = Color(1.0, 0.42, 0.40)
 	title.process_mode         = _pm
-	add_child(title)
+	title.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, title, Vector2(0.0, 7.0 * sy), Vector2(vp.x, 22.0 * sy))
 
-	# Boss-defeat → endless mode unlock badge. Consumed once per unlock.
+	_build_go_left(left, total_pizzas, level_rewards, xp_before, level_before, _pm)
+	_build_go_right(right, balance_before_run, _pm)
+
+	if show_rank_block:
+		_build_go_rank_block(left.position.x, left.position.y, left.size.x, _pm, left.size.y)
+
+	_run_xp_animation(xp_before, level_before, total_pizzas)
+	_spawn_dollar_fly_to_balance(_dollars_this_run)
+
+	# Дев-кнопки экрана смерти под общим рубильником.
+	if DevFlags.ENABLED:
+		_build_go_dev_xp_btns(vp, left.position.y, _pm)
+
+# ── Левая колонка: итог забега и действия ────────────────────────────────────
+func _build_go_left(r: Rect2, total_pizzas: int, level_rewards: Array,
+		xp_before: int, level_before: int, _pm: int) -> void:
+	var panel := UiKit.panel(self, r.position, r.size,
+		Color(0.07, 0.07, 0.10, 0.97), 12, Color(0.62, 0.32, 0.34, 0.85), 2)
+	panel.process_mode = _pm
+
+	var x : float = r.position.x + GO_PAD
+	var w : float = r.size.x - GO_PAD * 2.0
+	var y : float = r.position.y + GO_PAD
+
+	# Портрет слева, добыча справа от него — так строка добычи стоит на уровне
+	# глаз, а не под самым низом портрета.
+	const AV : float = 64.0
+	var av_rect := _skin_head_icon(SaveData.active_skin, _max_unlocked_fat(), AV)
+	av_rect.process_mode = _pm
+	UiKit.place(self, av_rect, Vector2(x, y), Vector2(AV, AV))
+
+	var sx0 : float = x + AV + 10.0
+	var sw  : float = w - AV - 10.0
+	_go_stat_row(Vector2(sx0, y + 2.0), sw, PIZZA_TEXTURE, "× %d" % total_pizzas,
+		Color(1.0, 0.88, 0.55), _pm, true)
+	_go_stat_row(Vector2(sx0, y + 26.0), sw, DOLLAR_TEXTURE, "+ %d" % _dollars_this_run,
+		Color(1.0, 0.88, 0.35), _pm, false)
+
+	var t_lbl := Label.new()
+	t_lbl.add_theme_font_override("font", UI_FONT)
+	t_lbl.add_theme_font_size_override("font_size", 12)
+	_apply_menu_caption_fx(t_lbl)
+	t_lbl.text                 = "ВРЕМЯ  %d:%02d" % [int(_elapsed_time) / 60, int(_elapsed_time) % 60]
+	t_lbl.modulate             = Color(0.82, 0.86, 0.94)
+	t_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	t_lbl.process_mode         = _pm
+	t_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, t_lbl, Vector2(sx0, y + 48.0), Vector2(sw, 16.0))
+	y += AV + 8.0
+
+	# История скина: сколько им сыграно и какой у него рекорд. Возвращающемуся
+	# игроку это и есть контекст, в котором его 411 что-то значат.
+	var runs : int = SaveData.get_skin_runs_for(SaveData.active_skin)
+	var hist := Label.new()
+	hist.add_theme_font_override("font", UI_FONT)
+	hist.add_theme_font_size_override("font_size", 10)
+	_apply_menu_caption_fx(hist)
+	hist.text                 = "Забегов этим скином: %d · Рекорд: %d" % [
+		runs, maxi(_go_best_before, total_pizzas)]
+	hist.modulate             = Color(0.72, 0.76, 0.84)
+	hist.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hist.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	hist.process_mode         = _pm
+	hist.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, hist, Vector2(x, y), Vector2(w, 14.0))
+	y += 20.0
+
+	# Строка рекорда — главный довод «ещё раз». Сравнение идёт с рекордом ДО
+	# забега: текущий уже перезаписан начислением.
+	var rec_txt : String
+	var rec_col : Color
+	if _go_best_before <= 0:
+		rec_txt = "ПЕРВЫЙ ЗАБЕГ ЭТИМ СКИНОМ"
+		rec_col = Color(0.80, 0.84, 0.92)
+	elif total_pizzas > _go_best_before:
+		rec_txt = "НОВЫЙ РЕКОРД!  БЫЛО %d" % _go_best_before
+		rec_col = Color(1.0, 0.88, 0.30)
+	else:
+		rec_txt = "ДО РЕКОРДА НЕ ХВАТИЛО %d" % (_go_best_before - total_pizzas)
+		rec_col = Color(0.86, 0.88, 0.95)
+	UiKit.panel(self, Vector2(x, y), Vector2(w, 24.0),
+		Color(0.12, 0.10, 0.14, 0.95), 8,
+		Color(rec_col.r, rec_col.g, rec_col.b, 0.55), 1).process_mode = _pm
+	var rec := Label.new()
+	rec.add_theme_font_override("font", UI_FONT)
+	rec.add_theme_font_size_override("font_size", 11)
+	_apply_menu_caption_fx(rec)
+	rec.text                 = rec_txt
+	rec.modulate             = rec_col
+	rec.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	rec.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	rec.process_mode         = _pm
+	rec.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, rec, Vector2(x, y), Vector2(w, 24.0))
+	y += 30.0
+
+	const BTN_H : float = 36.0
+	var btn_y   : float = r.position.y + r.size.y - GO_PAD - BTN_H
+	var reward_y : float = btn_y - 24.0
+	var xp_y     : float = reward_y - 12.0 - 46.0
+	_build_go_xp_block(x, maxf(y, xp_y), w, xp_before, level_before, _pm)
+
+	# Награда за уровень — появляется по окончании анимации опыта.
+	_go_rewards_node              = Node2D.new()
+	_go_rewards_node.modulate.a   = 0.0
+	_go_rewards_node.process_mode = _pm
+	add_child(_go_rewards_node)
+	if level_rewards.size() > 0:
+		var max_level : int = 0
+		var rd : int = 0
+		var rt : int = 0
+		for rr in level_rewards:
+			max_level = maxi(max_level, int(rr["level"]))
+			rd += int(rr["dollars"])
+			rt += int(rr["tokens"])
+		var bits : Array = []
+		if rd > 0: bits.append("+%d $" % rd)
+		if rt > 0: bits.append("+%d жетон" % rt)
+		var lv := Label.new()
+		lv.add_theme_font_override("font", UI_FONT)
+		lv.add_theme_font_size_override("font_size", 12)
+		_apply_menu_caption_fx(lv)
+		lv.text                 = ("МАСТЕРСТВО!" if max_level == 0 else "УРОВЕНЬ %d!" % max_level) \
+			+ ("   " + "  ".join(bits) if not bits.is_empty() else "")
+		lv.modulate             = Color(1.0, 0.92, 0.25)
+		lv.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lv.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		lv.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+		UiKit.place(_go_rewards_node, lv, Vector2(x, reward_y), Vector2(w, 18.0))
+
+	# Бейдж открытия бесконечного режима — разово, при победе над боссом.
 	if _endless_unlock_pending:
 		_endless_unlock_pending = false
-		var unlock_y : float = panel_y + 40.0
-		var unlock_bg := ColorRect.new()
-		unlock_bg.color        = Color(0.05, 0.18, 0.07, 0.95)
-		unlock_bg.size         = Vector2(panel_w - 32.0, 22.0)
-		unlock_bg.position     = Vector2(panel_x + 16.0, unlock_y)
-		unlock_bg.process_mode = _pm
-		add_child(unlock_bg)
-		var unlock_stripe := ColorRect.new()
-		unlock_stripe.color        = Color(0.45, 1.0, 0.55, 0.85)
-		unlock_stripe.size         = Vector2(panel_w - 32.0, 2.0)
-		unlock_stripe.position     = unlock_bg.position
-		unlock_stripe.process_mode = _pm
-		add_child(unlock_stripe)
-		var unlock_lbl := Label.new()
-		unlock_lbl.add_theme_font_override("font", UI_FONT)
-		unlock_lbl.add_theme_font_size_override("font_size", 11)
-		_apply_menu_caption_fx(unlock_lbl)
-		unlock_lbl.text                 = "БЕСКОНЕЧНЫЙ РЕЖИМ ОТКРЫТ!"
-		unlock_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		unlock_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		unlock_lbl.modulate             = Color(0.55, 1.0, 0.65)
-		unlock_lbl.size                 = Vector2(panel_w - 32.0, 22.0)
-		unlock_lbl.position             = Vector2(panel_x + 16.0, unlock_y)
-		unlock_lbl.process_mode         = _pm
-		add_child(unlock_lbl)
+		UiKit.panel(self, Vector2(x, reward_y - 26.0), Vector2(w, 22.0),
+			Color(0.05, 0.20, 0.08, 0.96), 8, Color(0.45, 1.0, 0.55, 0.85), 2).process_mode = _pm
+		var ul := Label.new()
+		ul.add_theme_font_override("font", UI_FONT)
+		ul.add_theme_font_size_override("font_size", 11)
+		_apply_menu_caption_fx(ul)
+		ul.text                 = "БЕСКОНЕЧНЫЙ РЕЖИМ ОТКРЫТ!"
+		ul.modulate             = Color(0.60, 1.0, 0.70)
+		ul.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		ul.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		ul.process_mode         = _pm
+		ul.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+		UiKit.place(self, ul, Vector2(x, reward_y - 26.0), Vector2(w, 22.0))
 
-	# ── Skin avatar — the run's character, big and centred under the title ──
-	var av_sz   : float   = 78.0
-	var av_x    : float   = panel_x + (panel_w - av_sz) * 0.5
-	var av_y    : float   = panel_y + 48.0
-	var av_rect := _skin_head_icon(SaveData.active_skin, _max_unlocked_fat(), av_sz)
-	av_rect.position          = Vector2(av_x, av_y)
-	av_rect.process_mode      = _pm
-	add_child(av_rect)
+	# «ЕЩЁ РАЗ» — то, чего мы хотим от игрока: вдвое шире выхода и единственная
+	# залитая. Кнопки прижаты к низу панели, их место не зависит от содержимого.
+	var quit_w : float = (w - 10.0) * 0.34
+	var again_w : float = w - 10.0 - quit_w
+	_build_go_action_btn(Vector2(x, btn_y), Vector2(again_w, BTN_H), "ЕЩЁ РАЗ",
+		Color(0.92, 1.0, 0.85), Color(0.22, 0.52, 0.14), _restart_into_new_run, _pm,
+		Color(0.65, 1.0, 0.45, 0.95), 16)
+	_build_go_action_btn(Vector2(x + again_w + 10.0, btn_y), Vector2(quit_w, BTN_H), "ВЫХОД",
+		Color(1.0, 0.80, 0.78), Color(0.14, 0.08, 0.09), _on_death_exit_tapped, _pm,
+		Color(1.0, 0.55, 0.50, 0.90), 13)
 
-	# Per-run earnings row — pizza count + dollars earned, side by side.
-	var stats_y : float = av_y + av_sz + 8.0
-	var pz_icon := _make_icon(PIZZA_TEXTURE, 18.0)
-	pz_icon.position     = Vector2(panel_x + 40.0, stats_y + 2.0)
-	pz_icon.process_mode = _pm
-	add_child(pz_icon)
-	_go_pizza_spawn_pos = pz_icon.position + Vector2(9.0, 9.0)
+func _go_stat_row(pos: Vector2, w: float, tex: Texture2D, text: String,
+		col: Color, _pm: int, is_pizza: bool) -> void:
+	const ICO : float = 20.0
+	var ico := _make_icon(tex, ICO)
+	ico.process_mode = _pm
+	ico.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, ico, pos, Vector2(ICO, ICO))
+	# Точки вылета для анимаций: пиццы летят в полосу опыта, монеты — в баланс.
+	if is_pizza:
+		_go_pizza_spawn_pos = pos + Vector2(ICO * 0.5, ICO * 0.5)
+	else:
+		_go_dollar_spawn_pos = pos + Vector2(ICO * 0.5, ICO * 0.5)
 
-	var pz_lbl := Label.new()
-	pz_lbl.add_theme_font_override("font", UI_FONT)
-	pz_lbl.add_theme_font_size_override("font_size", 15)
-	_apply_menu_caption_fx(pz_lbl)
-	pz_lbl.text                 = "× %d" % total_pizzas
-	pz_lbl.modulate             = Color(1.0, 0.88, 0.55)
-	pz_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	pz_lbl.size                 = Vector2(80.0, 22.0)
-	pz_lbl.position             = Vector2(panel_x + 64.0, stats_y)
-	pz_lbl.process_mode         = _pm
-	add_child(pz_lbl)
+	var lbl := Label.new()
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", 16)
+	_apply_menu_caption_fx(lbl)
+	lbl.text               = text
+	lbl.modulate           = col
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.process_mode       = _pm
+	lbl.mouse_filter       = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, lbl, pos + Vector2(ICO + 6.0, 0.0), Vector2(w - ICO - 6.0, ICO))
 
-	var dl_icon := _make_icon(DOLLAR_TEXTURE, 18.0)
-	dl_icon.position     = Vector2(panel_x + panel_w - 124.0, stats_y + 2.0)
-	dl_icon.process_mode = _pm
-	add_child(dl_icon)
-	_go_dollar_spawn_pos = dl_icon.position + Vector2(9.0, 9.0)
-
-	var dl_lbl := Label.new()
-	dl_lbl.add_theme_font_override("font", UI_FONT)
-	dl_lbl.add_theme_font_size_override("font_size", 15)
-	_apply_menu_caption_fx(dl_lbl)
-	dl_lbl.text                 = "+ %d" % _dollars_this_run
-	dl_lbl.modulate             = Color(1.0, 0.88, 0.35)
-	dl_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	dl_lbl.size                 = Vector2(80.0, 22.0)
-	dl_lbl.position             = Vector2(panel_x + panel_w - 100.0, stats_y)
-	dl_lbl.process_mode         = _pm
-	add_child(dl_lbl)
-
-	# ── Shop-style XP bar block — `ур.N` tags above the bar's edges, fill
-	# below, and a chest sprite on the right that mirrors the shop card
-	# (locked normally, golden + pulse at mastery, tap opens the levels
-	# popup). All sizes copied from `_build_shop_card`'s XP row so the two
-	# layouts read identically.
-	const GO_XP_LBL_H  : float = 12.0
-	const GO_XP_BAR_H  : float = 10.0
-	const GO_BAR_GAP   : float = 3.0
-	const GO_CHEST_SZ  : float = 24.0
-	var bar_pad : float = 22.0
-	var tags_y  : float = stats_y + 32.0
-	var bar_y   : float = tags_y + GO_XP_LBL_H + GO_BAR_GAP
-	var bar_x   : float = panel_x + bar_pad
-	# Leave room on the right for the chest icon — matches the shop card's
-	# layout (`bar_right = cw - 8 - CHEST_SZ - 6`).
-	_go_bar_w = panel_w - bar_pad * 2.0 - GO_CHEST_SZ - 6.0
-	_go_bar_screen_pos = Vector2(bar_x, bar_y)
-
-	# Mastery state is read from SaveData (post-XP), so a run that pushed the
-	# skin past level 10 lights the chest immediately on the death screen.
-	var skin_lvl_now : int  = SaveData.skin_level
-	var go_ready     : bool = skin_lvl_now >= 10
+# Полоса опыта с метками уровней и сундуком мастерства — та же, что на карточке
+# скина, чтобы два экрана читались одинаково.
+func _build_go_xp_block(x: float, y: float, w: float,
+		xp_before: int, level_before: int, _pm: int) -> void:
+	const LBL_H : float = 12.0
+	const BAR_H : float = 12.0
+	const CHEST : float = 24.0
+	_go_bar_w = w - CHEST - 8.0
+	var bar_y : float = y + LBL_H + 3.0
+	_go_bar_screen_pos = Vector2(x, bar_y)
 
 	var cur_tag := Label.new()
 	cur_tag.add_theme_font_override("font", UI_FONT)
 	cur_tag.add_theme_font_size_override("font_size", 9)
 	_apply_menu_caption_fx(cur_tag)
-	cur_tag.text                 = "★" if level_before >= 10 else "ур.%d" % level_before
-	cur_tag.modulate             = Color(0.55, 0.85, 1.0)
-	cur_tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	cur_tag.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	cur_tag.size                 = Vector2(50.0, GO_XP_LBL_H)
-	cur_tag.position             = Vector2(bar_x, tags_y)
-	cur_tag.process_mode         = _pm
-	add_child(cur_tag)
+	cur_tag.text               = "★" if level_before >= 10 else "ур.%d" % level_before
+	cur_tag.modulate           = Color(0.55, 0.85, 1.0)
+	cur_tag.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	cur_tag.process_mode       = _pm
+	cur_tag.mouse_filter       = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, cur_tag, Vector2(x, y), Vector2(50.0, LBL_H))
 
 	_go_level_lbl = Label.new()
 	_go_level_lbl.add_theme_font_override("font", UI_FONT)
@@ -6661,39 +6761,33 @@ func _show_game_over(total_pizzas: int, level_rewards: Array, xp_before: int, le
 	_go_level_lbl.modulate             = Color(0.85, 0.95, 1.0)
 	_go_level_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_go_level_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	_go_level_lbl.size                 = Vector2(50.0, GO_XP_LBL_H)
-	_go_level_lbl.position             = Vector2(bar_x + _go_bar_w - 50.0, tags_y)
 	_go_level_lbl.process_mode         = _pm
-	add_child(_go_level_lbl)
+	_go_level_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, _go_level_lbl, Vector2(x + _go_bar_w - 50.0, y), Vector2(50.0, LBL_H))
 
-	var bar_bg := ColorRect.new()
-	bar_bg.color        = Color(0.11, 0.11, 0.16, 1.0)
-	bar_bg.size         = Vector2(_go_bar_w, GO_XP_BAR_H)
-	bar_bg.position     = Vector2(bar_x, bar_y)
-	bar_bg.process_mode = _pm
-	add_child(bar_bg)
+	UiKit.panel(self, Vector2(x, bar_y), Vector2(_go_bar_w, BAR_H),
+		Color(0.04, 0.04, 0.07, 0.98), 6, Color(0.30, 0.32, 0.40, 0.9), 1).process_mode = _pm
 
 	var old_p := _xp_progress_at(xp_before, level_before)
 	_go_fill_rect = ColorRect.new()
 	_go_fill_rect.color        = Color(0.45, 0.80, 1.0)
-	_go_fill_rect.size         = Vector2(maxf(2.0, _go_bar_w * old_p), GO_XP_BAR_H - 2.0)
-	_go_fill_rect.position     = Vector2(bar_x, bar_y + 1.0)
 	_go_fill_rect.process_mode = _pm
-	add_child(_go_fill_rect)
+	_go_fill_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, _go_fill_rect, Vector2(x + 2.0, bar_y + 2.0),
+		Vector2(maxf(2.0, (_go_bar_w - 4.0) * old_p), BAR_H - 4.0))
 
 	_go_shimmer_rect = ColorRect.new()
 	_go_shimmer_rect.color        = Color(1.0, 1.0, 1.0, 0.20)
-	_go_shimmer_rect.size         = Vector2(maxf(2.0, _go_bar_w * old_p), 3.0)
-	_go_shimmer_rect.position     = Vector2(bar_x, bar_y + 1.0)
 	_go_shimmer_rect.process_mode = _pm
-	add_child(_go_shimmer_rect)
+	_go_shimmer_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, _go_shimmer_rect, Vector2(x + 2.0, bar_y + 2.0),
+		Vector2(maxf(2.0, (_go_bar_w - 4.0) * old_p), 3.0))
 
-	# Chest icon — same sprite as the shop card. Sits right of the bar,
-	# pulses when the active skin is at mastery, and on tap opens the
-	# levels-reward popup for the current skin.
-	var chest_x : float = panel_x + panel_w - bar_pad - GO_CHEST_SZ
-	var chest_y : float = tags_y + (GO_XP_LBL_H + GO_BAR_GAP + GO_XP_BAR_H - GO_CHEST_SZ) * 0.5
-	var chest_root : Control = _draw_shop_card_chest(self, Vector2(chest_x, chest_y), GO_CHEST_SZ, go_ready)
+	# Сундук мастерства — тот же спрайт, что на карточке скина.
+	var go_ready : bool = SaveData.skin_level >= 10
+	var chest_x : float = x + w - CHEST
+	var chest_y : float = y + (LBL_H + 3.0 + BAR_H - CHEST) * 0.5
+	var chest_root : Control = _draw_shop_card_chest(self, Vector2(chest_x, chest_y), CHEST, go_ready)
 	chest_root.process_mode = _pm
 	for c in chest_root.get_children():
 		if c is CanvasItem:
@@ -6706,156 +6800,176 @@ func _show_game_over(total_pizzas: int, level_rewards: Array, xp_before: int, le
 			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 
 	var chest_hit := Button.new()
-	chest_hit.flat       = true
-	chest_hit.focus_mode = Control.FOCUS_NONE
-	chest_hit.size       = Vector2(GO_CHEST_SZ + 12.0, GO_CHEST_SZ + 12.0)
-	chest_hit.position   = Vector2(chest_x - 6.0, chest_y - 6.0)
+	chest_hit.flat         = true
+	chest_hit.focus_mode   = Control.FOCUS_NONE
 	chest_hit.process_mode = _pm
-	chest_hit.pressed.connect(func():
-		_play_btn_sfx()
-		# Popup expects a Control parent; HUD is Node2D-rooted, so wrap a
-		# transient full-screen Control we own and feed that in. ALWAYS-mode
-		# keeps it interactive while the death screen pauses the tree.
-		# MOUSE_FILTER_IGNORE so the empty wrapper doesn't block clicks on the
-		# ЗАНОВО / ВЫХОД buttons after the popup closes itself.
-		var go_popup_root := Control.new()
-		go_popup_root.size         = get_viewport().get_visible_rect().size
-		go_popup_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		go_popup_root.process_mode = Node.PROCESS_MODE_ALWAYS
-		go_popup_root.z_index      = 80
-		add_child(go_popup_root)
-		_show_skin_levels_popup(go_popup_root, SaveData.active_skin)
-		# When the popup queue_frees itself (dim-tap), garbage-collect the
-		# wrapper too so we don't accumulate empty full-screen Controls.
-		var popup_root_node : Node = go_popup_root.get_child(go_popup_root.get_child_count() - 1)
-		if popup_root_node:
-			popup_root_node.tree_exited.connect(func():
-				if is_instance_valid(go_popup_root):
-					go_popup_root.queue_free()
-			)
-	)
+	chest_hit.pressed.connect(_open_go_levels_popup)
 	chest_hit.button_down.connect(_menu_btn_press_anim.bind(chest_root, true))
 	chest_hit.button_up.connect(_menu_btn_press_anim.bind(chest_root, false))
 	chest_hit.mouse_exited.connect(_menu_btn_press_anim.bind(chest_root, false))
-	add_child(chest_hit)
+	UiKit.place(self, chest_hit, Vector2(chest_x - 6.0, chest_y - 6.0),
+		Vector2(CHEST + 12.0, CHEST + 12.0))
 
 	_go_xp_sub_lbl = Label.new()
 	_go_xp_sub_lbl.add_theme_font_override("font", UI_FONT)
-	_go_xp_sub_lbl.add_theme_font_size_override("font_size", 8)
+	_go_xp_sub_lbl.add_theme_font_size_override("font_size", 9)
 	_apply_menu_caption_fx(_go_xp_sub_lbl)
-	_go_xp_sub_lbl.modulate             = Color(0.55, 0.70, 0.90, 0.85)
+	_go_xp_sub_lbl.modulate             = Color(0.62, 0.76, 0.94, 0.95)
 	_go_xp_sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_go_xp_sub_lbl.size                 = Vector2(_go_bar_w, 13.0)
-	_go_xp_sub_lbl.position             = Vector2(bar_x, bar_y + GO_XP_BAR_H + 2.0)
 	_go_xp_sub_lbl.process_mode         = _pm
-	add_child(_go_xp_sub_lbl)
+	_go_xp_sub_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, _go_xp_sub_lbl, Vector2(x, bar_y + BAR_H + 2.0), Vector2(_go_bar_w, 13.0))
 	_update_xp_sub_label(xp_before, level_before)
 
-	# ── "Мой баланс" row — collected dollars fly here and pump the value ──
-	var bal_y : float = bar_y + GO_XP_BAR_H + 22.0
+# Попап уровней ждёт родителя-Control; HUD — Node2D, поэтому заводим временный
+# полноэкранный слой и отдаём его. ALWAYS — экран смерти держит дерево на паузе.
+func _open_go_levels_popup() -> void:
+	_play_btn_sfx()
+	var root := Control.new()
+	root.size         = get_viewport().get_visible_rect().size
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.process_mode = Node.PROCESS_MODE_ALWAYS
+	root.z_index      = 80
+	add_child(root)
+	_show_skin_levels_popup(root, SaveData.active_skin)
+	var popup : Node = root.get_child(root.get_child_count() - 1)
+	if popup:
+		popup.tree_exited.connect(func():
+			if is_instance_valid(root):
+				root.queue_free())
+
+# ── Правая колонка: что ещё можно взять ──────────────────────────────────────
+func _build_go_right(r: Rect2, balance_before_run: int, _pm: int) -> void:
+	var panel := UiKit.panel(self, r.position, r.size,
+		Color(0.07, 0.07, 0.10, 0.97), 12, Color(0.42, 0.48, 0.62, 0.85), 2)
+	panel.process_mode = _pm
+
+	var x : float = r.position.x + GO_PAD
+	var w : float = r.size.x - GO_PAD * 2.0
+	var y : float = r.position.y + GO_PAD
+
+	var cap := Label.new()
+	cap.add_theme_font_override("font", UI_FONT)
+	cap.add_theme_font_size_override("font_size", 11)
+	_apply_menu_caption_fx(cap)
+	cap.text               = "ЗАДАНИЯ ДНЯ"
+	cap.modulate           = Color(1.0, 0.85, 0.35)
+	cap.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	cap.process_mode       = _pm
+	cap.mouse_filter       = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, cap, Vector2(x, y), Vector2(w, 16.0))
+	y += 20.0
+
+	# Баланс прижат к низу — на него летят монеты, и его место не должно
+	# зависеть от числа заданий.
+	const BAL_H : float = 30.0
+	var bal_y : float = r.position.y + r.size.y - GO_PAD - BAL_H
+	var slots : int = QuestManager.daily_quests.size()
+	if slots > 0:
+		var avail : float = bal_y - 10.0 - y
+		var row_h : float = minf(46.0, (avail - 6.0 * float(slots - 1)) / float(slots))
+		for slot in slots:
+			_build_go_quest_row(Vector2(x, y), Vector2(w, row_h), slot, _pm)
+			y += row_h + 6.0
+
+	UiKit.panel(self, Vector2(x, bal_y), Vector2(w, BAL_H),
+		Color(0.11, 0.11, 0.15, 0.95), 8, Color(0.55, 0.50, 0.25, 0.85), 1).process_mode = _pm
 	var bal_hdr := Label.new()
 	bal_hdr.add_theme_font_override("font", UI_FONT)
 	bal_hdr.add_theme_font_size_override("font_size", 10)
 	_apply_menu_caption_fx(bal_hdr)
-	bal_hdr.text                 = "МОЙ БАЛАНС"
-	bal_hdr.modulate             = Color(0.75, 0.80, 0.90, 0.85)
-	bal_hdr.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	bal_hdr.size                 = Vector2(120.0, 18.0)
-	bal_hdr.position             = Vector2(panel_x + bar_pad, bal_y)
-	bal_hdr.process_mode         = _pm
-	add_child(bal_hdr)
+	bal_hdr.text               = "МОЙ БАЛАНС"
+	bal_hdr.modulate           = Color(0.78, 0.82, 0.90, 0.90)
+	bal_hdr.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	bal_hdr.process_mode       = _pm
+	bal_hdr.mouse_filter       = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, bal_hdr, Vector2(x + 8.0, bal_y), Vector2(w * 0.5, BAL_H))
 
 	_go_balance_value  = balance_before_run
 	_go_balance_target = SaveData.dollars
 	_go_balance_lbl = Label.new()
 	_go_balance_lbl.add_theme_font_override("font", UI_FONT)
-	_go_balance_lbl.add_theme_font_size_override("font_size", 13)
+	_go_balance_lbl.add_theme_font_size_override("font_size", 14)
 	_apply_menu_caption_fx(_go_balance_lbl)
 	_go_balance_lbl.text                 = "%d $" % balance_before_run
 	_go_balance_lbl.modulate             = Color(1.0, 0.88, 0.35)
 	_go_balance_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_go_balance_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	_go_balance_lbl.size                 = Vector2(panel_w - bar_pad * 2.0 - 120.0, 18.0)
-	_go_balance_lbl.position             = Vector2(panel_x + bar_pad + 120.0, bal_y)
 	_go_balance_lbl.process_mode         = _pm
-	add_child(_go_balance_lbl)
-	_go_balance_anchor = _go_balance_lbl.position + Vector2(_go_balance_lbl.size.x - 28.0, 9.0)
+	_go_balance_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, _go_balance_lbl, Vector2(x + w * 0.5 - 8.0, bal_y),
+		Vector2(w * 0.5, BAL_H))
+	_go_balance_anchor = _go_balance_lbl.position + Vector2(_go_balance_lbl.size.x - 20.0, BAL_H * 0.5)
 
-	# Rewards node — hidden until animation finishes
-	_go_rewards_node              = Node2D.new()
-	_go_rewards_node.position     = Vector2(0, 0)
-	_go_rewards_node.modulate.a   = 0.0
-	_go_rewards_node.process_mode = _pm
-	add_child(_go_rewards_node)
+func _build_go_quest_row(pos: Vector2, size: Vector2, slot: int, _pm: int) -> void:
+	var q     : Dictionary = QuestManager.daily_quests[slot]
+	var on_cd : bool = QuestManager.is_slot_on_cooldown(slot)
+	var done  : bool = bool(q.get("completed", false))
+	var taken : bool = bool(q.get("claimed", false))
+	var def   : Dictionary = QuestManager._daily_def(slot)
 
-	var rw_y : float = bal_y + 26.0
-	if level_rewards.size() > 0:
-		var max_level : int = 0
-		for r in level_rewards:
-			if int(r["level"]) > max_level:
-				max_level = int(r["level"])
+	UiKit.panel(self, pos, size,
+		Color(0.06, 0.06, 0.09, 0.90) if on_cd else Color(0.11, 0.11, 0.15, 0.95), 8,
+		Color(0.45, 1.0, 0.55, 0.65) if (done and not on_cd) else Color(0.26, 0.27, 0.34, 0.85),
+		1).process_mode = _pm
 
-		var lv_text  := "МАСТЕРСТВО!" if max_level == 0 else "УРОВЕНЬ %d!" % max_level
-		var lv_label := Label.new()
-		lv_label.add_theme_font_override("font", UI_FONT)
-		lv_label.add_theme_font_size_override("font_size", 12)
-		_apply_menu_caption_fx(lv_label)
-		lv_label.text                 = lv_text
-		lv_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		lv_label.modulate             = Color(1.0, 0.92, 0.20)
-		lv_label.size                 = Vector2(panel_w, 18)
-		lv_label.position             = Vector2(panel_x, rw_y)
-		_go_rewards_node.add_child(lv_label)
-		rw_y += 20.0
+	var title := Label.new()
+	title.add_theme_font_override("font", UI_FONT)
+	title.add_theme_font_size_override("font_size", 11)
+	_apply_menu_caption_fx(title)
+	title.text                  = "—" if on_cd else String(def.get("title", ""))
+	title.modulate              = Color(0.96, 0.97, 1.0) if not on_cd else Color(0.65, 0.66, 0.72)
+	title.vertical_alignment    = VERTICAL_ALIGNMENT_CENTER
+	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	title.process_mode          = _pm
+	title.mouse_filter          = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, title, pos + Vector2(8.0, 3.0), Vector2(size.x - 16.0, 15.0))
 
-		var reward_bits : Array = []
-		if level_reward_d > 0:
-			reward_bits.append("+%d $" % level_reward_d)
-		if level_reward_t > 0:
-			reward_bits.append("+%d жетон" % level_reward_t)
-		if not reward_bits.is_empty():
-			var rw_label := Label.new()
-			rw_label.add_theme_font_override("font", UI_FONT)
-			rw_label.add_theme_font_size_override("font_size", 10)
-			_apply_menu_caption_fx(rw_label)
-			rw_label.text                 = "  ".join(reward_bits)
-			rw_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			rw_label.modulate             = Color(0.45, 1.0, 0.55)
-			rw_label.size                 = Vector2(panel_w, 16)
-			rw_label.position             = Vector2(panel_x, rw_y)
-			_go_rewards_node.add_child(rw_label)
-			rw_y += 18.0
+	var line : String
+	var frac : float
+	var col  : Color = Color(0.55, 0.85, 1.0)
+	if on_cd:
+		line = "новое завтра"
+		frac = 0.0
+		col  = Color(0.45, 0.46, 0.52)
+	elif taken:
+		line = "ЗАБРАНО"
+		frac = 1.0
+		col  = Color(0.45, 0.80, 0.35)
+	elif done:
+		line = "ГОТОВО"
+		frac = 1.0
+		col  = Color(0.45, 1.00, 0.55)
+	else:
+		var pr : Vector2i = QuestManager.daily_progress(slot)
+		line = QuestManager.daily_progress_text(slot)
+		frac = float(pr.x) / maxf(1.0, float(pr.y))
+	_go_bar(pos + Vector2(8.0, size.y - 19.0), size.x - 16.0, 14.0, frac, col, line, _pm)
 
-	# Optional rank block (endless mode only) — anchored just above the buttons.
-	if show_rank_block:
-		_build_go_rank_block(panel_x, panel_y, panel_w, _pm, panel_h)
-
-	# Buttons — two of them, with the standard press-shrink FX from the menu.
-	var btn_y   : float = panel_y + panel_h - 50.0
-	var btn_w   : float = 124.0
-	var btn_h   : float = 38.0
-	var btn_gap : float = 18.0
-	var total_w : float = btn_w * 2.0 + btn_gap
-	var btns_x  : float = panel_x + (panel_w - total_w) * 0.5
-
-	_build_go_action_btn(Vector2(btns_x, btn_y), Vector2(btn_w, btn_h),
-		"ЗАНОВО", Color(0.45, 1.0, 0.55), Color(0.08, 0.22, 0.10),
-		_restart_into_new_run, _pm)
-	_build_go_action_btn(Vector2(btns_x + btn_w + btn_gap, btn_y), Vector2(btn_w, btn_h),
-		"ВЫХОД", Color(1.0, 0.55, 0.55), Color(0.20, 0.07, 0.07),
-		_on_death_exit_tapped, _pm)
-
-	# Kick off the end-of-run animation.
-	_run_xp_animation(xp_before, level_before, total_pizzas)
-	# Stream the collected dollars into the balance label in parallel with the
-	# pizza→XP animation so the run earnings visibly arrive in the wallet.
-	_spawn_dollar_fly_to_balance(_dollars_this_run)
-
-	# Дев-кнопки экрана смерти были единственными, что не спрашивало DevFlags, —
-	# в релизной сборке «+1000 XP» и «СБРОС УР.» уезжали к игроку. Теперь они под
-	# тем же рубильником, что и остальной дев-инструмент.
-	if DevFlags.ENABLED:
-		_build_go_dev_xp_btns(vp, panel_y, _pm)
+func _go_bar(pos: Vector2, w: float, h: float, frac: float, col: Color,
+		text: String, _pm: int) -> void:
+	UiKit.panel(self, pos, Vector2(w, h),
+		Color(0.03, 0.03, 0.05, 0.95), 6, Color(0.28, 0.30, 0.38, 0.9), 1).process_mode = _pm
+	var f : float = clampf(frac, 0.0, 1.0)
+	if f > 0.0:
+		var fill := Panel.new()
+		fill.add_theme_stylebox_override("panel", UiKit.rounded(
+			Color(col.r, col.g, col.b, 0.85), 5))
+		fill.process_mode = _pm
+		fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		UiKit.place(self, fill, pos + Vector2(2.0, 2.0),
+			Vector2(maxf(3.0, (w - 4.0) * f), h - 4.0))
+	var l := Label.new()
+	l.add_theme_font_override("font", UI_FONT)
+	l.add_theme_font_size_override("font_size", 9)
+	_apply_menu_caption_fx(l)
+	l.text                 = text
+	l.modulate             = Color(1, 1, 1)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	l.process_mode         = _pm
+	l.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(self, l, pos, Vector2(w, h))
 
 # Быстрая прокачка скина прямо с экрана смерти: четыре кнопки опыта и сброс
 # уровня. Нужны, чтобы за минуту прогнать скин по всей лестнице наград.
@@ -6960,9 +7074,12 @@ func _update_xp_sub_label(xp: int, level: int) -> void:
 		var in_cycle := over % SaveData.MASTERY_XP_PER_TOKEN
 		_go_xp_sub_lbl.text = "%d / %d XP" % [in_cycle, SaveData.MASTERY_XP_PER_TOKEN]
 	else:
-		var from_xp = SaveData.LEVEL_XP[level - 1]
-		var to_xp   = SaveData.LEVEL_XP[level]
-		_go_xp_sub_lbl.text = "%d / %d XP" % [xp - from_xp, to_xp - from_xp]
+		var from_xp : int = SaveData.LEVEL_XP[level - 1]
+		var to_xp   : int = SaveData.LEVEL_XP[level]
+		# clamp: при рассинхроне уровня и опыта (дев-сброс, правка сейва) разница
+		# уходила в минус, и на экране печаталось «-6789 / 8400 XP».
+		var have : int = clampi(xp - from_xp, 0, to_xp - from_xp)
+		_go_xp_sub_lbl.text = "%d / %d XP" % [have, to_xp - from_xp]
 
 # Sprays N dollar icons from the "+%d $" row toward the "Мой баланс" label
 # and bumps the visible balance value each time one lands — mirrors the
@@ -7978,49 +8095,36 @@ func _build_go_rank_row(row_x: float, y: float, row_w: float,
 # Death-screen action button — visual wrapper Control + Label + hit Button
 # so the standard press-shrink FX (`_menu_btn_press_anim`) applies cleanly.
 func _build_go_action_btn(pos: Vector2, sz: Vector2, caption: String,
-		fg: Color, bg: Color, action: Callable, pm: int) -> void:
+		fg: Color, bg: Color, action: Callable, pm: int,
+		border: Color = Color(0, 0, 0, 0), font_sz: int = 14) -> void:
 	var visual := Control.new()
-	visual.size         = sz
-	visual.position     = pos
 	visual.pivot_offset = sz * 0.5
 	visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	visual.process_mode = pm
-	add_child(visual)
+	UiKit.place(self, visual, pos, sz)
 
-	var bg_rect := ColorRect.new()
-	bg_rect.color        = bg
-	bg_rect.size         = sz
-	bg_rect.position     = Vector2.ZERO
+	var bg_rect := Panel.new()
+	bg_rect.add_theme_stylebox_override("panel", UiKit.rounded(bg, 8,
+		border if border.a > 0.0 else Color(fg.r, fg.g, fg.b, 0.80), 2))
 	bg_rect.mouse_filter = Control.MOUSE_FILTER_PASS
 	bg_rect.process_mode = pm
-	visual.add_child(bg_rect)
-
-	var stripe := ColorRect.new()
-	stripe.color        = Color(fg.r, fg.g, fg.b, 0.80)
-	stripe.size         = Vector2(sz.x, 2.0)
-	stripe.position     = Vector2.ZERO
-	stripe.mouse_filter = Control.MOUSE_FILTER_PASS
-	stripe.process_mode = pm
-	visual.add_child(stripe)
+	UiKit.place(visual, bg_rect, Vector2.ZERO, sz)
 
 	var lbl := Label.new()
 	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 14)
+	lbl.add_theme_font_size_override("font_size", font_sz)
 	_apply_menu_caption_fx(lbl)
 	lbl.text                 = caption
 	lbl.modulate             = fg
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.size                 = sz
-	lbl.position             = Vector2.ZERO
 	lbl.process_mode         = pm
-	visual.add_child(lbl)
+	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(visual, lbl, Vector2.ZERO, sz)
 
 	var hit := Button.new()
-	hit.flat       = true
-	hit.focus_mode = Control.FOCUS_NONE
-	hit.size       = sz
-	hit.position   = pos
+	hit.flat         = true
+	hit.focus_mode   = Control.FOCUS_NONE
 	hit.process_mode = pm
 	hit.pressed.connect(func():
 		_play_btn_sfx()
@@ -8029,7 +8133,7 @@ func _build_go_action_btn(pos: Vector2, sz: Vector2, caption: String,
 	hit.button_down.connect(_menu_btn_press_anim.bind(visual, true))
 	hit.button_up.connect(_menu_btn_press_anim.bind(visual, false))
 	hit.mouse_exited.connect(_menu_btn_press_anim.bind(visual, false))
-	add_child(hit)
+	UiKit.place(self, hit, pos, sz)
 
 # Exit button — quits to the main menu, matching the old МЕНЮ button. The
 # scene reload achieves that cleanly because the run lives in a single scene.

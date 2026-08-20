@@ -72,6 +72,16 @@ func _texts(node: Node, out: Array) -> Array:
 		_texts(c, out)
 	return out
 
+# Точное совпадение подписи. Подстрокой считать нельзя: названия заданий
+# пересекаются между собой и с другими подписями экрана, и тест начинает падать
+# от того, какие задания сегодня выпали.
+func _count_exact(arr: Array, needle: String) -> int:
+	var n := 0
+	for t in arr:
+		if String(t) == needle:
+			n += 1
+	return n
+
 func _count(arr: Array, needle: String) -> int:
 	var n := 0
 	for t in arr:
@@ -181,7 +191,7 @@ func _test_quests(hud: Node) -> void:
 		var def : Dictionary = qm.call("_daily_def", slot)
 		if bool(qm.call("is_slot_on_cooldown", slot)):
 			continue
-		if _count(txt, String(def.get("title", ""))) != 1:
+		if _count_exact(txt, String(def.get("title", ""))) != 1:
 			missing.append(def.get("title", ""))
 	_check(missing.is_empty(), "все задания дня перечислены: нет %s" % [missing])
 	_check(_count(txt, "ЗАДАНИЯ ДНЯ") == 1, "заголовок блока заданий на месте")
