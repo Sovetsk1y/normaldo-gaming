@@ -38,6 +38,42 @@ static func place(parent: Node, ctrl: Control, pos: Vector2, size: Vector2) -> C
 	ctrl.size     = size
 	return ctrl
 
+# Усадка при нажатии. Один тайминг на всю игру.
+const PRESS_SCALE : float = 0.90
+const PRESS_TIME  : float = 0.07
+
+# Кнопка переживает свой экран, и об этом надо помнить ЗДЕСЬ, а не в каждом
+# экране заново.
+#
+# Порядок сигналов у Godot такой: `pressed` → `button_up`. То есть обработчик
+# нажатия успевает увести игрока с экрана ДО того, как придёт отпускание, а за
+# ним ещё и `mouse_exited` — вьюпорт шлёт его кнопке, когда её вынимают из
+# дерева. Выход из забега при этом делает reload_current_scene(), а тот вынимает
+# сцену из дерева СРАЗУ и удаляет только на следующем кадре: в этом окне узел
+# ещё `is_instance_valid()`, но create_tween() уже возвращает null. Отсюда
+# «Cannot call method 'set_pause_mode' on a null value» по кнопке выхода.
+#
+# Проверять надо не валидность узла, а то, что он в дереве. Размер выставляем
+# напрямую: анимировать уже нечего, но масштаб обязан вернуться к единице —
+# иначе усаженная кнопка такой и останется на снимке экрана.
+static func press_anim(visual_root: Control, pressed: bool) -> void:
+	if not is_instance_valid(visual_root):
+		return
+	var target := Vector2.ONE * (PRESS_SCALE if pressed else 1.0)
+	if not visual_root.is_inside_tree():
+		visual_root.scale = target
+		return
+	# Твин привязан к тому, что анимирует, — и умирает вместе с ним.
+	var tw := visual_root.create_tween()
+	if tw == null:
+		visual_root.scale = target
+		return
+	# Экраны паузы и настроек живут поверх остановленного дерева: без этого
+	# усадка на них замирает нажатой.
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_property(visual_root, "scale", target, PRESS_TIME)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+
 # Панель со скруглением — самый частый вызов, чтобы не писать три строки подряд.
 static func panel(parent: Node, pos: Vector2, size: Vector2, fill: Color,
 		radius: int, border: Color = Color(0, 0, 0, 0), border_w: int = 2) -> Panel:

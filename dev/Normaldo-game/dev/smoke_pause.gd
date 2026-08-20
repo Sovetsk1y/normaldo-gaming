@@ -44,6 +44,8 @@ func _initialize() -> void:
 	await _test_quit(hud)
 	print("── Настройки с паузы ──")
 	await _test_settings(hud)
+	print("── Усадка переживает уход с экрана ──")
+	await _test_press_anim()
 
 	print("")
 	if _fails == 0:
@@ -245,3 +247,35 @@ func _test_settings(hud: Node) -> void:
 	_check(get_root().get_tree().paused and is_instance_valid(scr),
 		"закрыли настройки — вернулись на паузу")
 	await _shut(hud)
+
+# Кнопка живёт дольше своего экрана. Сигналы у Godot идут в порядке
+# `pressed` → `button_up`, а следом вьюпорт шлёт `mouse_exited`, когда вынимает
+# кнопку из дерева — то есть усадка доигрывает УЖЕ ПОСЛЕ того, как обработчик
+# увёл игрока с экрана. Выход из забега при этом зовёт reload_current_scene(),
+# который вынимает сцену из дерева сразу, а удаляет через кадр: в этом окне узел
+# ещё is_instance_valid(), но create_tween() возвращает null, и кнопка выхода
+# валилась «Cannot call method 'set_pause_mode' on a null value».
+func _test_press_anim() -> void:
+	var host := Control.new()
+	get_root().add_child(host)
+	var visual := Control.new()
+	visual.size = Vector2(40, 20)
+	host.add_child(visual)
+	await process_frame
+
+	UiKit.press_anim(visual, true)
+	for _i in 12:
+		await process_frame
+	_check(visual.scale.x < 0.95, "в дереве усадка анимируется: ×%.2f" % visual.scale.x)
+
+	# Тот самый кадр: узел отцеплен, но ещё жив.
+	host.remove_child(visual)
+	_check(is_instance_valid(visual) and not visual.is_inside_tree(),
+		"узел вне дерева, но валиден — is_instance_valid() тут не защита")
+	UiKit.press_anim(visual, false)
+	_check(is_equal_approx(visual.scale.x, 1.0),
+		"вне дерева масштаб возвращается напрямую: ×%.2f" % visual.scale.x)
+
+	visual.free()
+	host.free()
+	await process_frame

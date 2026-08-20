@@ -1662,27 +1662,14 @@ func _build_menu_canvas_btn(
 	return hit
 
 # Press-down / press-up tween for menu buttons. Scales the visual container so
-# the icon + glow + caption + badge all shrink together. Snappy timing (~70 ms)
-# gives a tactile feel without slowing the player down.
-const MENU_BTN_PRESS_SCALE : float = 0.90
-const MENU_BTN_PRESS_TIME  : float = 0.07
+# the icon + glow + caption + badge all shrink together.
+#
+# Тот же кирпич, что у всех экранов: и тайминг, и — главное — разбор случая,
+# когда кнопка переживает свой экран. Раньше защита от него стояла ТОЛЬКО здесь,
+# а шесть копий этого же хелпера по экранам её не имели, и выход из забега по
+# кнопке паузы валился «Cannot call method 'set_pause_mode' on a null value».
 func _menu_btn_press_anim(visual_root: Control, pressed: bool) -> void:
-	if not is_instance_valid(visual_root):
-		return
-	# Tween bound to this node — bails out if the HUD has already started
-	# leaving the tree (e.g. button_up firing after _restart_into_new_run
-	# queues a scene reload). Set the scale directly so the visual still
-	# resets to the right value even though we can't animate it.
-	var target := Vector2.ONE * (MENU_BTN_PRESS_SCALE if pressed else 1.0)
-	if not is_inside_tree():
-		visual_root.scale = target
-		return
-	var tw := create_tween()
-	if tw == null:
-		visual_root.scale = target
-		return
-	tw.tween_property(visual_root, "scale", target, MENU_BTN_PRESS_TIME)\
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	UiKit.press_anim(visual_root, pressed)
 
 func _attach_canvas_badge(parent: Button, visible_on_start: bool) -> TextureRect:
 	var badge := TextureRect.new()
@@ -7137,6 +7124,14 @@ func _spawn_pizza_fly() -> void:
 		tw.parallel().tween_property(fly, "modulate:a", 0.0, 0.18).set_delay(0.30)
 		tw.tween_callback(fly.queue_free)
 
+# Анимации экрана смерти асинхронные, а «ЕЩЁ РАЗ» и «ВЫХОД» под ними
+# перезагружают сцену. reload_current_scene() вынимает сцену из дерева СРАЗУ, а
+# удаляет только на следующем кадре: корутина, проснувшаяся в этом окне, видит
+# валидный, но уже отцепленный HUD — и create_tween() возвращает ей null.
+# is_instance_valid() тут не спасает, проверять надо дерево.
+func _go_anim_alive() -> bool:
+	return is_inside_tree()
+
 func _fill_xp_segment(from_p: float, to_p: float) -> void:
 	if not _go_fill_rect or not is_instance_valid(_go_fill_rect):
 		return
@@ -7162,6 +7157,8 @@ func _flash_level_up_bar(new_level: int, reward_d: int, reward_t: int) -> void:
 	tw_fill.tween_property(_go_fill_rect,    "size:x", _go_bar_w, 0.18)
 	tw_fill.parallel().tween_property(_go_shimmer_rect, "size:x", _go_bar_w, 0.18)
 	await tw_fill.finished
+	if not _go_anim_alive():
+		return
 	var tw_flash := create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
 	tw_flash.tween_property(_go_fill_rect, "color", Color(1.0, 0.85, 0.20), 0.12)
 	tw_flash.tween_property(_go_fill_rect, "color", Color(0.22, 0.58, 1.0), 0.30)
@@ -7464,6 +7461,8 @@ func _show_level_reward_popup(new_level: int, reward_d: int, reward_t: int) -> v
 
 	# Wait for player to collect
 	await collect_btn.pressed
+	if not _go_anim_alive():
+		return
 	_play_btn_sfx()
 
 	# Fade out
@@ -7530,7 +7529,7 @@ func _run_xp_animation(xp_before: int, level_before: int, xp_gained: int) -> voi
 			_update_xp_sub_label(cur_xp, cur_level)
 
 	# Reveal rewards
-	if _go_rewards_node and is_instance_valid(_go_rewards_node):
+	if _go_rewards_node and is_instance_valid(_go_rewards_node) and _go_anim_alive():
 		var tw := create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
 		tw.tween_property(_go_rewards_node, "modulate:a", 1.0, 0.35)
 	_go_anim_busy = false
@@ -8349,6 +8348,10 @@ func _show_prize_claim_modal(reward: Dictionary) -> void:
 	tw.tween_property(root, "modulate:a", 1.0, 0.30)
 
 func _spawn_confetti(parent: Node, vp: Vector2, count: int) -> void:
+	# Конфетти сыплется по итогам асинхронной анимации: если экран к этому
+	# моменту уехал, класть частицы некуда — create_tween() на них вернёт null.
+	if not is_instance_valid(parent) or not parent.is_inside_tree():
+		return
 	var palette : Array = [
 		Color(1.0, 0.85, 0.35),
 		Color(0.55, 0.85, 1.0),

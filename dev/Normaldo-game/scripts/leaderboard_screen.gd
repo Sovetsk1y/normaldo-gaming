@@ -331,15 +331,8 @@ func _apply_text_fx(lbl: Label) -> void:
 	lbl.add_theme_constant_override("shadow_outline_size", 3)
 
 # Press feedback for tap-targets — mirrors the main-menu chip shrink.
-const _PRESS_SCALE : float = 0.90
-const _PRESS_TIME  : float = 0.07
 func _press_anim(visual_root: Control, pressed: bool) -> void:
-	if not is_instance_valid(visual_root):
-		return
-	var target := Vector2.ONE * (_PRESS_SCALE if pressed else 1.0)
-	var tw := create_tween()
-	tw.tween_property(visual_root, "scale", target, _PRESS_TIME)\
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	UiKit.press_anim(visual_root, pressed)
 
 # Top-right resources (dollar + token), mirroring the quests / book chrome.
 func _build_top_resources(vp: Vector2, scale_x: float, scale_y: float) -> void:

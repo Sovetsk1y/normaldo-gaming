@@ -317,15 +317,8 @@ func _build_resource_strip(vp: Vector2) -> void:
 
 # Press-feedback for tap-targets — mirrors the main-menu button shrink so the
 # back arrow squeezes the same way as the chips that opened this screen.
-const _PRESS_SCALE : float = 0.90
-const _PRESS_TIME  : float = 0.07
 func _press_anim(visual_root: Control, pressed: bool) -> void:
-	if not is_instance_valid(visual_root):
-		return
-	var target := Vector2.ONE * (_PRESS_SCALE if pressed else 1.0)
-	var tw := create_tween()
-	tw.tween_property(visual_root, "scale", target, _PRESS_TIME)\
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	UiKit.press_anim(visual_root, pressed)
 
 # Russo One text — black outline + soft shadow (same spec as the main-menu
 # button captions). Pulled into a single helper so every label on this screen
