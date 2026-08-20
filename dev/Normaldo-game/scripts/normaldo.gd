@@ -505,6 +505,11 @@ func boss_face_factor(target_h: float) -> float:
 		return 6.0
 	return clampf(target_h / h, 1.5, 40.0)
 
+# Публичная обёртка: fat_boss.gd считает по ней якорь — насколько отодвинуть
+# центр головы от края, чтобы на экране было три четверти лица.
+func boss_head_px() -> Vector2:
+	return _boss_head_px()
+
 # Размер нарисованной головы в экранных пикселях при масштабе 1 — по замеру
 # ИМЕННО ЭТОГО состояния жира.
 func _boss_head_px() -> Vector2:

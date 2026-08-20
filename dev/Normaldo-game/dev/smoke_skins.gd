@@ -239,7 +239,7 @@ func _test_sizes(reg: Node, save: Node) -> void:
 	await process_frame
 
 # ЖИРОБОСС должен для КАЖДОГО скина и КАЖДОГО состояния жира встать одинаково:
-# голова ростом с экран, центром на левом крае — видно ровно половину лица. И
+# голова ростом с экран, у левого края, но В КАДРЕ — видно три четверти лица. И
 # хитбокс обязан помещаться в нарисованную голову: круг больше головы означает,
 # что предметы лопаются в пустоте перед лицом, «об невидимую стену».
 func _test_boss(reg: Node, save: Node) -> void:
@@ -253,12 +253,13 @@ func _test_boss(reg: Node, save: Node) -> void:
 	spawner.clear_items()
 	var vp : Vector2 = get_root().get_visible_rect().size
 
-	_check(is_equal_approx(boss.boss_anchor(vp).x, 0.0),
-		"голова босса ставится центром на левый край: x = %.0f" % boss.boss_anchor(vp).x)
-
 	var target_h : float = vp.y * float(boss.BOSS_FACE_H)
 	var bad_size : Array = []
 	var bad_box  : Array = []
+	# Якорь считается от ШИРИНЫ ГОЛОВЫ, поэтому его надо проверять у каждого
+	# скина: у широкой головы (классика с хвостами повязки) смещение упирается
+	# в верхнюю границу, и в кадре остаётся меньше задуманного.
+	var bad_frame : Array = []
 	for sk in reg.SKINS:
 		var id := String(sk["id"])
 		save.active_skin = id
@@ -283,8 +284,15 @@ func _test_boss(reg: Node, save: Node) -> void:
 			# Круг обязан быть внутри овала головы по ОБЕИМ сторонам.
 			if r > hw * 0.5 + 0.5 or r > hh * 0.5 + 0.5:
 				bad_box.append("%s/%d r=%.0f при голове %.0fx%.0f" % [id, fat, r, hw, hh])
+			# Лицо в кадре: не половина, как раньше, но и не весь экран.
+			boss.call("_refresh_max_factor")
+			var ax  : float = boss.boss_anchor(vp).x
+			var vis : float = (minf(vp.x, ax + hw * 0.5) - maxf(0.0, ax - hw * 0.5)) / hw
+			if vis < 0.60 or ax < vp.x * 0.03 or ax > vp.x * 0.23:
+				bad_frame.append("%s/%d в кадре %.0f%% при якоре %.0f" % [id, fat, vis * 100.0, ax])
 	_check(bad_size.is_empty(), "голова босса ростом с экран у всех, мимо: %s" % [bad_size])
 	_check(bad_box.is_empty(), "хитбокс внутри головы у всех, торчит: %s" % [bad_box])
+	_check(bad_frame.is_empty(), "лицо в кадре у всех, обрезаны: %s" % [bad_frame])
 
 	# Живая проверка: предмет обязан ДОЛЕТЕТЬ до лица, а не лопнуть перед ним.
 	save.active_skin = "classic"
@@ -313,12 +321,16 @@ func _test_boss(reg: Node, save: Node) -> void:
 		if not is_instance_valid(pizza):
 			break
 		hit_x = pizza.position.x
-	_check(hit_x >= 0.0 and hit_x <= face_r + 4.0,
-		"предмет исчезает НА лице, а не перед ним: x=%.0f при краю лица %.0f" % [hit_x, face_r])
+	# Край лица считается ОТ ЯКОРЯ, а не от нуля: голова больше не стоит центром
+	# на краю кадра.
+	var face_edge : float = float((normaldo.get("position") as Vector2).x) + face_r
+	_check(hit_x >= 0.0 and hit_x <= face_edge + 4.0,
+		"предмет исчезает НА лице, а не перед ним: x=%.0f при краю лица %.0f" % [hit_x, face_edge])
 	normaldo.call("end_fat_boss")
 
-	# После мини-игры голову обязано вернуть в забег: якорь босса стоит на самом
-	# краю экрана, и оставить её там значит продолжить забег вплотную к краю.
+	# После мини-игры голову обязано вернуть ровно туда, откуда забрали: якорь
+	# босса и обычная позиция забега теперь рядом, и «поправка» точки возврата
+	# не должна дёргать голову с места.
 	normaldo.position = Vector2(220.0, 215.0)
 	var home : Vector2 = normaldo.position
 	boss.call("_run_grow")

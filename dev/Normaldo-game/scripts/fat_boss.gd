@@ -70,18 +70,18 @@ const BOSS_FACE_H : float = 1.05
 const BAR_START     : float = 1.0            # мутаген взят — ты СРАЗУ огромный
 # Пол размера: даже на нуле жира голова заметно больше обычной, иначе последние
 # секунды босс уже не босс, а предметы летят сквозь маленькую голову.
-const FAT_FLOOR     : float = 0.40
+const FAT_FLOOR     : float = 0.28
 # ПОТОЛОК: выше пика можно раздуться ещё на 10 %, и всё. Дальше тап не растит
 # размер — он только дольше удерживает набранное, а с течением времени и это
 # слабеет (см. `tap_stamina`). Так у мэшинга есть видимая верхняя точка.
-const OVERSHOOT_MAX : float = 1.10
+const OVERSHOOT_MAX : float = 1.50
 # Сдувание БЫСТРОЕ: без тапов пик уходит примерно за 2.5 c. Мини-игра должна
 # ощущаться как удержание, а не как медленное таяние.
-const BAR_DECAY     : float = 0.22
-const BAR_DECAY_RAMP: float = 0.75
+const BAR_DECAY     : float = 0.30
+const BAR_DECAY_RAMP: float = 0.95
 # И тап даёт МНОГО: голова заметно вспухает на каждом. Раньше прибавка была
 # 0.075 при медленном сливе — вместе это читалось как «он еле трясётся».
-const BAR_TAP_GAIN  : float = 0.16
+const BAR_TAP_GAIN  : float = 0.26
 # Отдача чуть падает по мере набора — но основную работу делает не она, а
 # потолок сверху и затухание со временем.
 const BAR_TAP_FALLOFF : float = 0.55
@@ -128,8 +128,8 @@ const DEFLATE_T : float = 0.6
 
 # Скачок размера на тап: накапливается, стухает за пару кадров. Именно он даёт
 # ощущение «получается» — без него тап виден только по полоске.
-const TAP_PULSE_GAIN : float = 0.07
-const TAP_PULSE_MAX  : float = 0.16
+const TAP_PULSE_GAIN : float = 0.17
+const TAP_PULSE_MAX  : float = 0.50
 
 const PROMPT_REAPPEAR : float = 0.55         # idle gap before the tap-prompt returns
 
@@ -287,23 +287,37 @@ func _freeze_run() -> void:
 	if is_instance_valid(_background):
 		_background.stop_scrolling()
 
-# Куда ставится голова на время френзи: ЦЕНТРОМ ровно на левый край кадра.
-# Спрайт скина посажен так, что центр головы совпадает с началом координат узла
-# (см. normaldo._apply_head_offset), поэтому на экране остаётся ровно правая
-# половина головы — половина лица, как и задумано.
-# Куда вернуть голову после мини-игры. Брать текущую позицию «как есть» нельзя:
-# если мини-игра почему-то начинается, когда голова УЖЕ стоит на якоре босса
-# (левый край), то забег после неё продолжится вплотную к краю, и играть
-# станет невозможно. В таком случае возвращаем на обычное игровое место.
-const RETURN_X_FRAC : float = 0.28
+# Куда вернуть голову после мини-игры. Позиция забега берётся как есть, с одной
+# поправкой: вплотную к левому краю играть невозможно — предметы прилетают уже
+# на голову, увернуться нечем.
+#
+# Раньше здесь стояла проверка «а не стоим ли мы прямо на якоре босса»: якорь
+# был на самом краю кадра, и совпадение с ним однозначно значило «возвращать
+# некуда». Теперь якорь сам стоит в играбельном месте (~0.22 ширины), и такая
+# проверка начала перехватывать ОБЫЧНУЮ позицию забега — стартовая x = 220
+# отличается от якоря на девять пикселей, и забег после мини-игры телепортировал
+# голову вправо ни за чем. Сравнивать надо не с якорем, а с краем.
+const RETURN_MIN_FRAC : float = 0.12
 func _safe_return_pos(vp: Vector2) -> Vector2:
 	var pos : Vector2 = _normaldo.position
-	if absf(pos.x - boss_anchor(vp).x) < vp.x * 0.06:
-		return Vector2(vp.x * RETURN_X_FRAC, pos.y)
-	return pos
+	return Vector2(maxf(pos.x, vp.x * RETURN_MIN_FRAC), pos.y)
+
+# Доля головы, которая обязана быть видна в фазе Б. Раньше якорь стоял ровно на
+# левом краю (`x = 0`) — за экраном оставалась ПОЛОВИНА лица. Теперь центр
+# отодвинут вправо ровно настолько, чтобы на экране было ~три четверти головы.
+const BOSS_VISIBLE_FRAC : float = 0.78
 
 func boss_anchor(vp: Vector2) -> Vector2:
-	return Vector2(0.0, vp.y * 0.5)
+	var half_out : float = _boss_head_w() * (BOSS_VISIBLE_FRAC - 0.5)
+	# Верхняя граница — чтобы на огромной голове гигант не занял весь экран и
+	# потоку осталось где лететь.
+	return Vector2(clampf(half_out, vp.x * 0.04, vp.x * 0.22), vp.y * 0.5)
+
+# Ширина нарисованной головы на пике, в экранных пикселях.
+func _boss_head_w() -> float:
+	if not is_instance_valid(_normaldo) or not _normaldo.has_method("boss_head_px"):
+		return 0.0
+	return float((_normaldo.call("boss_head_px") as Vector2).x) * _max_factor
 
 # Пик размера считается ПОД СКИН и состояние жира: голова растягивается до
 # BOSS_FACE_H высоты экрана. Прежнее фиксированное ×12 давало у классики голову
@@ -455,14 +469,11 @@ func _tick_play(delta: float) -> void:
 	_tap_pulse = lerpf(_tap_pulse, 0.0, delta * 7.0)
 	_tap_rot   = lerpf(_tap_rot, 0.0, delta * 9.0)
 
-	# СДУВАЯСЬ, БОСС ОТЪЕЗЖАЕТ ОТ КРАЯ. На пике голова стоит центром на левом
-	# краю — видна ровно половина лица. Если оставить её там же и просто
-	# уменьшать, сдувание уезжает за кадр вместе с головой, и главную обратную
-	# связь мини-игры игрок не видит. Поэтому якорь едет от края к обычному
-	# игровому месту по мере похудения — заодно к концу он уже почти там, куда
-	# его вернёт аутро.
-	var vp := get_viewport_rect().size
-	_normaldo.position.x = lerpf(vp.x * RETURN_X_FRAC, boss_anchor(vp).x, _bar)
+	# ПОЗИЦИЯ НЕ ГУЛЯЕТ. Пока голова стояла центром на самом краю, её приходилось
+	# подтягивать вправо по мере похудения — иначе сдувание уезжало за кадр
+	# вместе с ней. Теперь якорь и так на экране (три четверти лица), и босс
+	# стоит на одном месте всю мини-игру: ползающий гигант читается хуже, чем
+	# неподвижный.
 
 	# РАЗМЕР ИДЁТ ЗА ЖИРОМ. Это и есть главная обратная связь мини-игры: перестал
 	# тапать — видишь, как сдуваешься, и понимаешь, что время уходит.
@@ -535,9 +546,12 @@ func _end_minigame() -> void:
 	_state = State.OUTRO
 	_run_outro()
 
-# Outro: cut the music + settle the screen, deflate him SMOOTHLY (not a snap),
-# puff out the parting bubble, resume the run, then fly the tallied pizza/dollars
-# up-left into the run score and credit them for real.
+# Аутро. ПОРЯДОК ВАЖЕН: сначала спины множителя — Нормальдо остаётся там же и
+# таким же, каким закончил, — и только потом сдувание и возврат в забег.
+#
+# Раньше было наоборот, и на стыке игрок видел баг: `_deflate()` тянул размер ОТ
+# ПИКА, хотя голова к концу уже сдулась до пола, — она на мгновение подскакивала
+# до максимума, потом падала, потом прыгала в центр, и только тогда шли спины.
 func _run_outro() -> void:
 	_hide_prompt()
 	_hide_title()
@@ -552,14 +566,6 @@ func _run_outro() -> void:
 	if _normaldo.has_method("set_fat_boss_rotation"):
 		_normaldo.set_fat_boss_rotation(0.0)
 
-	# Sag back to normal size, then the "slake bake" stamp pops over the deflated him.
-	await _deflate()
-	_show_slake()
-	_tap_particles()
-
-	if _normaldo.has_method("end_fat_boss"):
-		_normaldo.end_fat_boss()
-
 	# Итог мини-игры: барабаны бросают множитель, плашка показывает умножение,
 	# добыча улетает в счётчики HUD. Поток предметов на это время ОСТАЁТСЯ на
 	# паузе — иначе игрок под окном итогов уворачивается вслепую.
@@ -571,6 +577,13 @@ func _run_outro() -> void:
 	if _normaldo.has_method("fat_boss_award"):
 		_normaldo.fat_boss_award(_pizza_got * mult, _dollar_got * mult)
 	_teardown_bar_hud()
+
+	# Только теперь сдуваемся и возвращаемся на место забега.
+	await _deflate()
+	_show_slake()
+	_tap_particles()
+	if _normaldo.has_method("end_fat_boss"):
+		_normaldo.end_fat_boss()
 
 	if is_instance_valid(_spawner) and _spawner.has_method("resume_after_event"):
 		_spawner.resume_after_event()
@@ -590,8 +603,11 @@ func _run_outro() -> void:
 func _deflate() -> void:
 	if not _normaldo.has_method("set_fat_boss_factor"):
 		return
+	# ОТ ТЕКУЩЕГО размера, а не от пика: к концу мини-игры голова уже сдута до
+	# пола, и тяга «от пика» подбрасывала её на кадр до максимума.
+	var from_f : float = maxf(1.0, float((_normaldo as Node2D).scale.x))
 	var tw := create_tween()
-	tw.tween_method(Callable(_normaldo, "set_fat_boss_factor"), _max_factor, 1.0, DEFLATE_T) \
+	tw.tween_method(Callable(_normaldo, "set_fat_boss_factor"), from_f, 1.0, DEFLATE_T) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
 	# Сдувается и одновременно возвращается на своё место в забеге.
 	if _pre_boss_pos != Vector2.ZERO:

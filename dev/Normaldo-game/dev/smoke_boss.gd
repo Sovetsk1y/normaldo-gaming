@@ -46,6 +46,7 @@ func _initialize() -> void:
 	print("── Мини-игра всегда кончается ──")
 	await _test_always_ends(boss, normaldo)
 	print("── Возврат в забег ──")
+	await _test_return_guard(boss, normaldo)
 	await _test_restore(boss, normaldo)
 
 	print("")
@@ -123,13 +124,22 @@ func _test_shrink(boss: Node, normaldo: Node) -> void:
 		"за секунду без тапов заметно сдулся: ×%.1f → ×%.1f" % [f0, f1])
 	_check(float(boss.get("_bar")) < 0.95, "жир стекает: %.2f" % boss.get("_bar"))
 
-	# Сдуваясь, босс отъезжает от края: иначе уменьшение уходит за кадр вместе с
-	# головой, и главную обратную связь мини-игры игрок просто не видит.
+	# Голова видна на экране целиком-почти: три четверти лица, а не половина за
+	# краем. И за мини-игру она НЕ ползает — стоит на одном месте.
 	var vp : Vector2 = get_root().get_visible_rect().size
-	var x_full : float = boss.call("boss_anchor", vp).x
-	await _play(boss, 4.0, 0.0)
-	_check((normaldo as Node2D).position.x > x_full + vp.x * 0.10,
-		"худея, босс отъезжает в кадр: x=%.0f" % (normaldo as Node2D).position.x)
+	var anchor_x : float = boss.call("boss_anchor", vp).x
+	var head_w : float = float(boss.call("_boss_head_w"))
+	_check(anchor_x > head_w * 0.15,
+		"центр головы отодвинут от края: x=%.0f при ширине головы %.0f"
+			% [anchor_x, head_w])
+	var x0 : float = (normaldo as Node2D).position.x
+	await _play(boss, 3.0, 0.0)
+	# Допуск в 2 % ширины: сам Нормальдо каждый кадр подтягивает себя в кадр и
+	# смещается на единицы пикселей. Ловим мы не это, а прежний дрейф якоря —
+	# он был в десятки пикселей.
+	_check(absf((normaldo as Node2D).position.x - x0) < vp.x * 0.02,
+		"за мини-игру босс не ползает: x=%.0f → %.0f"
+			% [x0, (normaldo as Node2D).position.x])
 	boss.call("_end_minigame")
 	await _await_idle(boss)
 
@@ -174,7 +184,7 @@ func _test_tap_punch(boss: Node, normaldo: Node) -> void:
 		boss.call("_on_tap")
 		await process_frame
 	var punched : float = _factor(normaldo)
-	_check(punched > calm * 1.10,
+	_check(punched > calm * 1.35,
 		"тап заметно вспухает голову: ×%.2f → ×%.2f" % [calm, punched])
 	boss.call("_end_minigame")
 	await _await_idle(boss)
@@ -244,8 +254,36 @@ func _test_always_ends(boss: Node, normaldo: Node) -> void:
 	# Без тапов она кончается быстро — но не мгновенно.
 	await _begin(boss, 1.0)
 	var quick : float = await _play(boss, 30.0, 0.0)
-	_check(quick > 2.0 and quick < 15.0,
+	# Сдувание нарочно быстрое: мини-игра должна ощущаться как удержание, а не
+	# как медленное таяние. Нижняя граница — чтобы игрок всё-таки успел понять,
+	# что происходит, и нажать.
+	_check(quick > 1.2 and quick < 15.0,
 		"без тапов сдувается за разумное время: %.1f c" % quick)
+	await _await_idle(boss)
+
+# Отдельно — защита от старой поломки: возвращать голову вплотную к левому краю
+# нельзя, оттуда забег непроходим — предметы прилетают сразу на голову.
+# Сравнение идёт с КРАЕМ: раньше сравнивалось с якорем босса, но якорь уехал в
+# играбельное место и такая проверка начала срабатывать на обычной позиции.
+func _test_return_guard(boss: Node, normaldo: Node) -> void:
+	var vp : Vector2 = get_root().get_visible_rect().size
+	(normaldo as Node2D).position = Vector2(0.0, vp.y * 0.5)
+	await _begin(boss, 1.0)
+	var back : Vector2 = boss.get("_pre_boss_pos")
+	_check(back.x >= vp.x * float(boss.RETURN_MIN_FRAC) - 0.5,
+		"старт у самого края не делает точкой возврата край: x=%.0f" % back.x)
+	boss.call("_end_minigame")
+	await _await_idle(boss)
+
+	# А обычную позицию забега трогать не за что: она возвращается как есть.
+	var home := Vector2(vp.x * 0.23, vp.y * 0.5)
+	(normaldo as Node2D).position = home
+	await _begin(boss, 1.0)
+	var back2 : Vector2 = boss.get("_pre_boss_pos")
+	_check(absf(back2.x - home.x) < 1.0,
+		"обычная позиция забега возвращается как есть: x=%.0f (было %.0f)"
+			% [back2.x, home.x])
+	boss.call("_end_minigame")
 	await _await_idle(boss)
 
 func _test_restore(boss: Node, normaldo: Node) -> void:
@@ -255,11 +293,10 @@ func _test_restore(boss: Node, normaldo: Node) -> void:
 	var anchor : Vector2 = boss.call("boss_anchor", vp)
 	_check(absf((normaldo as Node2D).position.x - anchor.x) < vp.x * 0.05,
 		"на полном жире голова у якоря босса: x=%.0f" % (normaldo as Node2D).position.x)
-	# И возвращаться она обязана НЕ на якорь: иначе забег продолжится вплотную
-	# к левому краю. Этот баг уже случался.
+	# И возвращаться она обязана в играбельное место, а не к самому краю.
 	var back : Vector2 = boss.get("_pre_boss_pos")
-	_check(back.x > anchor.x + get_root().get_visible_rect().size.x * 0.1,
-		"точка возврата не на краю экрана: x=%.0f при якоре %.0f" % [back.x, anchor.x])
+	_check(back.x > vp.x * 0.10,
+		"точка возврата не у левого края: x=%.0f" % back.x)
 	await _play(boss, 30.0, 0.0)
 	# Аутро сдувает голову и возвращает забег.
 	for _i in 300:
