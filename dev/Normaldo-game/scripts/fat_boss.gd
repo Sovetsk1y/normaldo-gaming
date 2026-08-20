@@ -12,12 +12,13 @@ extends Node2D
 #       A blinking "ТАПАЙ" title (finger on each side) cues the tapping — it
 #       shows while idle and hides while the player is tapping.
 #
-#   Phase B (PLAY): obstacles (бочки=trash, бомжи=homeless, собаки=dog) and loot
-#       (пиццы, доллары) fly past FAST. The head deflates over time; each tap
-#       slows the deflation, with diminishing returns so it ALWAYS ends and can
-#       never grow past the start size. Item speed tracks the head size. While
-#       big, Normaldo is invincible and eats pizza/dollars as usual. At normal
-#       size, control / damage / music / spawner are restored.
+#   Phase B (PLAY): ЖИР — одна величина, которая управляет всем. Не тапаешь —
+#       жир стекает, голова СДУВАЕТСЯ на глазах и поток вянет. Тапаешь — жир
+#       держится (остаёшься огромным) и поток разгоняется. Мини-игра кончается,
+#       когда жир дошёл до нуля; фиксированного таймера нет. Отдача от тапа
+#       падает с ростом жира, а слив растёт со временем — поэтому она всегда
+#       заканчивается. Пока большой, Нормальдо неуязвим и жрёт лут; на выходе
+#       возвращаются управление, урон, музыка и спавнер.
 #
 # SFX: players are created with no stream and marked `# SFX:` — drop audio onto
 # them later and they'll fire at the right beat.
@@ -60,27 +61,38 @@ const GROW_HOLD_T : float = 0.40             # tremble pause between steps
 # единицы: лицо должно упираться в верх и низ кадра, но остаться лицом.
 const BOSS_FACE_H : float = 1.05
 
-# Phase B is a fixed-length feeding frenzy. The head stays HUGE the whole time —
-# tapping never changes his size (only a tiny impact tremble); it fills a SPEED
-# bar that drives how fast the loot stream flies past. Faster stream = more
-# pizza/dollars tallied before the timer runs out. The bar drains when idle, so
-# the player mashes to keep the throughput high.
-const FRENZY_MIN    : float = 8.0            # mini-game length is rolled in this range
-const FRENZY_MAX    : float = 15.0
-const BAR_START     : float = 0.12           # low start → the stream visibly crawls at first
-# Difficulty grows with how much speed you've already built: drain = BAR_DECAY +
-# BAR_DECAY_RAMP·_bar³. Cubic → the low/mid climb is gentle, but every further
-# notch costs more and the top is brutal, so MAX item speed is a real grind.
-const BAR_DECAY     : float = 0.45           # easy base drain near empty
-const BAR_DECAY_RAMP: float = 1.50           # extra drain that ramps up with the bar
-const BAR_TAP_GAIN  : float = 0.10           # fill per tap
-# Madness (stage 2) is meant to be PLAYABLE for a while, then spike. The drain
-# stays normal for the first MAD_GRACE seconds spent in stage 2, then ramps over
-# MAD_RAMP seconds up to ×DECAY_TIME_MULT — at which point holding high flow is
-# nearly hopeless. Time spent below madness doesn't count toward this.
-const MAD_GRACE       : float = 5.0
-const MAD_RAMP        : float = 3.0
-const DECAY_TIME_MULT : float = 2.2
+# ── Фаза Б: ЖИР — одна величина на всё ───────────────────────────────────────
+# `_bar` (0..1) — это ЖИР, и он же управляет всем:
+#   • размером головы на экране: не тапаешь — сдуваешься на глазах;
+#   • скоростью потока предметов: тапаешь — поток разгоняется.
+# Мини-игра кончается, когда жир дошёл до нуля. Таймера нет: длительность —
+# следствие того, как игрок тапает. См. /Концепция/Мини-игра — Жиробосс (мутаген).md
+const BAR_START     : float = 1.0            # мутаген взят — ты СРАЗУ огромный
+# Пол размера: даже на нуле жира голова заметно больше обычной, иначе последние
+# секунды босс уже не босс, а предметы летят сквозь маленькую голову.
+const FAT_FLOOR     : float = 0.40
+# Слив растёт с набранным жиром (квадратично) и со временем в мини-игре. База
+# небольшая: у самого низа сдувание замедляется, и концовка не обрывается.
+const BAR_DECAY     : float = 0.10
+const BAR_DECAY_RAMP: float = 0.42
+const BAR_TAP_GAIN  : float = 0.075          # прибавка за тап у пустой полосы
+# Отдача от тапа падает по мере набора: у полного жира тап даёт вчетверо меньше.
+# Без этого мэшер держал бы максимум бесконечно.
+const BAR_TAP_FALLOFF : float = 0.25
+# Со временем слив нарастает, А ОТДАЧА ОТ ТАПА ПАДАЕТ — Нормальдо выдыхается.
+# Второе обязательно: одного нарастающего слива мало. Пока тап у пустой полосы
+# даёт больше, чем стекает у самого дна, у мэшера есть равновесие выше нуля, и
+# мини-игра не кончается ВООБЩЕ — при 14 тапах в секунду она честно висела 40
+# секунд, пока в неё не упёрся тест.
+const DECAY_GRACE     : float = 5.0
+const DECAY_RAMP_T    : float = 12.0
+# ×3 не хватало: при 14 тапах в секунду слив и прибавка сходились на середине
+# полосы, и мини-игра не кончалась вовсе. ×6 перекрывает любой человеческий темп.
+const DECAY_TIME_MULT : float = 6.0
+const TAP_STAMINA_MIN : float = 0.25         # во что вырождается отдача от тапа
+# Аварийный потолок: даже при полностью сломанной математике игрок не должен
+# застрять в мини-игре навсегда.
+const FRENZY_HARD_CAP : float = 45.0
 
 # Phase-B item speed, as a multiple of the run phase's base speed. SLOW is well
 # below 1.0 so the very first taps read as a clear, immediate acceleration.
@@ -116,9 +128,9 @@ enum State { IDLE, GROW, PLAY, OUTRO }
 var _state    : int   = State.IDLE
 var _arm_timer: float = 0.0
 
-var _bar       : float = 0.0      # speed throttle 0..1 (fills on tap, drives item speed)
-var _frenzy_t  : float = 0.0      # countdown to the frenzy's end
-var _mad_time  : float = 0.0      # cumulative time spent in stage 2, for the late spike
+var _bar       : float = 0.0      # ЖИР 0..1: и размер головы, и скорость потока
+var _frenzy_t  : float = 0.0      # аварийный потолок длительности
+var _play_time : float = 0.0      # время в фазе Б — по нему нарастает слив
 var _max_factor : float = 12.0    # пик размера, считается под скин в _refresh_max_factor
 var _pre_boss_pos : Vector2 = Vector2.ZERO   # куда вернуть голову после мини-игры
 var _pizza_got : int   = 0        # loot tallied this mini-game (credited at the end)
@@ -151,6 +163,7 @@ var _disco      : ColorRect = null   # full-screen additive light wash at madnes
 # Phase-B HUD: the speed bar + the live pizza/dollar tally beneath it.
 var _bar_root        : Control = null
 var _bar_fill        : ColorRect = null
+var _bar_mult_lbl    : Label = null
 var _pizza_count_lbl : Label = null
 var _dollar_count_lbl: Label = null
 var _pizza_count_icon : TextureRect = null   # fly-from origin for the end transfer
@@ -265,6 +278,17 @@ func _freeze_run() -> void:
 # Спрайт скина посажен так, что центр головы совпадает с началом координат узла
 # (см. normaldo._apply_head_offset), поэтому на экране остаётся ровно правая
 # половина головы — половина лица, как и задумано.
+# Куда вернуть голову после мини-игры. Брать текущую позицию «как есть» нельзя:
+# если мини-игра почему-то начинается, когда голова УЖЕ стоит на якоре босса
+# (левый край), то забег после неё продолжится вплотную к краю, и играть
+# станет невозможно. В таком случае возвращаем на обычное игровое место.
+const RETURN_X_FRAC : float = 0.28
+func _safe_return_pos(vp: Vector2) -> Vector2:
+	var pos : Vector2 = _normaldo.position
+	if absf(pos.x - boss_anchor(vp).x) < vp.x * 0.06:
+		return Vector2(vp.x * RETURN_X_FRAC, pos.y)
+	return pos
+
 func boss_anchor(vp: Vector2) -> Vector2:
 	return Vector2(0.0, vp.y * 0.5)
 
@@ -290,6 +314,41 @@ func dev_pose_boss() -> void:
 		_normaldo.set_fat_boss_factor(_max_factor)
 	if _normaldo.has_method("set_fat_boss_rotation"):
 		_normaldo.set_fat_boss_rotation(0.0)
+
+# Dev hook: поставить фазу Б напрямую, без мутагена и без анимации раздува.
+# Нужен dev/smoke_boss.gd, который прогоняет саму механику жира: и без него
+# проверить «не тапаешь — сдуваешься» можно только глазами.
+func dev_begin_play(bar: float = BAR_START) -> void:
+	if not is_instance_valid(_normaldo):
+		return
+	# Только из покоя: если предыдущая мини-игра ещё доигрывает аутро, её
+	# корутина через мгновение поставит IDLE — и оборвёт только что начатую.
+	if _state != State.IDLE:
+		return
+	_freeze_run()
+	if _normaldo.has_method("begin_fat_boss"):
+		_normaldo.begin_fat_boss()
+	_refresh_max_factor()
+	_pre_boss_pos = _safe_return_pos(get_viewport_rect().size)
+	_normaldo.position = boss_anchor(get_viewport_rect().size)
+	_bar        = clampf(bar, 0.0, 1.0)
+	_frenzy_t   = FRENZY_HARD_CAP
+	_play_time  = 0.0
+	_pizza_got  = 0
+	_dollar_got = 0
+	_breathe_t  = 0.0
+	_stage      = 0
+	_fx_t       = 0.0
+	_dance_amp  = 0.0
+	_disco_a    = 0.0
+	_tap_pulse  = 0.0
+	_tap_rot    = 0.0
+	_mg_timer   = 0.0
+	_last_tap_msec = Time.get_ticks_msec()
+	if _normaldo.has_method("set_fat_boss_factor"):
+		_normaldo.set_fat_boss_factor(fat_factor_for(_bar))
+	_build_bar_hud()
+	_state = State.PLAY
 
 # Dev hook: fire a mutagen right now. No-op if a mini-game is already in progress.
 func dev_send_mutagen() -> void:
@@ -320,7 +379,7 @@ func _run_grow() -> void:
 	# Куда вернуть голову после мини-игры. Раньше босс стоял почти на месте
 	# забега и возвращать было нечего; теперь он уезжает центром на левый край,
 	# и без возврата игрок продолжал бы забег вплотную к краю экрана.
-	_pre_boss_pos = _normaldo.position
+	_pre_boss_pos = _safe_return_pos(vp)
 	if _normaldo.has_method("move_to"):
 		_normaldo.move_to(boss_anchor(vp), 0.5)
 
@@ -349,8 +408,8 @@ func _run_grow() -> void:
 	_crossfade_music()
 
 	_bar          = BAR_START
-	_frenzy_t     = randf_range(FRENZY_MIN, FRENZY_MAX)
-	_mad_time     = 0.0
+	_frenzy_t     = FRENZY_HARD_CAP
+	_play_time    = 0.0
 	_pizza_got    = 0
 	_dollar_got   = 0
 	_breathe_t    = 0.0
@@ -372,24 +431,32 @@ func _run_grow() -> void:
 # ── Phase B: shrink + tap ─────────────────────────────────────────────────────
 
 func _tick_play(delta: float) -> void:
-	_frenzy_t -= delta
-	# Speed bar drains toward idle; taps push it back up (see _on_tap).
+	_frenzy_t  -= delta
+	_play_time += delta
+	# Жир сам стекает; тап возвращает его наверх (см. `_on_tap`).
 	_bar = clampf(_bar - _bar_decay() * delta, 0.0, 1.0)
 	_refresh_stage()
-	if _stage == 2:
-		_mad_time += delta   # clock the late-madness difficulty spike
 	_update_stage_fx(delta)
 
 	# Tap feedback decays back to rest.
 	_tap_pulse = lerpf(_tap_pulse, 0.0, delta * 12.0)
 	_tap_rot   = lerpf(_tap_rot, 0.0, delta * 9.0)
 
-	# Size stays at the peak factor — only a faint breathing wobble + the transient tap
-	# impact ride on top. He never *grows* from a tap; he just jolts.
+	# СДУВАЯСЬ, БОСС ОТЪЕЗЖАЕТ ОТ КРАЯ. На пике голова стоит центром на левом
+	# краю — видна ровно половина лица. Если оставить её там же и просто
+	# уменьшать, сдувание уезжает за кадр вместе с головой, и главную обратную
+	# связь мини-игры игрок не видит. Поэтому якорь едет от края к обычному
+	# игровому месту по мере похудения — заодно к концу он уже почти там, куда
+	# его вернёт аутро.
+	var vp := get_viewport_rect().size
+	_normaldo.position.x = lerpf(vp.x * RETURN_X_FRAC, boss_anchor(vp).x, _bar)
+
+	# РАЗМЕР ИДЁТ ЗА ЖИРОМ. Это и есть главная обратная связь мини-игры: перестал
+	# тапать — видишь, как сдуваешься, и понимаешь, что время уходит.
 	_breathe_t += delta * 5.0
 	if _normaldo.has_method("set_fat_boss_factor"):
 		var wobble := 1.0 + sin(_breathe_t) * 0.012 + _tap_pulse
-		_normaldo.set_fat_boss_factor(_max_factor * wobble)
+		_normaldo.set_fat_boss_factor(fat_factor_for(_bar) * wobble)
 	if _normaldo.has_method("set_fat_boss_rotation"):
 		_normaldo.set_fat_boss_rotation(_tap_rot)
 
@@ -414,8 +481,15 @@ func _tick_play(delta: float) -> void:
 			alive.append(it)
 	_mg_items = alive
 
-	if _frenzy_t <= 0.0:
+	# Сдулся до нуля — мини-игра кончилась. Таймера нет: длительность целиком в
+	# руках игрока. `_frenzy_t` остаётся аварийным потолком.
+	if _bar <= 0.0 or _frenzy_t <= 0.0:
 		_end_minigame()
+
+# Множитель размера по уровню жира. Даже на нуле голова заметно больше обычной:
+# ниже пола босс перестаёт читаться боссом, а предметы начинают пролетать мимо.
+func fat_factor_for(bar: float) -> float:
+	return lerpf(_max_factor * FAT_FLOOR, _max_factor, clampf(bar, 0.0, 1.0))
 
 func _on_tap() -> void:
 	_last_tap_msec = Time.get_ticks_msec()
@@ -423,9 +497,9 @@ func _on_tap() -> void:
 		_hide_prompt()
 	if _state != State.PLAY:
 		return
-	# Tap fills the speed bar → the loot stream accelerates. Size does NOT change;
-	# the head only jerks + gives a tiny impact wobble that immediately settles.
-	_bar = clampf(_bar + BAR_TAP_GAIN, 0.0, 1.0)
+	# Тап делает ровно две вещи разом: держит жир (а значит и размер) и разгоняет
+	# поток. Отдача падает по мере набора — удержать максимум нельзя.
+	_bar = clampf(_bar + tap_gain(), 0.0, 1.0)
 	_tap_pulse = 0.03   # transient jolt, decays in a few frames (reads as a shudder)
 	_tap_rot   = randf_range(0.05, 0.10) * (1.0 if randf() < 0.5 else -1.0)
 	# Tap feedback: tap.mp3 (if present) + a green particle puff.
@@ -737,7 +811,7 @@ func _build_bar_hud() -> void:
 	cap.add_theme_color_override("font_color", Color(0.90, 1.0, 0.92))
 	cap.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	cap.add_theme_constant_override("outline_size", 4)
-	cap.text                 = "СКОРОСТЬ ПОТОКА"
+	cap.text                 = "ЖИР — ТАПАЙ, ЧТОБЫ ДЕРЖАТЬСЯ"
 	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	cap.size                 = Vector2(BAR_W, 20.0)
 	cap.position             = Vector2(0.0, -24.0)
@@ -759,6 +833,20 @@ func _build_bar_hud() -> void:
 	_bar_fill.color = Color(0.35, 1.0, 0.45)
 	_bar_fill.size  = Vector2(BAR_W * _bar, BAR_H)
 	root.add_child(_bar_fill)
+
+	# Число ПОВЕРХ полосы — во сколько раз ты сейчас больше обычного. Полоса
+	# без числа отвечает «примерно столько», а тут есть что назвать.
+	_bar_mult_lbl = Label.new()
+	_bar_mult_lbl.add_theme_font_override("font", UI_FONT)
+	_bar_mult_lbl.add_theme_font_size_override("font_size", 14)
+	_bar_mult_lbl.add_theme_color_override("font_color", Color(1, 1, 1))
+	_bar_mult_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	_bar_mult_lbl.add_theme_constant_override("outline_size", 4)
+	_bar_mult_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_bar_mult_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_bar_mult_lbl.size                 = Vector2(BAR_W, BAR_H)
+	_bar_mult_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	root.add_child(_bar_mult_lbl)
 
 	var row_y := BAR_H + 12.0
 	_pizza_count_icon = _make_count_icon(PIZZA_TEX)
@@ -805,6 +893,8 @@ func _update_bar_hud() -> void:
 		_bar_fill.size.x = BAR_W * _bar
 		# Tint heats up green→gold as the player mashes — pure juice.
 		_bar_fill.color  = Color(0.35, 1.0, 0.45).lerp(Color(1.0, 0.95, 0.30), _bar)
+	if is_instance_valid(_bar_mult_lbl):
+		_bar_mult_lbl.text = "×%d" % int(round(fat_factor_for(_bar)))
 
 func _teardown_bar_hud() -> void:
 	_clear_disco()
@@ -814,6 +904,7 @@ func _teardown_bar_hud() -> void:
 	_bar_fill = null
 	_pizza_count_lbl = null
 	_dollar_count_lbl = null
+	_bar_mult_lbl = null
 	_pizza_count_icon = null
 	_dollar_count_icon = null
 
@@ -843,17 +934,30 @@ func _punch(node: Control) -> void:
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 # ── Intensity stages: calm → mid (screen dances) → madness (disco light) ───────
-# Stage is purely a function of the bar level, with up/down hysteresis margins so
-# it doesn't flicker at a boundary. Each transition is a discrete moment the music
-# can escalate on (see _set_stage); the visuals themselves ride the bar smoothly.
+# Этап — функция уровня ЖИРА, с гистерезисом, чтобы не дребезжало на границе.
+# Каждый переход — момент, на который может встать музыка (см. `_set_stage`);
+# сама картинка едет за жиром плавно.
 
-# Resistance grows two ways: with how much speed you've built (cubic in _bar) AND
-# with how long you've stayed in madness — ×1 for the first MAD_GRACE seconds of
-# stage 2 (so you actually get to play it), then ramping to ×DECAY_TIME_MULT.
+# Слив растёт двояко: с набранным жиром (квадратично) и со временем в мини-игре
+# — первые DECAY_GRACE секунд обычный, потом за DECAY_RAMP_T нарастает до
+# ×DECAY_TIME_MULT. Второе и гарантирует, что мини-игра всегда кончается.
 func _bar_decay() -> float:
-	var t := clampf((_mad_time - MAD_GRACE) / MAD_RAMP, 0.0, 1.0)
+	var t := clampf((_play_time - DECAY_GRACE) / DECAY_RAMP_T, 0.0, 1.0)
 	var time_mult := lerpf(1.0, DECAY_TIME_MULT, t)
-	return (BAR_DECAY + BAR_DECAY_RAMP * _bar * _bar * _bar) * time_mult
+	return (BAR_DECAY + BAR_DECAY_RAMP * _bar * _bar) * time_mult
+
+# Прибавка за один тап. Падает дважды: у полного жира тап даёт вчетверо меньше,
+# чем у пустого, и вся отдача угасает со временем — Нормальдо выдыхается. Без
+# второго множителя мини-игра при быстром тапе не кончается никогда.
+func tap_gain() -> float:
+	return BAR_TAP_GAIN \
+		* lerpf(1.0, BAR_TAP_FALLOFF, clampf(_bar, 0.0, 1.0)) \
+		* tap_stamina()
+
+# 1.0 в начале, TAP_STAMINA_MIN к концу разгона сложности.
+func tap_stamina() -> float:
+	var t := clampf((_play_time - DECAY_GRACE) / DECAY_RAMP_T, 0.0, 1.0)
+	return lerpf(1.0, TAP_STAMINA_MIN, t)
 
 func _refresh_stage() -> void:
 	var s := _stage

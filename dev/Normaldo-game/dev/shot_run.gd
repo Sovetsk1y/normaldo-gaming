@@ -92,6 +92,27 @@ func _initialize() -> void:
 		for _i in 30:
 			await process_frame
 
+	# Мини-игра с мутагеном: ставим фазу Б напрямую и фиксируем уровень жира
+	# прямо перед съёмкой — иначе он утечёт за кадры ожидания.
+	if argv.size() > 5 and String(argv[5]).begins_with("boss"):
+		var boss : Node = game.get_node_or_null("FatBoss")
+		var bar : float = 1.0
+		if String(argv[5]) == "boss_mid": bar = 0.5
+		if String(argv[5]) == "boss_low": bar = 0.08
+		boss.call("dev_begin_play", bar)
+		for _i in 8:
+			await process_frame
+		boss.set("_bar", bar)
+		boss.call("_update_bar_hud")
+		normaldo.call("set_fat_boss_factor", boss.call("fat_factor_for", bar))
+		await process_frame
+		await RenderingServer.frame_post_draw
+		var bimg := get_root().get_texture().get_image()
+		bimg.save_png("%s/%s.png" % [out, name])
+		print("saved ", name)
+		quit(0)
+		return
+
 	# Экран смерти собирается своим настоящим строителем: аргументы — это то,
 	# что ему передаёт `_on_normaldo_died`.
 	if argv.size() > 5 and String(argv[5]).begins_with("death"):
