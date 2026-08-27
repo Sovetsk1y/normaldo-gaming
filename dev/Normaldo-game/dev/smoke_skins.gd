@@ -434,10 +434,17 @@ func _test_casts(reg: Node, save: Node) -> void:
 		_check(is_instance_valid(normaldo) and not bool(normaldo.get("_dead")),
 			"«%s» отработал каст" % id)
 
-	# Поза каста подгрузилась у скинов, чьи архивы приехали.
+	# Поза каста подгрузилась у скинов, чьи архивы приехали. Список НЕ зашит
+	# руками: раньше он был константой, и приехавший арт пирата и очков молча
+	# не попадал под проверку — тест бы и дальше рапортовал «8 из 8».
 	var posed : Array = []
-	var with_art := ["batman", "harry_potter", "halloween", "spider_man", "wizard",
-		"joker", "tyson", "viking"]
+	var with_art : Array = []
+	for sk in reg.SKINS:
+		var sid := String(sk["id"])
+		var dir : String = String(sk.get("tex_dir", ""))
+		if dir != "" and ResourceLoader.exists(dir + "state1_spell.png"):
+			with_art.append(sid)
+	_check(with_art.size() >= 8, "скинов с позой каста найдено: %d" % with_art.size())
 	for id in with_art:
 		save.active_skin = id
 		normaldo.reload_skin()

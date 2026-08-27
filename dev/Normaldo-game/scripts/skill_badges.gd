@@ -72,6 +72,11 @@ func setup(nrm: Node) -> void:
 		if ab.get("type", "") == SkinSkills.RYAGALITY:
 			specs.append({ "key": "active", "tex": SMOKE_TEX, "sym": "",
 				"mod": RING_ACTIVE, "ring": RING_ACTIVE, "title": a_title, "desc": a_desc, "chg": a_charges })
+		elif String(ab.get("icon", "")) != "":
+			# Спелл со своей иконкой рисуется ею, а не общей звёздочкой: «✦» у
+			# всех одинаковый и о самом спелле не говорит ничего.
+			specs.append({ "key": "active", "tex": load(String(ab.get("icon", ""))), "sym": "",
+				"mod": Color(1, 1, 1), "ring": RING_ACTIVE, "title": a_title, "desc": a_desc, "chg": a_charges })
 		else:
 			specs.append({ "key": "active", "tex": null, "sym": "✦",
 				"mod": Color(1, 1, 1), "ring": RING_ACTIVE, "title": a_title, "desc": a_desc, "chg": a_charges })

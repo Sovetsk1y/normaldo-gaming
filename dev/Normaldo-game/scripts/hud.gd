@@ -4081,6 +4081,11 @@ func _ability_items(skin_id: String) -> Array:
 		items.append({ "ring": RING_ACTIVE, "tex": smoke, "mod": BELCH, "star": "",
 			"kind": "АКТИВНАЯ", "kind_col": RING_ACTIVE,
 			"title": ab.get("label", ""), "desc": ab.get("desc", "") })
+	elif String(ab.get("icon", "")) != "":
+		items.append({ "ring": RING_ACTIVE, "tex": load(String(ab.get("icon", ""))),
+			"mod": Color(1, 1, 1), "star": "",
+			"kind": "АКТИВНАЯ", "kind_col": RING_ACTIVE,
+			"title": ab.get("label", ""), "desc": ab.get("desc", "") })
 	elif not ab.is_empty():
 		items.append({ "ring": RING_ACTIVE, "tex": null, "mod": Color(1, 1, 1), "star": "✦",
 			"kind": "АКТИВНАЯ", "kind_col": RING_ACTIVE,

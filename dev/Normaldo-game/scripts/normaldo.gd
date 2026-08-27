@@ -48,6 +48,10 @@ const UI_FONT := preload("res://assets/fonts/RussoOne-Regular.ttf")
 var _skin_tex     : Array = []
 var _skin_eat_tex : Array = []
 var _skin_spell_tex : Array = []   # поза каста на каждое состояние жира
+var _skin_spell2_tex    : Array = []   # второй кадр позы (Очки: «пьёт» → «скалится»)
+var _skin_ghost_tex     : Array = []   # серые кадры Дракулы на время невидимости
+var _skin_ghost_eat_tex : Array = []
+var _ghost_active       : bool  = false
 var _skin_eat_sfx : Array = []
 var _skin_hit_sfx : AudioStream = null
 var _skin_fat_sfx : AudioStream = null
@@ -906,6 +910,9 @@ func fly_to_seat(duration: float) -> void:
 		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 
 func _load_skin(skin_id: String) -> void:
+	# Смена скина посреди невидимости оставила бы признак призрака поднятым, и
+	# новая голова приехала бы серой — а серых кадров у неё может не быть вовсе.
+	_ghost_active = false
 	var skin := SkinRegistry.get_skin(skin_id)
 	var tex_dir : String = skin.get("tex_dir", "")
 	var aud_dir : String = skin.get("audio_dir", "")
@@ -914,10 +921,16 @@ func _load_skin(skin_id: String) -> void:
 		_skin_tex       = _CLASSIC_TEX.duplicate()
 		_skin_eat_tex   = _CLASSIC_EAT_TEX.duplicate()
 		_skin_spell_tex = [null, null, null, null]
+		_skin_spell2_tex    = [null, null, null, null]
+		_skin_ghost_tex     = [null, null, null, null]
+		_skin_ghost_eat_tex = [null, null, null, null]
 	else:
 		_skin_tex     = []
 		_skin_eat_tex = []
 		_skin_spell_tex = []
+		_skin_spell2_tex    = []
+		_skin_ghost_tex     = []
+		_skin_ghost_eat_tex = []
 		for i in 4:
 			_skin_tex.append(    load(tex_dir + "state%d.png"     % (i + 1)))
 			_skin_eat_tex.append(load(tex_dir + "state%d_eat.png" % (i + 1)))
@@ -932,6 +945,16 @@ func _load_skin(skin_id: String) -> void:
 					sp = cand
 					break
 			_skin_spell_tex.append(load(sp) if sp != "" else null)
+			# Второй кадр позы — есть только у Очков: там каст нарисован в два
+			# шага, «пьёт банку» и «скалится». Нет файла → поза одноходовая.
+			var sp2 := tex_dir + "state%d_spell2.png" % (i + 1)
+			_skin_spell2_tex.append(load(sp2) if ResourceLoader.exists(sp2) else null)
+			# Призрачные кадры Дракулы: серые версии покоя и поедания, которыми
+			# он подменяется на время невидимости.
+			var gh  := tex_dir + "state%d_ghost.png"     % (i + 1)
+			var ghe := tex_dir + "state%d_ghost_eat.png" % (i + 1)
+			_skin_ghost_tex.append(load(gh) if ResourceLoader.exists(gh) else null)
+			_skin_ghost_eat_tex.append(load(ghe) if ResourceLoader.exists(ghe) else null)
 
 	if aud_dir.is_empty():
 		_skin_eat_sfx = _CLASSIC_EAT_SFX.duplicate()
@@ -1133,7 +1156,18 @@ func _on_pizza_left(area: Area2D) -> void:
 func _update_mouth() -> void:
 	if _eating or _morphing:   # the morph owns the sprite while spinning
 		return
-	_sprite.texture = _skin_eat_tex[fat_state] if _nearby_pizzas > 0 else _skin_tex[fat_state]
+	_sprite.texture = _head_tex(_nearby_pizzas > 0)
+
+# Какой кадр головы сейчас на экране. Отдельной функцией, потому что вариантов
+# уже три пары: обычная, «ест» и серая призрачная у Дракулы под невидимостью.
+# Призрачные кадры нарисованы и для покоя, и для поедания — жевать под
+# невидимостью можно, и голова не должна для этого проявляться.
+func _head_tex(eating: bool) -> Texture2D:
+	if _ghost_active and fat_state < _skin_ghost_tex.size():
+		var g = _skin_ghost_eat_tex[fat_state] if eating else _skin_ghost_tex[fat_state]
+		if g != null:
+			return g
+	return _skin_eat_tex[fat_state] if eating else _skin_tex[fat_state]
 
 # ── Collisions ────────────────────────────────────────────────────────────────
 
@@ -1648,8 +1682,18 @@ func _show_spell_pose() -> void:
 	var tok := _spell_pose_token
 	_sprite.texture = tex
 	await get_tree().create_timer(SPELL_POSE_TIME).timeout
-	if is_instance_valid(self) and tok == _spell_pose_token and not _morphing:
-		_update_mouth()
+	if not is_instance_valid(self) or tok != _spell_pose_token or _morphing:
+		return
+	# Второй кадр, если он нарисован: у Очков каст — это «глотнул энергетик» и
+	# только потом «поехало». Одним кадром такое не читается: на экране либо
+	# банка без реакции, либо реакция без банки.
+	var tex2 = _skin_spell2_tex[fat_state] if fat_state < _skin_spell2_tex.size() else null
+	if tex2 != null:
+		_sprite.texture = tex2
+		await get_tree().create_timer(SPELL_POSE_TIME).timeout
+		if not is_instance_valid(self) or tok != _spell_pose_token or _morphing:
+			return
+	_update_mouth()
 
 # Спрайт снаряда из раскадровки: кадры лежат в assets/skills/<скин>/<имя>N.png.
 func _make_anim_sprite(dir_path: String, prefix: String, count: int, px: float) -> Sprite2D:
@@ -1767,6 +1811,7 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 			var spr := _make_sprite(_WHEEL_TEX, 56.0)
 			_spawn_skill_projectile(dir, 520.0, spr, 34.0, _RYAG_HIT_GROUPS, _break_handler(), 9.0, 3.0)
 			_play_skill_sfx(SkinSkills.DODGE)
+			_pirate_flair()
 		"royal_gambit":
 			# Middle card flies straight; top/bottom fan out slightly diagonally.
 			# Each card hits the first item it meets (any type) and vanishes,
@@ -1781,6 +1826,16 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 			bolt.add_child(_make_skill_trail(Color(1, 1, 1), -dir))
 			_spawn_skill_projectile(dir, 540.0, bolt, 30.0, _RYAG_HIT_GROUPS, _break_once_handler(), 0.0)
 			_play_skill_sfx(SkinSkills.DODGE)
+		"dollar_shot":
+			# Классика: «Размен». Снаряд — золотой комок со следом, а НЕ доллар:
+			# летящая купюра читалась бы как добыча, за которой надо тянуться, и
+			# игрок ловил бы собственный выстрел.
+			var gold := Color(1.00, 0.82, 0.25)
+			var coin := Node2D.new()
+			coin.add_child(_make_skill_trail(gold, -dir))
+			_spawn_skill_projectile(dir, 520.0, coin, 30.0,
+				_RYAG_HIT_GROUPS, _to_dollar_handler(), 0.0)
+			_play_oneshot(_SFX_GLITTER, -6.0)
 		"transformus":
 			# Превращает ПЕРВЫЙ задетый предмет любого типа в пиццу/доллар.
 			# Снаряд — не облачко, а комок «магических» партиклов со следом.
@@ -1791,6 +1846,54 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 			_play_oneshot(_SFX_GLITTER, -6.0)   # charge flight
 		_:
 			_cast_expecto()
+
+# ── Пират: чем толще, тем громче ─────────────────────────────────────────────
+# На третьем жире у пирата на плече нарисован попугай, на четвёртом — флаг. Обе
+# детали до сих пор просто висели на спрайте и молчали. Теперь каст их
+# ОЗВУЧИВАЕТ: попугай орёт «ГААР», и надпись вылетает прямо в экран; на
+# четвёртом вместо неё разворачивается флаг.
+#
+# Летит НЕ в сторону тапа, а на зрителя: растёт от головы к полному размеру и
+# гаснет. Это не удар, а реплика — она не должна читаться как ещё один снаряд.
+const PIRATE_GAAR_TEX : Texture2D = preload("res://assets/skills/pirate/gaar.png")
+const PIRATE_FLAG_TEX : Texture2D = preload("res://assets/skills/pirate/flag.png")
+const PIRATE_FLAIR_T  : float = 0.55
+# Размер по голове, а не «побольше, чтоб заметили»: первая версия рисовала
+# надпись в 260 px при голове в 90 и наглухо закрывала ей лицо — на кадре
+# оставался флаг, а пирата под ним не было видно вовсе.
+const PIRATE_FLAIR_PX : float = 132.0
+
+func _pirate_flair() -> void:
+	# Индексы жира нулевые: 2 — это «третий жир», 3 — «четвёртый».
+	var tex : Texture2D = null
+	match fat_state:
+		2: tex = PIRATE_GAAR_TEX
+		3: tex = PIRATE_FLAG_TEX
+	if tex == null:
+		return
+	var host := get_parent()
+	if host == null:
+		return
+	var spr := _make_sprite(tex, PIRATE_FLAIR_PX)
+	spr.z_index = 40                      # поверх снарядов, но под HUD
+	# Уходит ВВЕРХ И ВПРАВО, в пустую часть кадра: реплика не должна перекрывать
+	# того, кто её подаёт, — иначе спелл читается как «экран чем-то залепило».
+	spr.global_position = global_position + Vector2(18.0, -46.0)
+	var full := spr.scale
+	spr.scale    = full * 0.55
+	spr.modulate = Color(1, 1, 1, 0)
+	host.add_child(spr)
+
+	var tw := spr.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(spr, "scale", full, PIRATE_FLAIR_T)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(spr, "position", spr.position + Vector2(56.0, -30.0), PIRATE_FLAIR_T)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_property(spr, "modulate:a", 1.0, PIRATE_FLAIR_T * 0.25)
+	tw.chain().tween_property(spr, "modulate:a", 0.0, PIRATE_FLAIR_T * 0.5)\
+		.set_delay(PIRATE_FLAIR_T * 0.25)
+	tw.chain().tween_callback(spr.queue_free)
 
 # Передать кадры анимации уже созданному снаряду.
 func _arm_frames(proj: Node2D, spr: Sprite2D, fps: float) -> void:
@@ -1886,16 +1989,36 @@ func _web_pull(n: Node2D) -> void:
 # Невидимость Дракулы: препятствия пролетают сквозь, голова полупрозрачна.
 func _cast_invisibility(duration: float) -> void:
 	_invincible = true
+	# У Дракулы невидимость НАРИСОВАНА: серые полупрозрачные кадры на каждое
+	# состояние жира. Пока их не было, спелл изображался общим гашением альфы до
+	# 0.25 — голова просто бледнела. Есть арт → показываем его, а альфу гасим
+	# слабее, иначе рисунок под ней не разглядеть.
+	var has_ghost : bool = fat_state < _skin_ghost_tex.size() \
+		and _skin_ghost_tex[fat_state] != null
+	_ghost_active = has_ghost
+	if has_ghost:
+		_update_mouth()
+	# С нарисованным кадром гасить альфу почти не надо: «нет меня» говорит сам
+	# серый рисунок. Прежние 0.25 поверх серого на тёмном фоне подземелья
+	# оставляли от головы вообще ничего.
 	var tw := create_tween()
-	tw.tween_property(_sprite, "modulate:a", 0.25, 0.12)
+	tw.tween_property(_sprite, "modulate:a", 0.90 if has_ghost else 0.25, 0.12)
 	_show_floating_text("НЕВИДИМОСТЬ", Color(0.65, 0.25, 1.0))
 	_play_skill_sfx(SkinSkills.TRANSFORM)
 	await get_tree().create_timer(duration).timeout
 	if not is_instance_valid(self):
 		return
+	_ghost_active = false
+	_update_mouth()
 	var tw2 := create_tween()
 	tw2.tween_property(_sprite, "modulate:a", 1.0, 0.18)
 	_invincible = false
+
+# Крылья Дракулы (assets/skills/dracula/wing*.png) СОЗНАТЕЛЬНО не подключены.
+# В архиве это одно крыло без опорной точки: на голову оно ложится по центру и
+# закрывает лицо, а как его разводить в пару — из арта не следует. Пробная
+# версия висела поверх морды и читалась как графический сбой. Лежит
+# импортированным до отдельной задачи, где решится посадка.
 
 # Three projectiles in three rows. `spread` > 0 fans the outer two out diagonally
 # (top goes up-right, bottom down-right), the middle one always flies straight.
@@ -2009,6 +2132,25 @@ func _transform_handler() -> Callable:
 		_vfx_particles(SkinSkills.TRANSFORM)
 		return true
 
+# «Размен» классики: задетый предмет становится ИМЕННО долларом. Отдельно от
+# _transform_handler: тот бросает монетку пицца-или-доллар, а здесь обещание
+# спелла — деньги, и выпавшая пицца читалась бы как осечка.
+func _to_dollar_handler() -> Callable:
+	return func(node):
+		if not is_instance_valid(node):
+			return false
+		var pos : Vector2 = (node as Node2D).global_position
+		var spd := 250.0
+		if node.get("speed") != null:
+			spd = float(node.get("speed"))
+		if node.has_method("on_hit"):
+			node.on_hit()
+		else:
+			node.queue_free()
+		_spawn_transformed(pos, spd, true)
+		_vfx_particles(SkinSkills.COUNTER)
+		return true
+
 func _slow_handler() -> Callable:
 	return func(node):
 		if not is_instance_valid(node):
@@ -2020,8 +2162,10 @@ func _slow_handler() -> Callable:
 		return false
 
 # Spawn a pizza or dollar where an obstacle was (Трансформус).
-func _spawn_transformed(pos: Vector2, speed: float = 250.0) -> void:
-	var as_pizza := randf() < 0.5
+# `force_dollar` — для «Размена» классики, где монетка не бросается.
+func _spawn_transformed(pos: Vector2, speed: float = 250.0,
+		force_dollar: bool = false) -> void:
+	var as_pizza := randf() < 0.5 and not force_dollar
 	var item := _ITEM_SCENE.instantiate()
 	item.speed      = speed
 	item.is_eatable = as_pizza
