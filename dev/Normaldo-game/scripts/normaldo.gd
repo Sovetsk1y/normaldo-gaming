@@ -30,6 +30,15 @@ const _CLASSIC_EAT_TEX = [
 	preload("res://assets/normaldo/normaldo3_eat.png"),
 	preload("res://assets/normaldo/normaldo4_eat.png"),
 ]
+# «Доллары в глазах» — реакция классики на УДАЧНЫЙ «Размен». Лежат рядом со
+# старыми normaldoN, а не в папке скина: у классики tex_dir пустой, она одна
+# живёт на легаси-именах.
+const _CLASSIC_CASH_TEX = [
+	preload("res://assets/normaldo/normaldo1_cash.png"),
+	preload("res://assets/normaldo/normaldo2_cash.png"),
+	preload("res://assets/normaldo/normaldo3_cash.png"),
+	preload("res://assets/normaldo/normaldo4_cash.png"),
+]
 const _CLASSIC_EAT_SFX = [
 	preload("res://assets/audio/eat1.mp3"),
 	preload("res://assets/audio/eat2.mp3"),
@@ -276,7 +285,9 @@ const _WEB_BIG_TEX       := preload("res://assets/skills/spider_man/big_shot.png
 # Кулак Викинга и перчатка Тайсона лежат в assets/skills/<скин>/ и рисуются
 # прямо в позе каста (stateN_spell). Отдельными спрайтами их больше не спавним —
 # именно от этого на экране получалось два кулака сразу.
-const _SHOVEL_TEX        := preload("res://assets/items/shuriken.png")
+# Лопатка Кусса. До приезда его архива тут стоял сюрикен ниндзя — спелл
+# назывался «БРОСОК ЛОПАТКИ», а летела метательная звезда.
+const _SHOVEL_TEX        := preload("res://assets/skills/kuss/spatula.png")
 const _BIRD_TEX          := preload("res://assets/skills/halloween/blackbird.png")
 
 # key -> [remaining, total]; keys: "resist:<tag>", "active", "passive:<id>"
@@ -331,6 +342,7 @@ func _apply_skin_to_sprite() -> void:
 	_base_scale     = _head_scale()
 	_sprite.scale   = _base_scale
 	_apply_head_offset()
+	_refresh_wings()
 
 # Масштаб считается так, чтобы ГОЛОВА была одного размера у всех скинов, но
 # силуэт целиком не вылезал за коробку MAX_BODY. Раньше нормировали ширину
@@ -913,6 +925,7 @@ func _load_skin(skin_id: String) -> void:
 	# Смена скина посреди невидимости оставила бы признак призрака поднятым, и
 	# новая голова приехала бы серой — а серых кадров у неё может не быть вовсе.
 	_ghost_active = false
+	_drop_wings()
 	var skin := SkinRegistry.get_skin(skin_id)
 	var tex_dir : String = skin.get("tex_dir", "")
 	var aud_dir : String = skin.get("audio_dir", "")
@@ -1998,6 +2011,7 @@ func _cast_invisibility(duration: float) -> void:
 	_ghost_active = has_ghost
 	if has_ghost:
 		_update_mouth()
+		_sync_wing_tex()
 	# С нарисованным кадром гасить альфу почти не надо: «нет меня» говорит сам
 	# серый рисунок. Прежние 0.25 поверх серого на тёмном фоне подземелья
 	# оставляли от головы вообще ничего.
@@ -2010,15 +2024,98 @@ func _cast_invisibility(duration: float) -> void:
 		return
 	_ghost_active = false
 	_update_mouth()
+	_sync_wing_tex()
 	var tw2 := create_tween()
 	tw2.tween_property(_sprite, "modulate:a", 1.0, 0.18)
 	_invincible = false
 
-# Крылья Дракулы (assets/skills/dracula/wing*.png) СОЗНАТЕЛЬНО не подключены.
-# В архиве это одно крыло без опорной точки: на голову оно ложится по центру и
-# закрывает лицо, а как его разводить в пару — из арта не следует. Пробная
-# версия висела поверх морды и читалась как графический сбой. Лежит
-# импортированным до отдельной задачи, где решится посадка.
+# ── Крылья Дракулы ───────────────────────────────────────────────────────────
+# В архиве крыло ОДНО. Пара собирается зеркалом: правое — тот же спрайт с
+# отрицательным масштабом по X, и обе половины машут навстречу друг другу.
+# Первая попытка вешала одно крыло по центру головы, и оно закрывало лицо —
+# отсюда правило: крыло крепится СБОКУ и уходит за голову, а не ложится на неё.
+#
+# Опорная точка — у корня крыла, а не в центре спрайта. Sprite2D вращается
+# вокруг начала координат узла, поэтому текстура сдвинута `offset` наружу: тогда
+# поворот читается как взмах от плеча, а не как вращение крыла вокруг себя.
+const WING_TEX       : Texture2D = preload("res://assets/skills/dracula/wing_open.png")
+const WING_TEX_GHOST : Texture2D = preload("res://assets/skills/dracula/wing_ghost.png")
+const WING_FAT       : int   = 3      # нулевой индекс: «четвёртый жир»
+const WING_PX        : float = 66.0   # меньше головы (99 px): хитбокс-то не растёт
+# Корни разведены почти к краям головы. Первая версия ставила их на ±20 и прятала
+# крылья ЦЕЛИКОМ за головой: наружу торчали только зубцы перепонки, и читались
+# они как красный воротник, а не как крылья.
+const WING_X         : float = 41.0
+const WING_Y         : float = -12.0
+const WING_REST_DEG  : float = -22.0  # сложены
+const WING_UP_DEG    : float = -58.0  # взмах вверх
+const WING_FLAP_T    : float = 0.34
+const WING_PAUSE_T   : float = 1.6    # между взмахами: «периодически», не мельтешит
+
+var _wings : Array = []
+
+# Крылья положены только тому, кому их нарисовали, и только на том жире, на
+# котором нарисовали: у Дракулы это четвёртый.
+func _wings_wanted() -> bool:
+	return SaveData.active_skin == "dracula" and fat_state == WING_FAT \
+		and not _fat_boss_active
+
+func _refresh_wings() -> void:
+	if not _wings_wanted():
+		_drop_wings()
+		return
+	if not _wings.is_empty():
+		_sync_wing_tex()
+		return
+	var tsz := WING_TEX.get_size()
+	var sc  : float = WING_PX / maxf(tsz.x, tsz.y)
+	for side in [-1.0, 1.0]:
+		var w := Sprite2D.new()
+		w.texture        = WING_TEX
+		w.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		w.scale    = Vector2(sc * side, sc)      # правое — зеркало левого
+		w.z_index  = -1                           # ЗА головой
+		w.position = Vector2(WING_X * side, WING_Y)
+		# Сдвиг текстуры наружу: корень крыла оказывается в начале координат.
+		w.offset   = Vector2(tsz.x * 0.34, 0.0)
+		w.rotation = deg_to_rad(WING_REST_DEG) * side
+		add_child(w)
+		_wings.append(w)
+	_sync_wing_tex()
+	_flap_wings()
+
+func _drop_wings() -> void:
+	for w in _wings:
+		if is_instance_valid(w):
+			w.queue_free()
+	_wings.clear()
+
+# Под невидимостью крылья сереют вместе с головой — иначе от Дракулы остаётся
+# призрак с двумя яркими красными крыльями.
+func _sync_wing_tex() -> void:
+	var tex : Texture2D = WING_TEX_GHOST if _ghost_active else WING_TEX
+	for w in _wings:
+		if is_instance_valid(w):
+			(w as Sprite2D).texture = tex
+
+# Взмах: обе половины вверх, обратно, и пауза. Цикл бесконечный, твин привязан к
+# самому крылу и умирает вместе с ним.
+func _flap_wings() -> void:
+	if _wings.size() < 2 or not is_instance_valid(_wings[0]):
+		return
+	var l : Sprite2D = _wings[0]
+	var r : Sprite2D = _wings[1]
+	var tw := l.create_tween()
+	tw.set_loops()
+	tw.tween_property(l, "rotation", deg_to_rad(-WING_UP_DEG), WING_FLAP_T)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(r, "rotation", deg_to_rad(WING_UP_DEG), WING_FLAP_T)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.chain().tween_property(l, "rotation", deg_to_rad(-WING_REST_DEG), WING_FLAP_T)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(r, "rotation", deg_to_rad(WING_REST_DEG), WING_FLAP_T)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tw.chain().tween_interval(WING_PAUSE_T)
 
 # Three projectiles in three rows. `spread` > 0 fans the outer two out diagonally
 # (top goes up-right, bottom down-right), the middle one always flies straight.
@@ -2149,7 +2246,31 @@ func _to_dollar_handler() -> Callable:
 			node.queue_free()
 		_spawn_transformed(pos, spd, true)
 		_vfx_particles(SkinSkills.COUNTER)
+		_show_cash_face()
 		return true
+
+# Реакция на УДАЧНЫЙ размен: доллары в глазах. Показывается по попаданию, а не
+# по касту — в этом вся разница с позой каста. Промахнулся мимо предмета — лицо
+# не меняется, и это честно: денег-то не появилось.
+const CASH_FACE_TIME : float = 0.45
+var _cash_face_token : int = 0
+
+func _show_cash_face() -> void:
+	if _morphing or SaveData.active_skin != "classic":
+		return
+	if fat_state >= _CLASSIC_CASH_TEX.size():
+		return
+	_cash_face_token += 1
+	var tok := _cash_face_token
+	# Тем же токеном, что и поза каста: иначе два кадра дерутся за спрайт, и
+	# чей таймер придёт вторым, тот и вернёт голову раньше времени.
+	_spell_pose_token += 1
+	var pose_tok := _spell_pose_token
+	_sprite.texture = _CLASSIC_CASH_TEX[fat_state]
+	await get_tree().create_timer(CASH_FACE_TIME).timeout
+	if is_instance_valid(self) and tok == _cash_face_token \
+			and pose_tok == _spell_pose_token and not _morphing:
+		_update_mouth()
 
 func _slow_handler() -> Callable:
 	return func(node):

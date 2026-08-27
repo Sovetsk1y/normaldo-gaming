@@ -4,7 +4,7 @@ extends SceneTree
 #   xvfb-run -a godot --path . --display-driver x11 --rendering-driver opengl3 \
 #     --resolution 960x430 --script res://dev/shot_spells.gd -- <папка> <режим>
 #
-# режим: dollar | pirate3 | pirate4 | dracula | glasses1 | glasses2
+# режим: dollar | cash | pirate3 | pirate4 | dracula | wings | wings_flap | glasses1 | glasses2 | kuss
 
 func _initialize() -> void:
 	_bail_out()
@@ -31,16 +31,22 @@ func _initialize() -> void:
 		"dracula":  skin = "dracula"; fat = 3; delay = 0.35
 		"glasses1": skin = "glasses"; fat = 2; delay = 0.12
 		"glasses2": skin = "glasses"; fat = 2; delay = 0.45
+		"cash":       skin = "classic"; fat = 1; delay = 0.30
+		"wings":      skin = "dracula"; fat = 3; delay = 0.02
+		"wings_flap": skin = "dracula"; fat = 3; delay = 0.34
+		"kuss":       skin = "kuss";    fat = 3; delay = 0.15
 
 	save.dollars     = 12400
-	save.owned_skins = ["classic", "pirate", "dracula", "glasses"]
+	save.owned_skins = ["classic", "pirate", "dracula", "glasses", "kuss"]
 	save.active_skin = skin
 	save.skin_level  = 10
 	normaldo.call("reload_skin")
 	normaldo.call("_build_skin_runtime")
 
 	hud.call("_start_game")
-	for _i in 12:
+	# Интро («АНН» + бросок на диван) идёт около двух секунд и своим титром
+	# закрывает лицо. Снимать спелл поверх него — снимать не спелл.
+	for _i in 190:
 		await process_frame
 	normaldo.set("fat_state", fat)
 	normaldo.call("_apply_skin_to_sprite")
@@ -51,7 +57,7 @@ func _initialize() -> void:
 		await process_frame
 
 	# Мишень для «Размена»: без неё нечего превращать.
-	if mode == "dollar":
+	if mode == "dollar" or mode == "cash":
 		var rock := Area2D.new()
 		rock.set_script(preload("res://scripts/hazard_item.gd"))
 		rock.set("kind", "safe")
@@ -60,7 +66,8 @@ func _initialize() -> void:
 		spawner.add_child(rock)
 		await process_frame
 
-	normaldo.call("_try_fire_ability", (normaldo as Node2D).position + Vector2(400.0, 0.0))
+	if not mode.begins_with("wings"):
+		normaldo.call("_try_fire_ability", (normaldo as Node2D).position + Vector2(400.0, 0.0))
 	var t := 0.0
 	while t < delay:
 		await process_frame
