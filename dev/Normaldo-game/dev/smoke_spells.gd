@@ -9,9 +9,15 @@ extends SceneTree
 #
 # См. /Концепция/Скины.md
 
-var _fails : int = 0
+var _fails  : int = 0
+var _checks : int = 0
+
+# Нижняя граница числа проверок. Держать точной незачем — она ловит не «стало на
+# одну меньше», а «не отработало вообще ничего».
+const EXPECTED_CHECKS : int = 40
 
 func _check(ok: bool, what: String) -> void:
+	_checks += 1
 	if ok:
 		print("  ok   ", what)
 	else:
@@ -33,10 +39,23 @@ func _initialize() -> void:
 	await _test_wings()
 	print("── Кусс: летит лопатка ──")
 	await _test_kuss_spatula()
+	print("── Кулак с героя: Battletoads ──")
+	await _test_big_fist()
+	print("── Классика: рука с пальцем ──")
+	await _test_pointing_hand()
 
 	print("")
+	# Зелёный прогон, в котором НИЧЕГО не проверялось, — худший из возможных
+	# отчётов. Ровно так и вышло: забытый импорт ассета уронил компиляцию
+	# normaldo.gd целиком, каждый тест падал на первой же строке, ни один _check
+	# не выполнился — и суита отрапортовала «ВСЁ ЗЕЛЁНОЕ».
+	if _checks < EXPECTED_CHECKS:
+		print("ПРОВАЛ: проверок выполнено %d из ожидаемых %d — тесты не отработали"
+			% [_checks, EXPECTED_CHECKS])
+		quit(1)
+		return
 	if _fails == 0:
-		print("ВСЁ ЗЕЛЁНОЕ")
+		print("ВСЁ ЗЕЛЁНОЕ (проверок: %d)" % _checks)
 	else:
 		print("ПРОВАЛОВ: ", _fails)
 	quit(1 if _fails > 0 else 0)
@@ -272,11 +291,13 @@ func _test_wings() -> void:
 				var head : Sprite2D = (n as Node).get_node("Sprite2D")
 				_check(l.z_index < head.z_index and r.z_index < head.z_index,
 					"лежат ЗА головой, а не поверх лица")
-				# Крыло обязано быть меньше головы: хитбокс от него не растёт, и
-				# раздутый силуэт обманывает игрока насчёт его габаритов.
+				# Крылья по просьбе сделаны КРУПНЕЕ головы, но потолок нужен:
+				# хитбокс от них не растёт, и силуэт в полтора лейна обманывал
+				# бы игрока насчёт его габаритов (то же правило, что MAX_BODY).
 				var head_w : float = head.texture.get_size().x * head.scale.x
 				var wing_w : float = absf(l.texture.get_size().x * l.scale.x)
-				_check(wing_w < head_w, "крыло меньше головы: %.0f против %.0f" % [wing_w, head_w])
+				_check(wing_w < head_w * 1.5,
+					"крыло не больше полутора голов: %.0f против %.0f" % [wing_w, head_w])
 		else:
 			_check(w.is_empty(), "жир %d: крыльев нет (%d)" % [fat + 1, w.size()])
 		(e["game"] as Node).queue_free()
@@ -334,3 +355,73 @@ func _test_kuss_spatula() -> void:
 	_check(missing.is_empty(), "поза каста на всех жирах, нет на: %s" % [missing])
 	(e["game"] as Node).queue_free()
 	await process_frame
+
+# Мили-спелл до сих пор бил НЕВИДИМОЙ зоной: кулак был нарисован только в позе
+# каста. Проверяем, что теперь он есть на экране, что он крупнее головы — в этом
+# вся отсылка к Battletoads, — и что «POWER!» печатается по попаданию, а не на
+# каждый мах.
+func _test_big_fist() -> void:
+	for skin in ["viking", "tyson"]:
+		var e : Dictionary = await _boot(skin, 1)
+		var n : Node = e["n"]
+		var head : Sprite2D = (n as Node).get_node("Sprite2D")
+		var head_w : float = head.texture.get_size().x * head.scale.x
+		n.call("_try_fire_ability", (n as Node2D).position + Vector2(300.0, 0.0))
+		await _wait(0.14)
+		var fists : Array = []
+		_all_sprites((n as Node).get_parent(), fists)
+		var big : Sprite2D = null
+		for f in fists:
+			var w : float = absf((f as Sprite2D).texture.get_size().x * (f as Sprite2D).scale.x)
+			if w > head_w and f != head:
+				big = f
+		_check(big != null, "«%s»: кулак на экране и крупнее головы (%.0f)" % [skin, head_w])
+		(e["game"] as Node).queue_free()
+		await process_frame
+
+	# «POWER!» — только по попаданию.
+	var power : Texture2D = load("res://assets/skills/power.png")
+	var e2 : Dictionary = await _boot("viking", 1)
+	var n2 : Node = e2["n"]
+	n2.call("_try_fire_ability", (n2 as Node2D).position + Vector2(300.0, 0.0))
+	await _wait(0.5)
+	_check(_sprites_with((n2 as Node).get_parent(), power, []).is_empty(),
+		"промах — «POWER!» не печатается")
+
+	await _wait(5.0)                                   # откат мили-спелла
+	for i in 3:                                        # три цели в один мах
+		_rock(e2["sp"], (n2 as Node2D).position + Vector2(34.0 + i * 12.0, 0.0))
+	await process_frame
+	n2.call("_try_fire_ability", (n2 as Node2D).position + Vector2(300.0, 0.0))
+	await _wait(0.3)
+	var shown : int = _sprites_with((n2 as Node).get_parent(), power, []).size()
+	_check(shown == 1, "попал — «POWER!» ровно одно, а не по слову на цель: %d" % shown)
+	(e2["game"] as Node).queue_free()
+	await process_frame
+
+# У классики в кадре нет ни рук, ни оружия — «Размен» был выстрелом из ниоткуда.
+func _test_pointing_hand() -> void:
+	var hand : Texture2D = load("res://assets/skills/classic/hand.png")
+	var e : Dictionary = await _boot("classic", 1)
+	var n : Node = e["n"]
+	n.call("_try_fire_ability", (n as Node2D).position + Vector2(300.0, 0.0))
+	await _wait(0.12)
+	var found : Array = _sprites_with((n as Node).get_parent(), hand, [])
+	_check(found.size() == 1, "рука с пальцем появилась (%d)" % found.size())
+	if found.size() == 1:
+		var h : Sprite2D = found[0]
+		_check(h.global_position.x > (n as Node2D).global_position.x,
+			"и стоит со стороны выстрела: %.0f против %.0f"
+				% [h.global_position.x, (n as Node2D).global_position.x])
+	await _wait(0.8)
+	_check(_sprites_with((n as Node).get_parent(), hand, []).is_empty(),
+		"и убралась за собой")
+	(e["game"] as Node).queue_free()
+	await process_frame
+
+func _all_sprites(root: Node, out: Array) -> Array:
+	if root is Sprite2D and (root as Sprite2D).texture != null:
+		out.append(root)
+	for c in root.get_children():
+		_all_sprites(c, out)
+	return out

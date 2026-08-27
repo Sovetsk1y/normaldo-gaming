@@ -1736,9 +1736,10 @@ const MELEE_RADIUS     : float = 60.0   # радиус поражения
 
 func _cast_melee(dir: Vector2, reach: float) -> void:
 	var proj := _spawn_skill_projectile(dir, 0.0, null, MELEE_RADIUS,
-		_RYAG_HIT_GROUPS, _break_handler(), 0.0, MELEE_SWEEP_TIME + 0.05)
+		_RYAG_HIT_GROUPS, _melee_hit_handler(), 0.0, MELEE_SWEEP_TIME + 0.05)
 	if proj == null:
 		return
+	_attach_big_fist(proj, dir)
 	# Дуга: от «замаха» сверху к «доводке» снизу, с вылетом вперёд на reach.
 	var steps := 4
 	var tw := proj.create_tween()
@@ -1752,6 +1753,76 @@ func _cast_melee(dir: Vector2, reach: float) -> void:
 		else:
 			tw.tween_property(proj, "global_position", target, MELEE_SWEEP_TIME / float(steps))
 	_lunge(dir)
+
+# ── Кулак размером с героя (отсылка к Battletoads) ───────────────────────────
+# В Battletoads удар — это когда конечность на кадр превращается в НЕСОРАЗМЕРНО
+# огромный кулак или сапог. Ровно этот приём здесь и берётся.
+#
+# Раньше мили-спелл вообще ничего не рисовал: била невидимая зона, а кулак был
+# только нарисован в позе каста. Причина была уважительная — когда-то снаряд с
+# кулаком улетал от головы, и на экране оказывалось ДВА кулака сразу, будто
+# перчатку метнули. Лечится это не отказом от кулака, а размером: кулак впятеро
+# крупнее нарисованного в позе не читается как «второй», он читается как «вот
+# этим он и бьёт».
+const _FIST_TEX : Dictionary = {
+	"viking": preload("res://assets/skills/viking/fist.png"),
+	"tyson":  preload("res://assets/skills/tyson/punch.png"),
+}
+const _FIST_FALLBACK : Texture2D = preload("res://assets/skills/fist_generic.png")
+const _POWER_TEX     : Texture2D = preload("res://assets/skills/power.png")
+const FIST_PX        : float = 150.0   # голова — 99: кулак заведомо крупнее её
+
+func _attach_big_fist(proj: Node2D, dir: Vector2) -> void:
+	var tex : Texture2D = _FIST_TEX.get(SaveData.active_skin, _FIST_FALLBACK)
+	var fist := _make_sprite(tex, FIST_PX)
+	fist.rotation = dir.angle()
+	# Кулак «вырастает» за первую треть замаха, а не появляется целиком: именно
+	# рост и читается как превращение руки, а не как подставленная картинка.
+	var full := fist.scale
+	fist.scale = full * 0.45
+	proj.add_child(fist)
+	var tw := fist.create_tween()
+	tw.tween_property(fist, "scale", full, MELEE_SWEEP_TIME * 0.35)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(MELEE_SWEEP_TIME * 0.35)
+	tw.tween_property(fist, "modulate:a", 0.0, MELEE_SWEEP_TIME * 0.3)
+
+# Удар ломает предмет и печатает «POWER!» — но только по ПОПАДАНИЮ. Промах
+# оставляет экран чистым: слово на каждом касте превратилось бы в фон.
+func _melee_hit_handler() -> Callable:
+	var base := _break_handler()
+	return func(node):
+		var hit := is_instance_valid(node)
+		var pos : Vector2 = (node as Node2D).global_position if hit else Vector2.ZERO
+		var res = base.call(node)
+		if hit:
+			_pop_power(pos)
+		return res
+
+var _power_until : float = 0.0
+
+func _pop_power(pos: Vector2) -> void:
+	# Один взмах сносит несколько предметов подряд — слово печатаем один раз,
+	# иначе на экране вырастает стопка из четырёх «POWER!».
+	var now : float = float(Time.get_ticks_msec()) / 1000.0
+	if now < _power_until:
+		return
+	_power_until = now + 0.4
+	var host := get_parent()
+	if host == null:
+		return
+	var spr := _make_sprite(_POWER_TEX, 124.0)
+	spr.z_index = 41
+	spr.global_position = pos + Vector2(0.0, -42.0)
+	var full := spr.scale
+	spr.scale = full * 0.4
+	host.add_child(spr)
+	var tw := spr.create_tween()
+	tw.tween_property(spr, "scale", full, 0.16)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(spr, "position", spr.position + Vector2(0.0, -18.0), 0.42)
+	tw.tween_property(spr, "modulate:a", 0.0, 0.20)
+	tw.tween_callback(spr.queue_free)
 
 # Короткий выпад головы в сторону удара — то, что делает мили-спелл «ударом», а
 # не срабатыванием невидимой зоны.
@@ -1849,6 +1920,7 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 			_spawn_skill_projectile(dir, 520.0, coin, 30.0,
 				_RYAG_HIT_GROUPS, _to_dollar_handler(), 0.0)
 			_play_oneshot(_SFX_GLITTER, -6.0)
+			_pop_pointing_hand(dir)
 		"transformus":
 			# Превращает ПЕРВЫЙ задетый предмет любого типа в пиццу/доллар.
 			# Снаряд — не облачко, а комок «магических» партиклов со следом.
@@ -2041,14 +2113,14 @@ func _cast_invisibility(duration: float) -> void:
 const WING_TEX       : Texture2D = preload("res://assets/skills/dracula/wing_open.png")
 const WING_TEX_GHOST : Texture2D = preload("res://assets/skills/dracula/wing_ghost.png")
 const WING_FAT       : int   = 3      # нулевой индекс: «четвёртый жир»
-const WING_PX        : float = 66.0   # меньше головы (99 px): хитбокс-то не растёт
+const WING_PX        : float = 112.0  # крупнее головы (99 px) — так и просили
 # Корни разведены почти к краям головы. Первая версия ставила их на ±20 и прятала
 # крылья ЦЕЛИКОМ за головой: наружу торчали только зубцы перепонки, и читались
 # они как красный воротник, а не как крылья.
-const WING_X         : float = 41.0
-const WING_Y         : float = -12.0
-const WING_REST_DEG  : float = -22.0  # сложены
-const WING_UP_DEG    : float = -58.0  # взмах вверх
+const WING_X         : float = 54.0
+const WING_Y         : float = -20.0
+const WING_REST_DEG  : float = -24.0  # сложены
+const WING_UP_DEG    : float = -60.0  # взмах вверх
 const WING_FLAP_T    : float = 0.34
 const WING_PAUSE_T   : float = 1.6    # между взмахами: «периодически», не мельтешит
 
@@ -2248,6 +2320,39 @@ func _to_dollar_handler() -> Callable:
 		_vfx_particles(SkinSkills.COUNTER)
 		_show_cash_face()
 		return true
+
+# Рука с пальцем на выстреле классики. У неё в кадре нет ни рук, ни оружия —
+# стрелять ей нечем, и «Размен» оставался выстрелом из ниоткуда. Рука появляется
+# у головы и показывает пальцем туда, куда ушёл снаряд.
+#
+# Тот же приём, что у пальца-указателя в подсказках интерфейса: жест понятен без
+# подписи, и глаз идёт по нему в сторону выстрела.
+const _POINT_HAND_TEX : Texture2D = preload("res://assets/skills/classic/hand.png")
+const POINT_HAND_PX   : float = 58.0
+const POINT_HAND_T    : float = 0.40
+
+func _pop_pointing_hand(dir: Vector2) -> void:
+	var host := get_parent()
+	if host == null:
+		return
+	var spr := _make_sprite(_POINT_HAND_TEX, POINT_HAND_PX)
+	spr.z_index = 39
+	# Рука нарисована пальцем вправо, поэтому доворачиваем её по направлению
+	# тапа; при выстреле влево переворачиваем, чтобы не висела вверх ногами.
+	spr.rotation = dir.angle()
+	if dir.x < 0.0:
+		spr.scale.y = -spr.scale.y
+	spr.global_position = global_position + dir * 34.0
+	var full := spr.scale
+	spr.scale = full * 0.5
+	host.add_child(spr)
+	var tw := spr.create_tween()
+	tw.tween_property(spr, "scale", full, POINT_HAND_T * 0.35)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(spr, "global_position",
+		spr.global_position + dir * 18.0, POINT_HAND_T)
+	tw.tween_property(spr, "modulate:a", 0.0, POINT_HAND_T * 0.4)
+	tw.tween_callback(spr.queue_free)
 
 # Реакция на УДАЧНЫЙ размен: доллары в глазах. Показывается по попаданию, а не
 # по касту — в этом вся разница с позой каста. Промахнулся мимо предмета — лицо
