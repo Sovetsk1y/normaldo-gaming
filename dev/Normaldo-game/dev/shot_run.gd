@@ -94,6 +94,26 @@ func _initialize() -> void:
 
 	# Мини-игра с мутагеном: ставим фазу Б напрямую и фиксируем уровень жира
 	# прямо перед съёмкой — иначе он утечёт за кадры ожидания.
+	# Бомж с бочкой: сет-пис ставится в линию Нормальдо, чтобы в кадре были и
+	# он, и цель. Задержка выбирается режимом: 0.35 — приезд, 1.3 — собака.
+	if argv.size() > 5 and String(argv[5]).begins_with("barrel"):
+		spawner.set_process(false)
+		spawner.call("clear_items")
+		for _i in 6:
+			await process_frame
+		var vpb : Vector2 = get_root().get_visible_rect().size
+		var lanes : Array = []
+		for i in 5:
+			lanes.append(vpb.y * (float(i) + 0.5) / 5.0)
+		(normaldo as Node2D).position = Vector2(200.0, lanes[2])
+		spawner.call("_setpiece_bum_barrel", 250.0, [lanes[2], lanes[2], lanes[2],
+			lanes[2], lanes[2]], vpb.x)
+		var wait_t : float = 0.35 if String(argv[5]) == "barrel_come" else 1.30
+		var tb := 0.0
+		while tb < wait_t:
+			await process_frame
+			tb += 1.0 / 60.0
+
 	if argv.size() > 5 and String(argv[5]).begins_with("boss"):
 		var boss : Node = game.get_node_or_null("FatBoss")
 		var bar : float = 1.0

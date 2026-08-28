@@ -14,6 +14,7 @@ const SNAKE_SCENE        := preload("res://scenes/snake.tscn")
 const MONEY_BAG_SCENE    := preload("res://scenes/money_bag.tscn")
 const DOG_SCENE          := preload("res://scenes/dog.tscn")
 const HOMELESS_SCENE     := preload("res://scenes/homeless.tscn")
+const BUM_BARREL_SCRIPT  := preload("res://scripts/bum_barrel.gd")
 const MOLOTOV_SCENE      := preload("res://scenes/molotov.tscn")
 # Новые предметы (script-only Area2D).
 const COMPASS_SCRIPT       := preload("res://scripts/compass_item.gd")
@@ -121,9 +122,9 @@ const CAMPAIGN_PAT_WEIGHTS : Array = [
 # See /Концепция/Эпизод 1 — прогрессия предметов (редизайн).md
 const CAMPAIGN_DIRECTOR : Array = [
 	{ "res": 0.90, "int": 0.85, "cad": 20.0, "sp": ["sandwich", "zigzag"] },
-	{ "res": 0.76, "int": 0.72, "cad": 16.0, "sp": ["sandwich", "zigzag", "barrel_cascade", "snake_columns", "bum_crowd", "glove_wave", "cone"] },
-	{ "res": 0.66, "int": 0.64, "cad": 14.0, "sp": ["barrel_cascade", "snake_columns", "stone_chess", "bum_wall", "bum_crowd", "diagonal", "glove_wave", "cone"] },
-	{ "res": 0.58, "int": 0.56, "cad": 12.0, "sp": ["snake_columns", "stone_chess", "glove_wave", "diagonal", "bum_wall", "bum_crowd", "cone"] },
+	{ "res": 0.76, "int": 0.72, "cad": 16.0, "sp": ["sandwich", "zigzag", "barrel_cascade", "snake_columns", "bum_crowd", "bum_barrel", "glove_wave", "cone"] },
+	{ "res": 0.66, "int": 0.64, "cad": 14.0, "sp": ["barrel_cascade", "snake_columns", "stone_chess", "bum_wall", "bum_crowd", "bum_barrel", "diagonal", "glove_wave", "cone"] },
+	{ "res": 0.58, "int": 0.56, "cad": 12.0, "sp": ["snake_columns", "stone_chess", "glove_wave", "diagonal", "bum_wall", "bum_crowd", "bum_barrel", "cone"] },
 	{ "res": 0.52, "int": 0.50, "cad": 10.0, "sp": ["stone_chess", "glove_wave", "molotov_wave", "diagonal", "bum_crowd"] },
 ]
 
@@ -585,6 +586,7 @@ func _run_set_piece(id: String, speed: float, lanes: Array, vp_w: float) -> void
 		"bum_wall":       await _setpiece_bum_wall(speed, lanes, vp_w)
 		"bum_crowd":      await _setpiece_bum_crowd(speed, lanes, vp_w)
 		"cone":           await _setpiece_cone(speed, lanes, vp_w)
+		"bum_barrel":     await _setpiece_bum_barrel(speed, lanes, vp_w)
 		"stone_chess":    await _t3_checkerboard(speed, lanes, vp_w)
 		"diagonal":       await _t3_diagonal(speed, lanes, vp_w)
 		"glove_wave":     await _wave_glove_sweep(speed, lanes, vp_w)
@@ -592,13 +594,20 @@ func _run_set_piece(id: String, speed: float, lanes: Array, vp_w: float) -> void
 		_:                await _t1_center_line(speed, lanes, vp_w)
 
 # Толпа бомжей — тучи бомжей БЫСТРО пролетают большими кучами, оставляя ровно
-# 2 СОСЕДНИХ свободных лейна; каждая следующая туча оставляет другую (но тоже
-# соседнюю) пару. Доступно уже после 1-й минуты (фаза 1+).
+# 2 СОСЕДНИХ свободных лейна; каждая следующая туча сдвигает щель НА ОДИН лейн.
+# Доступно уже после 1-й минуты (фаза 1+).
+#
+# Волна была почти непроходимой. Складывались три вещи: скорость ×1.5, короткая
+# пауза между тучами и щель, прыгавшая куда угодно — с крайней пары на
+# противоположную. Игрок должен был пересечь три лейна быстрее, чем долетала
+# следующая туча. Разрежено всё три: скорость, пауза и величина прыжка щели.
+const BUM_CROWD_SPEED : float = 1.30   # было 1.50
+const BUM_CROWD_GAP   : float = 3.20   # было 2.40
 func _setpiece_bum_crowd(speed: float, lanes: Array, vp_w: float) -> void:
-	var fast := speed * 1.5
+	var fast := speed * BUM_CROWD_SPEED
 	var waves := randi_range(3, 4)
 	var free_start := randi() % (LANE_COUNT - 1)   # свободны лейны free_start и free_start+1
-	var gap := _col_gap(fast) * 2.4
+	var gap := _col_gap(fast) * BUM_CROWD_GAP
 	for w in waves:
 		if _frozen: return
 		for lane in LANE_COUNT:
@@ -606,9 +615,33 @@ func _setpiece_bum_crowd(speed: float, lanes: Array, vp_w: float) -> void:
 				_spawn_homeless_clump(lanes[lane], vp_w, fast)
 		if w < waves - 1:
 			await get_tree().create_timer(gap).timeout
-			var opts := [0, 1, 2, 3]      # индексы соседних пар (start..start+1)
-			opts.erase(free_start)
-			free_start = opts[randi() % opts.size()]
+			# Просвет ПЕРЕЕЗЖАЕТ НА СОСЕДНИЙ, а не куда угодно. Раньше пара
+			# свободных лейнов могла прыгнуть с (0,1) на (3,4) — через три лейна
+			# на полуторной скорости, то есть волна требовала перелёта, который
+			# физически не успеваешь. Теперь щель уходит максимум на один лейн:
+			# двигаться надо всегда, но дорога есть всегда.
+			var step : int = 1 if randf() < 0.5 else -1
+			var nxt : int = free_start + step
+			if nxt < 0 or nxt > LANE_COUNT - 2:
+				nxt = free_start - step
+			free_start = clampi(nxt, 0, LANE_COUNT - 2)
+
+# Бомж с бочкой: приезжает, ставит бочку, бочка открывается и стреляет собакой
+# по линии Нормальдо. Отличается от остальных сет-писов тем, что угроза
+# ПОЯВЛЯЕТСЯ НЕ СРАЗУ: сначала читается подготовка, и только потом летит собака.
+# См. scripts/bum_barrel.gd
+func _setpiece_bum_barrel(speed: float, lanes: Array, vp_w: float) -> void:
+	var lane : int = randi() % LANE_COUNT
+	_mark_base_span(lanes[lane])
+	var node := Node2D.new()
+	# Скрипт и setup — ДО add_child: _ready() читает lane_y и speed, а поставь
+	# скрипт после добавления, и порядок вызовов держится на честном слове.
+	node.set_script(BUM_BARREL_SCRIPT)
+	node.call("setup", get_parent().get_node_or_null("Normaldo"), lanes[lane], speed)
+	add_child(node)
+	# Пока идёт хореография, поток не наваливается сверху: угроза тут одна и
+	# читаемая, и заваливать её обычными предметами значит спрятать.
+	await get_tree().create_timer(1.5).timeout
 
 # Конус-сет-пис: центральный конус (3 ряда) + сверху/снизу немного ресурсов,
 # чтобы соблазнить пройти сбоку либо сбить конус тапами.
