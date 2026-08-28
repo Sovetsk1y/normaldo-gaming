@@ -108,7 +108,16 @@ func _initialize() -> void:
 		(normaldo as Node2D).position = Vector2(200.0, lanes[2])
 		spawner.call("_setpiece_bum_barrel", 250.0, [lanes[2], lanes[2], lanes[2],
 			lanes[2], lanes[2]], vpb.x)
-		var wait_t : float = 0.35 if String(argv[5]) == "barrel_come" else 1.30
+		# Такты хореографии. Бомж теперь СНАЧАЛА влетает как обычный предмет и
+		# только потом отыгрывает атаку, поэтому до собаки около двух секунд.
+		var waits : Dictionary = {
+			"barrel_come": 0.40,   # летит как обычный предмет
+			"barrel_put":  1.45,   # затормозил, ставит бочку стоймя
+			"barrel_turn": 1.88,   # заваливается набок крышкой влево
+			"barrel_lid":  2.15,   # крышка отошла
+			"barrel_dog":  2.35,   # откинута, собака вылетела
+		}
+		var wait_t : float = float(waits.get(String(argv[5]), 2.35))
 		var tb := 0.0
 		while tb < wait_t:
 			await process_frame

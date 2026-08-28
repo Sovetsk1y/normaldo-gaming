@@ -82,3 +82,73 @@ static func apply_node_scale(node: Node2D, mult: float) -> void:
 	if node == null or is_equal_approx(mult, 1.0):
 		return
 	node.scale = Vector2.ONE * mult
+
+# ── Кадрирование по ВИДИМОЙ части ─────────────────────────────────────────────
+# Часть кадров приходит с полями: у бочки рисунок занимает половину кадра.
+# Приведённый ПО КАДРУ такой предмет выходит вдвое мельче соседей при формально
+# «одинаковом размере». Отзыв на бочку так и звучал — «бомж маленький, бочка
+# ещё меньше».
+#
+# Ось замера выбирается вызывающим. Для кадров одной анимации это важно: бочка
+# стоячая и бочка лежачая нормируются по РАЗНЫМ сторонам, иначе тело бочки
+# меняет размер при смене кадра.
+enum { AXIS_LONG, AXIS_W, AXIS_H }
+
+# Замер кэшируется по пути ресурса: get_image() тянет текстуру обратно с
+# видеопамяти, и делать это на каждый спавн незачем.
+static var _content : Dictionary = {}
+
+# Прямоугольник непрозрачных пикселей текстуры. Пустая текстура и текстура, с
+# которой картинку не забрать, отдают весь кадр — это ровно прежнее поведение.
+static func content_rect(tex: Texture2D) -> Rect2i:
+	if tex == null:
+		return Rect2i()
+	var key : String = tex.resource_path
+	if key != "" and _content.has(key):
+		return _content[key]
+	var r := Rect2i(Vector2i.ZERO, Vector2i(tex.get_size()))
+	var img := tex.get_image()
+	if img != null:
+		var used := img.get_used_rect()
+		if used.size.x > 0 and used.size.y > 0:
+			r = used
+	if key != "":
+		_content[key] = r
+	return r
+
+# Scale, при котором выбранная сторона РИСУНКА станет target_px пикселей.
+static func content_scale(tex: Texture2D, target_px: float = BASE_PX,
+		axis: int = AXIS_LONG) -> float:
+	if tex == null:
+		return 1.0
+	var r := content_rect(tex)
+	var m : float = float(maxi(r.size.x, r.size.y))
+	if axis == AXIS_W:
+		m = float(r.size.x)
+	elif axis == AXIS_H:
+		m = float(r.size.y)
+	if m <= 0.0:
+		return 1.0
+	return target_px / m
+
+# Как fit_sprite, но target_px меряется по РИСУНКУ, а не по рамке кадра.
+static func fit_sprite_content(sprite: Sprite2D, target_px: float = BASE_PX,
+		axis: int = AXIS_LONG) -> void:
+	if sprite == null:
+		return
+	sprite.scale          = Vector2.ONE * content_scale(sprite.texture, target_px, axis)
+	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+
+# Поставить спрайт на точку РИСУНКА, а не кадра: (0.5, 1.0) — «серединой низа»,
+# (0.0, 1.0) — «нижним левым углом». Нужно там, где кадры анимации нарисованы в
+# разных рамках: без общей опоры предмет на каждой смене кадра подпрыгивает.
+# Эта же точка — центр вращения спрайта, и бочка заваливается набок вокруг
+# своего нижнего угла, как настоящая.
+static func anchor_sprite(sprite: Sprite2D, ax: float, ay: float) -> void:
+	if sprite == null or sprite.texture == null:
+		return
+	var sz := sprite.texture.get_size()
+	var r  := content_rect(sprite.texture)
+	var p  := Vector2(float(r.position.x) + float(r.size.x) * ax,
+		float(r.position.y) + float(r.size.y) * ay)
+	sprite.offset = sz * 0.5 - p
