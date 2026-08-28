@@ -1211,7 +1211,25 @@ func _apply_win(result: Dictionary) -> void:
 	match prize.rtype:
 		"xp":
 			var fly_tex := TEX_PACK if (prize.rval as int) >= 500 else TEX_PIZZA
-			_fly_icons_to(fly_tex, src, _xp_bar_target, 4, func(): _do_apply_xp(prize.rval))
+			var total : int = prize.rval as int
+			var given := [0]
+			var lvl_rewards : Array = []
+			# Полоса растёт ПО МЕРЕ прилёта: каждая пицца несёт свою долю опыта
+			# и двигает заливку на неё. Раньше все четыре просто долетали, и
+			# только потом полоса ехала одним махом — удар пиццы о полосу ни с
+			# чем не был связан.
+			var step := func(i: int, n: int) -> void:
+				var want : int = int(round(float(total) * float(i) / float(n)))
+				var chunk : int = want - given[0]
+				if chunk <= 0:
+					return
+				given[0] = want
+				var got : Array = SaveData.add_xp(chunk, "slot_prize")
+				lvl_rewards.append_array(got)
+				_win_applied = true
+				_step_xp_bar(SaveData.xp_level_progress(), not got.is_empty())
+			_fly_icons_to(fly_tex, src, _xp_bar_target, 4,
+				func(): _finish_xp(lvl_rewards), Color.WHITE, step)
 		"dollars":
 			var dol_fn := func():
 				_win_applied = true
@@ -1233,7 +1251,8 @@ func _apply_win_instant(result: Dictionary) -> void:
 		"tokens":  SaveData.add_tokens(prize.rval, "slot_prize")
 
 func _fly_icons_to(tex: Texture2D, from: Vector2, to: Vector2, count: int,
-		on_done: Callable, tint: Color = Color.WHITE) -> void:
+		on_done: Callable, tint: Color = Color.WHITE,
+		on_each: Callable = Callable()) -> void:
 	var state := [0]
 	for i in count:
 		var ico       := _make_icon(tex, 14.0)
@@ -1249,9 +1268,37 @@ func _fly_icons_to(tex: Texture2D, from: Vector2, to: Vector2, count: int,
 		tw.tween_callback(func():
 			ico.queue_free()
 			state[0] += 1
+			# Каждая долетевшая пицца толкает полосу на свою долю: опыт
+			# начисляется порциями, а не одним рывком после последней иконки.
+			if on_each.is_valid():
+				on_each.call(state[0], count)
 			if state[0] == count:
 				on_done.call()
 		)
+
+# Шаг полосы под одну прилетевшую пиццу. Тайминг короткий: между иконками
+# 0.075 c, и длинный твин просто не успел бы доиграть до следующей.
+func _step_xp_bar(p: float, levelled: bool) -> void:
+	if not is_instance_valid(_skin_bar_fill):
+		return
+	var tw := _skin_bar_fill.create_tween()
+	if tw == null:
+		return
+	tw.tween_property(_skin_bar_fill, "size:x",
+		maxf(2.0, (_skin_bar_w - 4.0) * p), 0.14) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	if levelled:
+		_set_bar_color(Color(1.0, 0.85, 0.20))
+
+# Уровни, набранные по дороге, показываются ПОСЛЕ прилёта всех пицц: попап
+# посреди полёта оборвал бы его на середине.
+func _finish_xp(rewards: Array) -> void:
+	var p := SaveData.xp_level_progress()
+	if rewards.is_empty():
+		_set_bar_color(Color(0.45, 0.80, 1.0))
+		_refresh_skin_panel()
+		return
+	_show_next_level_reward(rewards, 0, p)
 
 func _do_apply_xp(amount: int) -> void:
 	var _old_p  := SaveData.xp_level_progress()

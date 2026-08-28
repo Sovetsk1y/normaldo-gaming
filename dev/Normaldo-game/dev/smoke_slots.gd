@@ -274,6 +274,33 @@ func _test_payout(hud: Node, save: Node) -> void:
 		scr.free()
 	await process_frame
 
+# Опыт приходит ПОРЦИЯМИ, по одной на каждую долетевшую пиццу. Раньше все
+# иконки просто долетали, а полоса ехала одним махом после последней — удар
+# пиццы о полосу ни с чем не был связан.
+func _test_xp_steps(hud: Node, save: Node) -> void:
+	var scr : Node = await _open(hud, save, 3)
+	save.skin_xp    = 0
+	save.skin_level = 1
+	var res := {"sym": "pizza", "count": 3}
+	scr.set("_last_result", res)
+	scr.call("_show_win_popup", res)
+	await process_frame
+	scr.call("_apply_win", res)
+
+	# Снимаем опыт покадрово: он обязан расти НЕ одним скачком.
+	var seen : Array = []
+	for _i in 150:
+		await process_frame
+		var v : int = int(save.skin_xp)
+		if seen.is_empty() or seen[seen.size() - 1] != v:
+			seen.append(v)
+	_check(seen.size() >= 3,
+		"опыт пришёл порциями, а не одним куском: шагов %d (%s)" % [seen.size(), seen])
+	_check(int(save.skin_xp) > 0, "и в сумме начислен: %d" % save.skin_xp)
+	if is_instance_valid(scr):
+		scr.free()
+	await process_frame
+
 # Окно выигрыша открыто, игрок жмёт «назад» — приз всё равно обязан прийти.
 func _test_close_with_popup(hud: Node, save: Node) -> void:
 	var scr : Node = await _open(hud, save, 3)

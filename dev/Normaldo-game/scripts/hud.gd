@@ -2439,18 +2439,20 @@ func _show_shop(restore_scroll: int = 0, from_slots: bool = false, skip_open_ani
 	scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
 	overlay.add_child(scroll)
 
-	# Owned first, then shop — flat list (no section headers in the grid).
+	# Порядок КОЛЛЕКЦИИ, а не владения: как в реестре, от классики к легендарным.
+	#
+	# Раньше сетка шла «сначала свои, потом магазин», и покупка ПЕРЕСОБИРАЛА её:
+	# карточка прыгала из хвоста в начало прямо из-под пальца, а на её место
+	# приезжала чужая. Игрок терял то, что только что купил.
+	#
+	# Владение показывает сама карточка — словом на кнопке (КУПИТЬ / НАДЕТЬ /
+	# АКТИВЕН) и уровнем на портрете. Гасить непокупленные целиком не стали:
+	# коллекция должна выглядеть коллекцией, а не списком запретов.
 	var skins : Array = []
 	for sd in SkinRegistry.SKINS:
 		if sd["id"] == "new_year":
 			continue
-		if SaveData.owns_skin(sd["id"]):
-			skins.append(sd)
-	for sd in SkinRegistry.SKINS:
-		if sd["id"] == "new_year":
-			continue
-		if not SaveData.owns_skin(sd["id"]):
-			skins.append(sd)
+		skins.append(sd)
 
 	# Вся коллекция на одном экране: 13 скинов ложатся 5×3 и помещаются целиком.
 	# Раньше карточка была 150×156, третий ряд обрезался, и треть коллекции
@@ -4258,9 +4260,19 @@ func _build_skin_grid_cell(parent: Control, pos: Vector2, w: float, h: float,
 	cell.position = pos; cell.size = Vector2(w, h); cell.mouse_filter = Control.MOUSE_FILTER_PASS
 	parent.add_child(cell)
 
-	UiKit.panel(cell, Vector2.ZERO, Vector2(w, h),
-		Color(0.10, 0.09, 0.13, 0.97) if (is_owned or can_buy) else Color(0.07, 0.06, 0.08, 0.94),
-		12, Color(1.0, 0.82, 0.25, 1.0) if is_active else Color(rc.r, rc.g, rc.b, 0.85),
+	# Рамка выбранного скина БЕЛАЯ, а фон подсвечен. Золотую рамку пришлось
+	# убрать: ровно такое же золото у легендарной редкости, и «выбран» читалось
+	# как «легендарный» — два разных смысла одним цветом.
+	#
+	# Все пять цветов редкости заняты (серый, зелёный, синий, фиолетовый,
+	# золото), поэтому выбор кодируется НЕ оттенком, а заливкой карточки: она
+	# одна такая на экране, и найти её можно не разбирая цвета.
+	var fill : Color = Color(0.10, 0.09, 0.13, 0.97) if (is_owned or can_buy) \
+		else Color(0.07, 0.06, 0.08, 0.94)
+	if is_active:
+		fill = Color(0.13, 0.22, 0.19, 0.98)
+	UiKit.panel(cell, Vector2.ZERO, Vector2(w, h), fill, 12,
+		Color(0.95, 1.0, 0.96, 1.0) if is_active else Color(rc.r, rc.g, rc.b, 0.85),
 		3 if is_active else 2)
 	# Недоступный скин гасится целиком — но это ВТОРОЙ признак, первый на кнопке.
 	if not is_owned and not can_buy:
@@ -4303,9 +4315,11 @@ func _build_skin_grid_cell(parent: Control, pos: Vector2, w: float, h: float,
 		lv.modulate = Color(0.70, 0.92, 1.0)
 		lv.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lv.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		lv.size = Vector2(chip_w, 15.0); lv.position = Vector2(6.0, 17.0)
 		lv.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		cell.add_child(lv)
+		# Через UiKit.place: размер до add_child зажимается по минимуму темы (48
+		# px по высоте), и подпись центрировалась в коробке втрое выше чипа —
+		# отсюда «ур.1» сидело по нижней линии, а не по центру плашки.
+		UiKit.place(cell, lv, Vector2(6.0, 17.0), Vector2(chip_w, 15.0))
 
 	var name_lbl := Label.new()
 	name_lbl.add_theme_font_override("font", UI_FONT); name_lbl.add_theme_font_size_override("font_size", 11)
@@ -5700,19 +5714,37 @@ func _notification(what: int) -> void:
 # молчала про сам забег, а убавить звук с неё было нельзя вовсе.
 # См. /Концепция/Экран паузы.md
 const _PAUSE_SCREEN_SCRIPT := preload("res://scripts/pause_screen.gd")
+var _pause_layer    : CanvasLayer = null
+var _settings_layer : CanvasLayer = null
+
+# Пауза и настройки живут в СВОИХ CanvasLayer, а не просто с большим z_index.
+# z_index упорядочивает только внутри одного слоя: мини-игры рисуют свой
+# интерфейс в CanvasLayer с layer = 50, и мигающее «ТАПАЙ» просвечивало сквозь
+# меню паузы, сколько z_index ему ни ставь.
+const PAUSE_LAYER    : int = 120
+const SETTINGS_LAYER : int = 130
+
+func _modal_layer(idx: int) -> CanvasLayer:
+	var cl := CanvasLayer.new()
+	cl.layer        = idx
+	cl.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(cl)
+	return cl
 
 func _open_pause_menu() -> void:
 	if is_instance_valid(_pause_overlay):
 		return
 	var scr : Control = _PAUSE_SCREEN_SCRIPT.new()
 	scr.call("setup", self)
-	add_child(scr)
+	_pause_layer = _modal_layer(PAUSE_LAYER)
+	_pause_layer.add_child(scr)
 	_pause_overlay = scr
 	get_tree().paused = true
 
 func _close_pause_menu() -> void:
-	if is_instance_valid(_pause_overlay):
-		_pause_overlay.queue_free()
+	if is_instance_valid(_pause_layer):
+		_pause_layer.queue_free()
+	_pause_layer = null
 	_pause_overlay = null
 	get_tree().paused = false
 
@@ -9078,8 +9110,16 @@ func _show_settings_modal() -> void:
 		return
 	var scr : Node = _SETTINGS_SCREEN_SCRIPT.new()
 	scr.call("setup", self)
-	add_child(scr)
+	# Своим слоем ПОВЕРХ паузы: с неё сюда и приходят.
+	_settings_layer = _modal_layer(SETTINGS_LAYER)
+	_settings_layer.add_child(scr)
 	_settings_screen = scr
+	# Экран настроек закрывает себя сам (queue_free в _on_close) — слой обязан
+	# уйти следом, иначе после каждого открытия остаётся пустой CanvasLayer.
+	var lay := _settings_layer
+	scr.tree_exited.connect(func() -> void:
+		if is_instance_valid(lay):
+			lay.queue_free(), CONNECT_ONE_SHOT)
 
 # ── Уведомления ──────────────────────────────────────────────────────────────
 # Раздел уведомлений переехал в экран настроек (scripts/settings_screen.gd) —

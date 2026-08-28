@@ -48,6 +48,8 @@ func _initialize() -> void:
 	await _test_press_anim()
 	print("── Пульсация ждёт входа в дерево ──")
 	await _test_pulse()
+	print("── Пауза поверх интерфейса мини-игры ──")
+	await _test_pause_above_minigame(hud, game)
 
 	print("")
 	if _fails == 0:
@@ -308,3 +310,46 @@ func _test_pulse() -> void:
 		"попал в дерево — пульсация пошла: размах %.3f" % (seen.max() - seen.min()))
 	host.free()
 	await process_frame
+
+
+# «ТАПАЙ» из мини-игры просвечивал сквозь меню паузы. Причина не в z_index:
+# мини-игры рисуют интерфейс в СВОЁМ CanvasLayer (layer = 50), а z_index
+# упорядочивает только внутри одного слоя. Пауза обязана лежать слоем выше —
+# иначе поверх её кнопок мигает подсказка остановленной игры.
+func _test_pause_above_minigame(hud: Node, game: Node) -> void:
+	var boss : Node = game.get_node_or_null("FatBoss")
+	var scr : Node = await _open(hud)
+	var lay : CanvasLayer = (scr as Node).get_parent() as CanvasLayer
+	_check(lay != null, "экран паузы лежит в собственном CanvasLayer")
+	if lay == null:
+		await _shut(hud)
+		return
+
+	# Слой мини-игры создаётся вместе с ней — берём из неё же, чтобы проверка не
+	# разошлась с кодом, если слой там поменяют.
+	boss.call("dev_begin_play", 1.0)
+	for _i in 6:
+		await process_frame
+	var mg : CanvasLayer = boss.get("_ui")
+	_check(mg != null, "интерфейс мини-игры нашёлся")
+	if mg != null:
+		_check(lay.layer > mg.layer,
+			"пауза выше мини-игры: %d против %d" % [lay.layer, mg.layer])
+	boss.call("_end_minigame")
+	for _i in 10:
+		await process_frame
+
+	# И настройки — выше паузы, они открываются с неё.
+	scr.call("_on_settings")
+	for _i in 6:
+		await process_frame
+	var st : Node = hud.get("_settings_screen")
+	if is_instance_valid(st):
+		var slay : CanvasLayer = (st as Node).get_parent() as CanvasLayer
+		_check(slay != null and slay.layer > lay.layer,
+			"настройки выше паузы: %d против %d"
+				% [slay.layer if slay != null else -1, lay.layer])
+		st.call("_on_close")
+		for _i in 40:
+			await process_frame
+	await _shut(hud)
