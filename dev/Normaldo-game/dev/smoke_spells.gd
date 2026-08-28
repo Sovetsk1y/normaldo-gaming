@@ -237,8 +237,15 @@ func _test_glasses_pose() -> void:
 	_check(spr.texture == f1, "первый кадр: пьёт банку")
 	await _wait(0.34)
 	_check(spr.texture == f2, "второй кадр: поехало")
-	await _wait(0.5)
-	_check(spr.texture == normal, "и вернулся к обычной голове")
+
+	# «Поехало» ДЕРЖИТСЯ всё ускорение, а не мгновение: эффект длится две
+	# секунды, и если лицо возвращается через треть, спелл читается как
+	# мигание, а не как состояние.
+	await _wait(0.8)
+	_check(spr.texture == f2, "и держится, пока действует ускорение")
+	_check(float(n.get("_speed_boost_remaining")) > 0.0, "ускорение и правда идёт")
+	await _wait(1.6)
+	_check(spr.texture == normal, "кончилось ускорение — вернулся к обычной голове")
 	(e["game"] as Node).queue_free()
 	await process_frame
 

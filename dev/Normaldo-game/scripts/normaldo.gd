@@ -281,7 +281,12 @@ const _ITEM_SCENE        := preload("res://scenes/item.tscn")
 const _PIZZA_TEX         := preload("res://assets/items/pizza.png")
 const _DOLLAR_TEX        := preload("res://assets/items/dollar.png")
 const _RESIST_SFX        := preload("res://assets/audio/resist.mp3")
-const _WEB_BIG_TEX       := preload("res://assets/skills/spider_man/big_shot.png")
+# На предмете остаётся ПАУТИНА, а не руки. Раньше сюда был подставлен
+# big_shot.png — а это пара ладоней Спайди, и на залепленной бочке вырастали
+# две красные руки неизвестно чьи. Паутина — последний кадр раскадровки, там
+# она раскрыта полностью.
+const _WEB_BIG_TEX       := preload("res://assets/skills/spider_man/web8.png")
+const _WEB_HANDS_TEX     := preload("res://assets/skills/spider_man/big_shot.png")
 # Кулак Викинга и перчатка Тайсона лежат в assets/skills/<скин>/ и рисуются
 # прямо в позе каста (stateN_spell). Отдельными спрайтами их больше не спавним —
 # именно от этого на экране получалось два кулака сразу.
@@ -901,7 +906,17 @@ func _eat_pizza_menu() -> void:
 		_audio.play()
 	_eating         = true
 	_eat_timer      = EAT_ANIM_TIME
-	_sprite.texture = _skin_eat_tex[fat_state]
+	_show_eat_frame()
+
+# Кадр поедания. Отдельной функцией, потому что анимация еды НЕ проходит через
+# _update_mouth (тот выходит при _eating) и раньше писала обычный кадр напрямую:
+# Дракула под невидимостью проявлялся на каждой съеденной пицце.
+func _show_eat_frame() -> void:
+	var variant := "_eat"
+	if _ghost_active and fat_state < _skin_ghost_eat_tex.size() \
+			and _skin_ghost_eat_tex[fat_state] != null:
+		variant = "_ghost_eat"
+	_show_head(_head_tex(true), variant)
 
 func set_tilt(angle: float, duration: float) -> void:
 	var tw := create_tween()
@@ -1058,6 +1073,7 @@ func _physics_process(delta: float) -> void:
 	if _dead:
 		return
 
+	_update_web_line()
 	_tick_skill_cd(delta)
 
 	# Eat animation timer
@@ -1169,7 +1185,31 @@ func _on_pizza_left(area: Area2D) -> void:
 func _update_mouth() -> void:
 	if _eating or _morphing:   # the morph owns the sprite while spinning
 		return
-	_sprite.texture = _head_tex(_nearby_pizzas > 0)
+	var eating := _nearby_pizzas > 0
+	var variant := ""
+	if _ghost_active and fat_state < _skin_ghost_tex.size() \
+			and _skin_ghost_tex[fat_state] != null:
+		variant = "_ghost_eat" if eating else "_ghost"
+	elif _hold_variant != "" and fat_state < _skin_spell2_tex.size() \
+			and _skin_spell2_tex[fat_state] != null:
+		variant = _hold_variant
+	elif eating:
+		variant = "_eat"
+	_show_head(_head_tex(eating), variant)
+
+# Подмена кадра головы вместе с ПОПРАВКОЙ на кадрирование. Варианты нарисованы
+# в своих рамках, а масштаб спрайта посчитан по обычному кадру: без поправки
+# голова на подмене меняет размер (у классики «доллары в глазах» приезжали в
+# 2.7 раза крупнее и читались как пролаг). См. SkinMetrics.POSE_K.
+var _head_k : float = 1.0
+
+func _show_head(tex: Texture2D, variant: String) -> void:
+	if tex == null:
+		return
+	_sprite.texture = tex
+	_head_k = 1.0 if variant == "" \
+		else SkinMetrics.pose_k(SaveData.active_skin, variant, fat_state)
+	_sprite.scale = _base_scale * _head_k
 
 # Какой кадр головы сейчас на экране. Отдельной функцией, потому что вариантов
 # уже три пары: обычная, «ест» и серая призрачная у Дракулы под невидимостью.
@@ -1180,7 +1220,27 @@ func _head_tex(eating: bool) -> Texture2D:
 		var g = _skin_ghost_eat_tex[fat_state] if eating else _skin_ghost_tex[fat_state]
 		if g != null:
 			return g
+	# Удерживаемая поза: у Очков «поехало» держится ВСЁ время ускорения, а не
+	# мгновение. Эффект длится две секунды, и если лицо возвращается через треть
+	# секунды, спелл читается как мигание, а не как состояние.
+	if _hold_variant != "" and fat_state < _skin_spell2_tex.size():
+		var h = _skin_spell2_tex[fat_state]
+		if h != null:
+			return h
 	return _skin_eat_tex[fat_state] if eating else _skin_tex[fat_state]
+
+var _hold_variant : String = ""
+var _hold_token   : int = 0
+
+func _hold_pose(variant: String, duration: float) -> void:
+	_hold_variant = variant
+	_hold_token  += 1
+	var tok := _hold_token
+	_update_mouth()
+	await get_tree().create_timer(duration).timeout
+	if is_instance_valid(self) and tok == _hold_token:
+		_hold_variant = ""
+		_update_mouth()
 
 # ── Collisions ────────────────────────────────────────────────────────────────
 
@@ -1566,11 +1626,7 @@ func _trigger_resist(tag: String, area: Area2D) -> void:
 	_skill_audio.play()
 	_vfx_resist_break(area.global_position)
 	_show_floating_text("РЕЗИСТ!", Color(0.95, 0.32, 0.28))
-	# Dracula passive: smashing a bum with the resist fattens by 3 pizzas.
-	if _passive_id == "bum_feast" and tag == "bum":
-		for _i in 3:
-			_eat_pizza()
-		_show_floating_text("+3", Color(0.72, 0.20, 1.00))
+	_bum_feast(tag)
 	_kill_item(area)
 
 # Destroy an obstacle with the "falling death" used in the ЖИРОБОСС mini-game:
@@ -1627,7 +1683,11 @@ func _try_fire_ability(target: Vector2) -> void:
 			if is_instance_valid(self):
 				_fire_rygality(dir, _ability_cfg.get("color", Color(0.35, 1.0, 0.45)))
 	else:
-		_show_spell_pose()
+		# Поза каста играется НЕ у всех. У викинга кулак нарисован и в позе, и
+		# летит анимированным — на экране получалось два кулака сразу. Кулак
+		# должен быть один, и это тот, который двигается: позу пропускаем.
+		if not _POSE_SKIP.has(String(_ability_cfg.get("id", ""))):
+			_show_spell_pose()
 		_cast_spell(str(_ability_cfg.get("id", "")), dir)
 	# Consume a charge; start the cooldown only when they're all gone.
 	_active_charges -= 1
@@ -1693,7 +1753,7 @@ func _show_spell_pose() -> void:
 		return
 	_spell_pose_token += 1
 	var tok := _spell_pose_token
-	_sprite.texture = tex
+	_show_head(tex, "_spell")
 	await get_tree().create_timer(SPELL_POSE_TIME).timeout
 	if not is_instance_valid(self) or tok != _spell_pose_token or _morphing:
 		return
@@ -1702,11 +1762,34 @@ func _show_spell_pose() -> void:
 	# банка без реакции, либо реакция без банки.
 	var tex2 = _skin_spell2_tex[fat_state] if fat_state < _skin_spell2_tex.size() else null
 	if tex2 != null:
-		_sprite.texture = tex2
+		_show_head(tex2, "_spell2")
 		await get_tree().create_timer(SPELL_POSE_TIME).timeout
 		if not is_instance_valid(self) or tok != _spell_pose_token or _morphing:
 			return
 	_update_mouth()
+
+# ── Тёмный снаряд на тёмном фоне ─────────────────────────────────────────────
+# Птицы Тыквы и батаранг Бэтмена нарисованы чёрным силуэтом, а забег идёт по
+# тёмному подземелью: снаряда просто не видно, и спелл читается как «ничего не
+# произошло». Увеличение одно не спасает — чёрное на чёрном не становится
+# заметнее от размера.
+#
+# Ободок — копия того же спрайта чуть крупнее, покрашенная в цвет скина и
+# положенная ПОД оригинал. Дёшево, работает на любой раскадровке (кадры
+# подменяются у обоих сразу) и не требует шейдера.
+const PROJ_BIRD_PX : float = 66.0
+const PROJ_BAT_PX  : float = 74.0
+const RIM_GROW     : float = 1.30
+
+func _add_rim(spr: Sprite2D, col: Color) -> void:
+	var rim := Sprite2D.new()
+	rim.texture        = spr.texture
+	rim.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	rim.scale          = Vector2.ONE * RIM_GROW
+	rim.modulate       = Color(col.r, col.g, col.b, 0.95)
+	rim.z_index        = -1
+	rim.name           = "Rim"
+	spr.add_child(rim)
 
 # Спрайт снаряда из раскадровки: кадры лежат в assets/skills/<скин>/<имя>N.png.
 func _make_anim_sprite(dir_path: String, prefix: String, count: int, px: float) -> Sprite2D:
@@ -1734,12 +1817,13 @@ const MELEE_SWEEP_TIME : float = 0.26
 const MELEE_ARC        : float = 0.85   # раствор дуги в радианах
 const MELEE_RADIUS     : float = 60.0   # радиус поражения
 
-func _cast_melee(dir: Vector2, reach: float) -> void:
+func _cast_melee(dir: Vector2, reach: float, show_fist: bool = true) -> void:
 	var proj := _spawn_skill_projectile(dir, 0.0, null, MELEE_RADIUS,
 		_RYAG_HIT_GROUPS, _melee_hit_handler(), 0.0, MELEE_SWEEP_TIME + 0.05)
 	if proj == null:
 		return
-	_attach_big_fist(proj, dir)
+	if show_fist:
+		_attach_big_fist(proj, dir)
 	# Дуга: от «замаха» сверху к «доводке» снизу, с вылетом вперёд на reach.
 	var steps := 4
 	var tw := proj.create_tween()
@@ -1824,6 +1908,33 @@ func _pop_power(pos: Vector2) -> void:
 	tw.tween_property(spr, "modulate:a", 0.0, 0.20)
 	tw.tween_callback(spr.queue_free)
 
+# Спеллы, у которых своя картинка удара и поза каста ЛИШНЯЯ.
+const _POSE_SKIP : Array = ["explosive_fist"]
+
+# Доворот головы к точке тапа: мгновенно повернулся — плавно вернулся. Тайсону
+# он заменяет летящий кулак, и именно поворот делает удар «в сторону», а не
+# «вообще».
+#
+# Угол ЗАЖАТ: голова нарисована в профиль, и честный поворот на тап позади себя
+# перевернул бы её вверх ногами. Наклон в пределах 40° читается как замах, а
+# переворота не даёт.
+const FACE_SNAP_MAX  : float = 0.70   # рад, ≈40°
+const FACE_SNAP_BACK : float = 0.22   # возврат: плавный, но быстрый
+
+func _snap_face_to(dir: Vector2) -> void:
+	if not is_instance_valid(_sprite):
+		return
+	var ang := clampf(dir.angle(), -FACE_SNAP_MAX, FACE_SNAP_MAX)
+	if dir.x < 0.0:
+		ang = clampf(PI - dir.angle(), -FACE_SNAP_MAX, FACE_SNAP_MAX)
+	_sprite.rotation = ang
+	var tw := _sprite.create_tween()
+	if tw == null:
+		_sprite.rotation = 0.0
+		return
+	tw.tween_property(_sprite, "rotation", 0.0, FACE_SNAP_BACK)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
 # Короткий выпад головы в сторону удара — то, что делает мили-спелл «ударом», а
 # не срабатыванием невидимой зоны.
 func _lunge(dir: Vector2) -> void:
@@ -1839,12 +1950,16 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 			# Вспышка Гарри обнуляет весь экран разом.
 			_cast_expecto()
 		"explosive_fist":
-			# Викинг: кулак проходит дугой вплотную перед собой.
+			# Викинг: кулак проходит дугой вплотную перед собой. Позы каста у
+			# него нет (см. _POSE_SKIP) — кулак ровно один, и он движется.
 			_cast_melee(dir, 92.0)
 			_play_skill_sfx(SkinSkills.COUNTER)
 		"glove_punch":
-			# Тайсон: тот же удар, но короче и чаще (откат 3 c против 5 c).
-			_cast_melee(dir, 78.0)
+			# Тайсон бьёт ПОЗОЙ, без летящего кулака: у него удар нарисован
+			# целиком, и второй кулак поверх рисунка только мешал. Вместо
+			# снаряда — доворот головы к точке тапа.
+			_snap_face_to(dir)
+			_cast_melee(dir, 78.0, false)
 			_play_skill_sfx(SkinSkills.COUNTER)
 		"shovel_throw":
 			# Кусс: одна цель. На 10-м уровне уходит вторая лопатка следом.
@@ -1855,14 +1970,20 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 					_throw_shovel(dir)
 		"black_birds":
 			# Тыква: стая срывается веером в разные стороны от головы.
+			# Птицы чёрные на тёмном подземелье — без ободка и следа их
+			# попросту не видно, сколько ни увеличивай.
 			for a in [-0.42, 0.0, 0.42]:
-				var b := _make_sprite(_BIRD_TEX, 46.0)
+				var b := _make_sprite(_BIRD_TEX, PROJ_BIRD_PX)
+				_add_rim(b, Color(1.00, 0.62, 0.12))
+				b.add_child(_make_skill_trail(Color(1.00, 0.55, 0.10), -dir.rotated(a)))
 				_spawn_skill_projectile(dir.rotated(a), 470.0, b, 26.0,
 					_RYAG_HIT_GROUPS, _break_once_handler(), 0.0)
 			_play_skill_sfx(SkinSkills.DODGE)
 		"bat_shuriken":
 			# Бэтмен: батаранг крутится покадрово (6 кадров из архива).
-			var bat := _make_anim_sprite("res://assets/skills/batman/", "batarang", 6, 52.0)
+			var bat := _make_anim_sprite("res://assets/skills/batman/", "batarang", 6, PROJ_BAT_PX)
+			_add_rim(bat, Color(0.45, 0.80, 1.00))
+			bat.add_child(_make_skill_trail(Color(0.40, 0.75, 1.00), -dir))
 			var pb := _spawn_skill_projectile(dir, 560.0, bat, 28.0,
 				_RYAG_HIT_GROUPS, _break_once_handler(), 0.0)
 			_arm_frames(pb, bat, 18.0)
@@ -1877,10 +1998,11 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 		"web_pull":
 			# Спайдер: паутина цепляет предмет и ТЯНЕТ его к себе, а не ломает —
 			# в этом вся разница с остальными дальними спеллами.
-			var web := _make_anim_sprite("res://assets/skills/spider_man/", "web", 8, 50.0)
+			var web := _make_anim_sprite("res://assets/skills/spider_man/", "web", 8, WEB_SHOT_PX)
 			var ps := _spawn_skill_projectile(dir, 600.0, web, 28.0,
 				["obstacle", "pizza", "dollar"], _pull_handler(), 0.0)
 			_arm_frames(ps, web, 20.0)
+			_attach_web_line(ps)
 			_play_skill_sfx(SkinSkills.DODGE)
 		"card_deck":
 			# Три карты веером, каждая крутится своей раскадровкой из 9 кадров.
@@ -1889,7 +2011,14 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 		"invisibility":
 			_cast_invisibility(float(_ability_cfg.get("duration", 2.0)))
 		"haste":
-			apply_speed_boost(float(_ability_cfg.get("duration", 2.0)))
+			var boost := float(_ability_cfg.get("duration", 2.0))
+			apply_speed_boost(boost)
+			# Пока действует ускорение, голова остаётся «поехавшей» — это и есть
+			# признак работающего эффекта, а не вспышка на треть секунды.
+			# Ждём конца позы каста, иначе удержание перебьёт её первый кадр.
+			await get_tree().create_timer(SPELL_POSE_TIME * 2.0).timeout
+			if is_instance_valid(self):
+				_hold_pose("_spell2", maxf(0.1, boost - SPELL_POSE_TIME * 2.0))
 		"helm_throw":
 			# Штурвал пробивает любые предметы на линии и НЕ ломается (pierce).
 			var spr := _make_sprite(_WHEEL_TEX, 56.0)
@@ -2028,6 +2157,69 @@ func _pull_handler() -> Callable:
 		return true
 
 # Липкая паутина на препятствии: большой спрайт поверх предмета + замедление.
+# ── Паутина Спайдера ─────────────────────────────────────────────────────────
+const WEB_SHOT_PX : float = 72.0   # было 50: снаряд терялся на фоне
+
+# Нить, тянущаяся из руки. Без неё паутина читается как отдельный летящий
+# предмет, а не как выстрел ИЗ героя — а весь смысл спелла в том, что он тянет
+# добычу К СЕБЕ.
+var _web_line : Line2D = null
+var _web_proj : Node2D = null
+
+func _attach_web_line(proj: Node2D) -> void:
+	if proj == null:
+		return
+	var host := get_parent()
+	if host == null:
+		return
+	if is_instance_valid(_web_line):
+		_web_line.queue_free()
+	_web_line = Line2D.new()
+	_web_line.width         = 3.0
+	_web_line.default_color = Color(0.92, 0.94, 1.0, 0.85)
+	_web_line.z_index       = 37          # под снарядом, но над предметами
+	_web_line.begin_cap_mode = Line2D.LINE_CAP_ROUND
+	_web_line.end_cap_mode   = Line2D.LINE_CAP_ROUND
+	host.add_child(_web_line)
+	_web_proj = proj
+	_update_web_line()
+
+func _update_web_line() -> void:
+	if not is_instance_valid(_web_line):
+		return
+	if not is_instance_valid(_web_proj):
+		_web_line.queue_free()
+		_web_line = null
+		_web_proj = null
+		return
+	_web_line.points = PackedVector2Array([
+		_web_line.to_local(global_position),
+		_web_line.to_local(_web_proj.global_position)])
+
+# Паутина не растворяется в воздухе, а ОТВАЛИВАЕТСЯ: отцепляется от предмета и
+# падает вниз с кувырком — так же, как падают сбитые предметы. Растворение
+# читалось как «эффект кончился где-то в коде», падение — как «слезла».
+func _drop_web(spr: Sprite2D) -> void:
+	if not is_instance_valid(spr):
+		return
+	var host := get_parent()
+	if host == null:
+		spr.queue_free()
+		return
+	var at := spr.global_position
+	var rot := spr.global_rotation
+	spr.get_parent().remove_child(spr)
+	host.add_child(spr)
+	spr.global_position = at
+	spr.global_rotation = rot
+	var tw := spr.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(spr, "position", spr.position + Vector2(-18.0, 190.0), 0.75)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_property(spr, "rotation", spr.rotation + 1.4, 0.75)
+	tw.tween_property(spr, "modulate:a", 0.0, 0.3).set_delay(0.45)
+	tw.chain().tween_callback(spr.queue_free)
+
 func _web_stick(n: Node2D) -> void:
 	if n.has_meta("webbed"):
 		return
@@ -2039,7 +2231,7 @@ func _web_stick(n: Node2D) -> void:
 	# Считаем от РАЗМЕРА ПРЕДМЕТА, а не фиксированным числом: предметы теперь
 	# бывают ×1…×3 (см. ItemSizing), и одна паутина на всех смотрелась бы то
 	# нашлёпкой, то марлей.
-	var px : float = ItemSizing.BASE_PX * 1.5
+	var px : float = ItemSizing.BASE_PX * 1.9
 	spr.scale = Vector2.ONE * ItemSizing.fit_scale(_WEB_BIG_TEX, px)
 	spr.modulate = Color(1, 1, 1, 0.0)
 	n.add_child(spr)
@@ -2055,10 +2247,7 @@ func _web_stick(n: Node2D) -> void:
 			if n.get("speed") != null:
 				n.speed = was
 			n.remove_meta("webbed")
-			if is_instance_valid(spr):
-				var tout := spr.create_tween()
-				tout.tween_property(spr, "modulate:a", 0.0, 0.25)
-				tout.tween_callback(spr.queue_free))
+			_drop_web(spr))
 	_play_skill_sfx(SkinSkills.DODGE)
 
 func _web_pull(n: Node2D) -> void:
@@ -2371,7 +2560,7 @@ func _show_cash_face() -> void:
 	# чей таймер придёт вторым, тот и вернёт голову раньше времени.
 	_spell_pose_token += 1
 	var pose_tok := _spell_pose_token
-	_sprite.texture = _CLASSIC_CASH_TEX[fat_state]
+	_show_head(_CLASSIC_CASH_TEX[fat_state], "_cash")
 	await get_tree().create_timer(CASH_FACE_TIME).timeout
 	if is_instance_valid(self) and tok == _cash_face_token \
 			and pose_tok == _spell_pose_token and not _morphing:
@@ -2618,7 +2807,7 @@ func _eat_pizza() -> void:
 		# Анимация: открытый рот на EAT_ANIM_TIME, потом обратно
 		_eating    = true
 		_eat_timer = EAT_ANIM_TIME
-		_sprite.texture = _skin_eat_tex[fat_state]
+		_show_eat_frame()
 
 func set_dev_immortal(v: bool) -> void:
 	_dev_immortal = v
@@ -2699,9 +2888,9 @@ func _take_hit(damage: int = 1) -> void:
 
 func _pulse_fat() -> void:
 	var tw := create_tween()
-	tw.tween_property(_sprite, "scale", _base_scale * 1.35, 0.12) \
+	tw.tween_property(_sprite, "scale", _base_scale * _head_k * 1.35, 0.12) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tw.tween_property(_sprite, "scale", _base_scale,        0.22) \
+	tw.tween_property(_sprite, "scale", _base_scale * _head_k, 0.22) \
 		.set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 
 	# Дрожание во время раздувания (параллельный tween, только по x)
@@ -2972,11 +3161,15 @@ func _on_area_entered(area: Area2D) -> void:
 			_vfx_resist_break(area.global_position)
 			_kill_item(area)
 			return
+		# Под невидимостью не срабатывают и они: и наручники, и чёрный туз —
+		# негативные предметы, а спелл обещает пролёт сквозь любой такой.
+		if _invincible:
+			return
 		var lethal := area.is_in_group("handcuffs")
 		area.queue_free()
 		if lethal:
 			apply_handcuffs()
-		elif not _invincible:
+		else:
 			apply_fat_burn()
 		return
 	if area.is_in_group("casey_mask"):
@@ -3035,9 +3228,15 @@ func _on_area_entered(area: Area2D) -> void:
 		_magnet_remaining = 3.0
 		area.activate(self)
 	elif area.is_in_group("compass"):
+		if _invincible:
+			return
 		apply_invert(5.0)
 		area.queue_free()
 	elif area.is_in_group("slowing"):
+		# Под невидимостью предмет пролетает насквозь: спелл обещает «пролетают
+		# сквозь», и замедление — такой же негативный эффект, как удар.
+		if _invincible:
+			return
 		# Резист (например, банан у Кусса) — предмет ломается, замедления нет.
 		var stag := _area_tag(area)
 		if stag != "" and _resist_cd_for.has(stag) and is_skill_ready("resist:" + stag):
@@ -3057,6 +3256,19 @@ func _on_area_entered(area: Area2D) -> void:
 		elif not _invincible:
 			_handle_obstacle(area)
 
+# Пассивка Дракулы «ОТЖОР ЛЮДЕЙ». На карточке написано «сбил человека — и сразу
+# толстеешь на 3 пиццы», без оговорок. А работала она ТОЛЬКО через резист: в
+# волне бомжей, где резист либо не открыт, либо на откате, Дракула просто
+# получал урон — то есть карточка обещала одно, а игра делала другое.
+func _bum_feast(tag: String) -> bool:
+	if _passive_id != "bum_feast" or tag != "bum":
+		return false
+	for _i in 3:
+		_eat_pizza()
+	_vfx_particles(SkinSkills.TRANSFORM)
+	_show_floating_text("+3", Color(0.72, 0.20, 1.00))
+	return true
+
 func _handle_obstacle(area: Area2D) -> void:
 	# Cache the cause for analytics — _die() reads it. Prefer the most specific
 	# group (snake/glove/molotov/fire) and fall back to the scene-file name.
@@ -3068,6 +3280,12 @@ func _handle_obstacle(area: Area2D) -> void:
 	var tag := _area_tag(area)
 	if tag != "" and _resist_cd_for.has(tag) and is_skill_ready("resist:" + tag):
 		_trigger_resist(tag, area)
+		return
+
+	# Отжор людей: бомж не бьёт Дракулу, а идёт в еду.
+	if _bum_feast(tag):
+		_vfx_resist_break(area.global_position)
+		_kill_item(area)
 		return
 
 	var dmg := int(area.get("damage")) if area.get("damage") != null else 1

@@ -71,6 +71,11 @@ func _process(delta: float) -> void:
 		if i != _frame_i:
 			_frame_i = i
 			(_spr as Sprite2D).texture = frames[i]
+			# Ободок под тёмным снарядом — та же раскадровка, иначе он застынет
+			# на первом кадре и поедет отдельно от самого снаряда.
+			var rim := _spr.get_node_or_null("Rim")
+			if rim is Sprite2D:
+				(rim as Sprite2D).texture = frames[i]
 	position += velocity * delta
 	life     -= delta
 	if _spr != null and spin != 0.0:
