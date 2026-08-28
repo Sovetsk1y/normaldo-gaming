@@ -92,6 +92,37 @@ const POSE_K : Dictionary = {
 	"wizard": { "_eat": [0.906, 1.000, 1.007, 0.835], "_spell": [1.220, 0.993, 1.104, 1.114] },
 }
 
+# Центр головы В КАДРЕ ВАРИАНТА. Поправки размера мало: у классики кадр
+# «доллары в глазах» ещё и смещён на четверть ширины вбок, и голова на подмене
+# ПРЫГАЛА. Размер уже совпадал, а прыжок оставался — читалось так же, как
+# пролаг. Таблица СГЕНЕРИРОВАНА замером.
+const POSE_OFF : Dictionary = {
+	"batman": { "_eat": [Vector2(-0.0050, 0.0125), Vector2(-0.0175, -0.0775), Vector2(-0.0475, -0.0450), Vector2(0.0000, -0.0975)], "_spell": [Vector2(-0.0875, -0.0825), Vector2(-0.2700, -0.1300), Vector2(-0.0250, -0.0675), Vector2(-0.0800, 0.0675)] },
+	"classic": { "_cash": [Vector2(-0.2275, 0.0900), Vector2(-0.1275, -0.0025), Vector2(-0.0800, -0.0350), Vector2(-0.0500, 0.0900)], "_eat": [Vector2(-0.0025, -0.0032), Vector2(-0.0025, -0.0027), Vector2(-0.0025, -0.0040), Vector2(-0.0025, -0.0255)] },
+	"dracula": { "_eat": [Vector2(-0.0300, 0.0400), Vector2(-0.0275, 0.0150), Vector2(-0.0850, -0.0125), Vector2(-0.0275, -0.0025)], "_ghost_eat": [Vector2(-0.0300, 0.0400), Vector2(-0.0275, 0.0150), Vector2(0.0050, 0.0025), Vector2(-0.0275, -0.0025)] },
+	"glasses": { "_eat": [Vector2(0.0175, 0.0125), Vector2(0.0000, -0.0125), Vector2(-0.0225, 0.0125), Vector2(-0.0025, -0.0025)], "_spell": [Vector2(0.0375, -0.0475), Vector2(0.0375, -0.0475), Vector2(0.0375, -0.0475), Vector2(0.0150, 0.0075)], "_spell2": [Vector2(-0.0150, -0.0500), Vector2(-0.0150, -0.0500), Vector2(0.0025, 0.0000), Vector2(-0.0025, -0.0100)] },
+	"halloween": { "_eat": [Vector2(-0.0150, 0.0025), Vector2(-0.0150, 0.0025), Vector2(0.0050, 0.0375), Vector2(-0.0100, -0.0550)], "_spell": [Vector2(-0.0200, 0.0125), Vector2(-0.0300, -0.0200), Vector2(-0.1325, -0.0350), Vector2(-0.0075, -0.0225)] },
+	"harry_potter": { "_eat": [Vector2(0.0875, -0.0225), Vector2(-0.0800, 0.0450), Vector2(-0.0625, 0.0900), Vector2(-0.0025, 0.0025)], "_spell": [Vector2(-0.2150, -0.0900), Vector2(-0.1500, 0.1125), Vector2(-0.0475, 0.0900), Vector2(-0.0625, 0.0925)] },
+	"joker": { "_eat": [Vector2(0.0075, -0.0500), Vector2(-0.0175, 0.0175), Vector2(0.0100, -0.0950), Vector2(-0.0125, -0.2175)], "_spell": [Vector2(-0.0525, -0.1350), Vector2(-0.0025, -0.0850), Vector2(-0.0200, 0.0075), Vector2(0.0000, -0.0975)] },
+	"kuss": { "_eat": [Vector2(0.0250, -0.0025), Vector2(0.0100, -0.0100), Vector2(-0.0200, 0.0625), Vector2(-0.0175, -0.0375)], "_spell": [Vector2(-0.0150, -0.0400), Vector2(-0.0125, -0.0200), Vector2(-0.0550, -0.1925), Vector2(-0.0150, -0.0175)] },
+	"new_year": { "_eat": [Vector2(-0.0875, -0.0500), Vector2(-0.0625, 0.0150), Vector2(-0.0275, -0.0300), Vector2(-0.0200, -0.0575)] },
+	"pirate": { "_eat": [Vector2(0.0000, -0.0700), Vector2(0.1000, -0.1675), Vector2(0.0725, -0.1025), Vector2(0.1125, -0.0850)], "_spell": [Vector2(-0.0850, -0.0050), Vector2(-0.1325, -0.0800), Vector2(0.0200, -0.0125), Vector2(0.0175, -0.1475)] },
+	"spider_man": { "_eat": [Vector2(-0.0225, -0.0225), Vector2(0.0425, 0.0250), Vector2(-0.0075, 0.0150), Vector2(0.0075, 0.0275)], "_spell": [Vector2(-0.0225, -0.0225), Vector2(0.0000, 0.0000), Vector2(0.0000, 0.0000), Vector2(0.0000, 0.0000)] },
+	"tyson": { "_eat": [Vector2(0.0100, -0.0100), Vector2(-0.0725, -0.0575), Vector2(-0.0100, 0.1050), Vector2(-0.0375, 0.0450)], "_spell": [Vector2(0.1125, -0.0100), Vector2(-0.2500, 0.0225), Vector2(0.1125, -0.0100), Vector2(-0.2800, -0.0100)] },
+	"viking": { "_eat": [Vector2(0.0200, -0.0075), Vector2(0.0025, -0.0375), Vector2(0.0150, -0.0525), Vector2(-0.0175, -0.0250)], "_spell": [Vector2(0.2025, 0.0350), Vector2(0.2025, 0.0350), Vector2(0.2000, -0.0225), Vector2(0.2000, -0.0225)] },
+	"wizard": { "_eat": [Vector2(-0.0700, -0.0525), Vector2(0.0050, 0.0350), Vector2(-0.0250, -0.0125), Vector2(-0.0075, -0.0075)], "_spell": [Vector2(-0.1850, -0.1575), Vector2(-0.1525, -0.0200), Vector2(-0.1800, -0.0650), Vector2(-0.2225, 0.0375)] },
+}
+
+func pose_off(skin_id: String, variant: String, fat_state: int) -> Vector2:
+	var row : Dictionary = POSE_OFF.get(skin_id, {})
+	var offs : Array = row.get(variant, [])
+	if offs.is_empty():
+		return offset_for(skin_id, fat_state)
+	return offs[clampi(fat_state, 0, offs.size() - 1)]
+
+func has_pose_off(skin_id: String, variant: String) -> bool:
+	return not (POSE_OFF.get(skin_id, {}) as Dictionary).get(variant, []).is_empty()
+
 func pose_k(skin_id: String, variant: String, fat_state: int) -> float:
 	var row : Dictionary = POSE_K.get(skin_id, {})
 	var ks  : Array = row.get(variant, [])

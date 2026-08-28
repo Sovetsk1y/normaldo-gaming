@@ -536,6 +536,21 @@ func dev_send_thief() -> void:
 	var speed : float = _campaign_item_speed() if campaign_mode else 250.0
 	_spawn_scripted(THIEF_SCRIPT, lanes[randi() % LANE_COUNT], vp_w, speed)
 
+# Дев-вызов волны бомжей и бомжа с бочкой. Оба — сет-писы, и «просто заспавнить
+# предмет» их не воспроизводит: у волны есть смена щели между тучами, у бочки —
+# три зависимых такта. Поэтому дёргаем ровно те же функции, что и забег.
+func dev_send_bum_crowd() -> void:
+	var vp_w  := get_viewport_rect().size.x
+	var lanes := _lane_centers()
+	var speed : float = _campaign_item_speed() if campaign_mode else 250.0
+	_setpiece_bum_crowd(speed, lanes, vp_w)
+
+func dev_send_bum_barrel() -> void:
+	var vp_w  := get_viewport_rect().size.x
+	var lanes := _lane_centers()
+	var speed : float = _campaign_item_speed() if campaign_mode else 250.0
+	_setpiece_bum_barrel(speed, lanes, vp_w)
+
 # Спавн любого из новых script-only предметов (компас/вор/бомж-со-знаком).
 func _spawn_scripted(script: Script, y: float, vp_w: float, speed: float) -> void:
 	var node := Area2D.new()

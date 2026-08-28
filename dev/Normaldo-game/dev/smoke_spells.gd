@@ -14,7 +14,7 @@ var _checks : int = 0
 
 # Нижняя граница числа проверок. Держать точной незачем — она ловит не «стало на
 # одну меньше», а «не отработало вообще ничего».
-const EXPECTED_CHECKS : int = 40
+const EXPECTED_CHECKS : int = 70
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -43,6 +43,14 @@ func _initialize() -> void:
 	await _test_big_fist()
 	print("── Классика: рука с пальцем ──")
 	await _test_pointing_hand()
+	print("── Подмена кадра не двигает голову ──")
+	await _test_head_anchor()
+	print("── Тайсон: поворот ровно в точку тапа ──")
+	await _test_tyson_aim()
+	print("── Дракула: отжор ЛЮДЕЙ, не только бомжей ──")
+	await _test_human_feast()
+	print("── Спайдер: нить цвета паутины ──")
+	await _test_web_color()
 
 	print("")
 	# Зелёный прогон, в котором НИЧЕГО не проверялось, — худший из возможных
@@ -425,6 +433,127 @@ func _test_pointing_hand() -> void:
 		"и убралась за собой")
 	(e["game"] as Node).queue_free()
 	await process_frame
+
+# ── Посадка кадров-вариантов ─────────────────────────────────────────────────
+# Кадр варианта нарисован в СВОЕЙ рамке. Размер мы уже приводим (POSE_K), но у
+# классики «доллары в глазах» смещены ещё и на четверть ширины вбок: голова на
+# подмене ПРЫГАЛА, и это читалось ровно как пролаг игры.
+#
+# Проверяется не картинка, а контракт: ЦЕНТР ГОЛОВЫ после подмены остаётся там
+# же, где он был у обычного кадра. Меряется в тех же долях кадра, по которым
+# посадка и считается, поэтому тест не зависит от конкретных цифр замера.
+const ANCHOR_TOL_PX : float = 4.0
+
+func _head_center(n: Node, variant: String) -> Vector2:
+	var sm   : Node = get_root().get_node_or_null("SkinMetrics")
+	var save : Node = get_root().get_node_or_null("SaveData")
+	var spr  : Sprite2D = (n as Node).get_node("Sprite2D")
+	var off  : Vector2 = sm.call("pose_off", save.active_skin, variant, n.get("fat_state"))
+	var sz   : Vector2 = spr.texture.get_size()
+	return spr.position + Vector2(off.x * sz.x * spr.scale.x, off.y * sz.y * spr.scale.y)
+
+func _test_head_anchor() -> void:
+	# Классика на всех четырёх жирах — именно на ней жалоба, и кадр «доллары в
+	# глазах» у неё смещён сильнее всех.
+	for fat in 4:
+		var e : Dictionary = await _boot("classic", fat)
+		var n : Node = e["n"]
+		# Даём вертикали устояться: после смены скина спрайт ещё едет в свою
+		# посадку, и мерить «где голова» на полпути значит мерить переезд.
+		await _wait(0.40)
+		var home : Vector2 = _head_center(n, "")
+		var cash : Texture2D = load("res://assets/normaldo/normaldo%d_cash.png" % (fat + 1))
+		n.call("_show_head", cash, "_cash")
+		await _wait(0.40)          # покачивание успевает доехать до новой посадки
+		var moved : float = _head_center(n, "_cash").distance_to(home)
+		_check(moved < ANCHOR_TOL_PX,
+			"жир %d: голова на подмене осталась на месте (сдвиг %.1f px)" % [fat + 1, moved])
+		(e["game"] as Node).queue_free()
+		await process_frame
+
+	# И по одному самому кривому кадру у остальных: у Тайсона, Гарри и Викинга
+	# поза каста смещена на четверть кадра в разные стороны.
+	for skin in ["tyson", "harry_potter", "viking"]:
+		var e2 : Dictionary = await _boot(skin, 1)
+		var n2 : Node = e2["n"]
+		var tex : Texture2D = (n2.get("_skin_spell_tex") as Array)[1]
+		if tex != null:
+			await _wait(0.40)
+			var home2 : Vector2 = _head_center(n2, "")
+			n2.call("_show_head", tex, "_spell")
+			await _wait(0.40)
+			var moved2 : float = _head_center(n2, "_spell").distance_to(home2)
+			_check(moved2 < ANCHOR_TOL_PX,
+				"%s: поза каста села на ту же голову (сдвиг %.1f px)" % [skin, moved2])
+		(e2["game"] as Node).queue_free()
+		await process_frame
+
+# ── Тайсон: доворот ──────────────────────────────────────────────────────────
+# Раньше угол зажимался сорока градусами, и на тап дальше — а это половина
+# экрана — Тайсон бил «примерно вправо». Игрок целится в предмет, значит и
+# смотреть надо в предмет.
+func _test_tyson_aim() -> void:
+	var e : Dictionary = await _boot("tyson", 1)
+	var n : Node = e["n"]
+	var spr : Sprite2D = (n as Node).get_node("Sprite2D")
+	for dir in [Vector2(1.0, 0.0), Vector2(1.0, -1.0).normalized(),
+			Vector2(-1.0, 0.0), Vector2(-1.0, -0.9).normalized(),
+			Vector2(-1.0, 0.45).normalized()]:
+		n.call("_snap_face_to", dir)
+		# «Нос» спрайта: вправо по локальной оси, а при зеркале — влево.
+		var nose : Vector2 = Vector2.RIGHT.rotated(spr.rotation)
+		if spr.flip_h:
+			nose = -nose
+		_check(absf(nose.angle_to(dir)) < 0.02,
+			"тап (%.2f, %.2f): смотрит ровно туда (расхождение %.1f°)"
+				% [dir.x, dir.y, rad_to_deg(absf(nose.angle_to(dir)))])
+		_check(absf(wrapf(spr.rotation, -PI, PI)) <= PI * 0.5 + 0.01,
+			"и голова не вверх ногами (наклон %.0f°)" % rad_to_deg(spr.rotation))
+	await _wait(0.5)
+	_check(absf(spr.rotation) < 0.02 and not spr.flip_h,
+		"после удара вернулся в обычную посадку")
+	(e["game"] as Node).queue_free()
+	await process_frame
+
+# ── Дракула: «сбил ЧЕЛОВЕКА» ─────────────────────────────────────────────────
+# На карточке написано «человека», а работало только на бомже. Бандит, коп и
+# шаман нарисованы людьми ровно так же.
+func _test_human_feast() -> void:
+	var e : Dictionary = await _boot("dracula", 1)
+	var n : Node = e["n"]
+	var sp : Node = e["sp"]
+
+	var thief := Area2D.new()
+	thief.set_script(load("res://scripts/thief.gd"))
+	sp.add_child(thief)
+	await process_frame
+	_check(str(n.call("_area_tag", thief)) == "thief",
+		"бандита вообще опознали: тег «%s»" % str(n.call("_area_tag", thief)))
+
+	var before : int = int(n.get("_pizza_count"))
+	var fat_before : int = int(n.get("fat_state"))
+	n.call("_handle_obstacle", thief)
+	await process_frame
+	_check(int(n.get("_pizza_count")) - before == 3,
+		"и отожрал его на три пиццы (+%d)" % (int(n.get("_pizza_count")) - before))
+	_check(int(n.get("fat_state")) >= fat_before, "а не похудел от удара")
+
+	for tag in ["bum", "cop", "shaman"]:
+		_check(bool(n.call("_bum_feast", tag)), "%s — тоже человек" % tag)
+	_check(not bool(n.call("_bum_feast", "safe")), "а сейф — не человек")
+	(e["game"] as Node).queue_free()
+	await process_frame
+
+# ── Спайдер: нить ────────────────────────────────────────────────────────────
+# Белёсая нить читалась как луч: снаряд серый, а тянется от него светящаяся
+# леска. Проверяем контракт «серая», а не конкретные три числа.
+func _test_web_color() -> void:
+	var c : Color = load("res://scripts/normaldo.gd").get("WEB_COLOR")
+	var mx : float = maxf(c.r, maxf(c.g, c.b))
+	var mn : float = minf(c.r, minf(c.g, c.b))
+	_check(mx - mn < 0.10, "нить обесцвечена (разброс каналов %.3f)" % (mx - mn))
+	_check(mx < 0.60, "и не белая (ярчайший канал %.2f)" % mx)
+	_check(mx > 0.30, "но и не чёрная (ярчайший канал %.2f)" % mx)
 
 func _all_sprites(root: Node, out: Array) -> Array:
 	if root is Sprite2D and (root as Sprite2D).texture != null:

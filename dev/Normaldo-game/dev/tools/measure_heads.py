@@ -165,6 +165,60 @@ def variant_row(sid, d, classic=False):
     return out
 
 
+def variant_off_row(sid, d, classic=False):
+    """{ "_cash": [(x,y) x4], ... } — центр головы В СВОЁМ кадре.
+
+    Нужно затем же, зачем и масштаб: у кадра «доллары в глазах» центр головы
+    смещён от центра кадра на четверть ширины, и без поправки голова на подмене
+    ПРЫГАЕТ вбок. Размер уже совпадал, а прыжок оставался — читалось так же,
+    как пролаг.
+    """
+    out = {}
+    for suf in VARIANT_SUFFIXES:
+        offs, need = [], False
+        for st in range(1, 5):
+            base = os.path.join(SKINS_DIR, "normaldo%d.png" % st) if classic \
+                else os.path.join(d, "state%d.png" % st)
+            var = os.path.join(SKINS_DIR, "normaldo%d%s.png" % (st, suf)) if classic \
+                else os.path.join(d, "state%d%s.png" % (st, suf))
+            if not (os.path.exists(base) and os.path.exists(var)):
+                offs.append((0.0, 0.0))
+                continue
+            _, bx, by, _ = head_metrics(base)
+            _, vx, vy, _ = head_metrics(var)
+            offs.append((vx, vy))
+            if abs(vx - bx) > 0.02 or abs(vy - by) > 0.02:
+                need = True
+        if need:
+            out[suf] = offs
+    return out
+
+
+def build_variant_offs():
+    rows = {}
+    v = variant_off_row("classic", None, classic=True)
+    if v:
+        rows["classic"] = v
+    for d in sorted(glob.glob(os.path.join(SKINS_DIR, "*") + os.sep)):
+        sid = os.path.basename(d.rstrip(os.sep))
+        if not os.path.exists(os.path.join(d, "state1.png")):
+            continue
+        v = variant_off_row(sid, d)
+        if v:
+            rows[sid] = v
+    return rows
+
+
+def render_variant_offs(rows):
+    out = []
+    for sid in sorted(rows):
+        parts = ", ".join('"%s": [%s]' % (suf, ", ".join(
+            "Vector2(%.4f, %.4f)" % o for o in offs))
+            for suf, offs in sorted(rows[sid].items()))
+        out.append('\t"%s": { %s },' % (sid, parts))
+    return "\n".join(out)
+
+
 def build_variants():
     rows = {}
     v = variant_row("classic", None, classic=True)
@@ -219,6 +273,7 @@ def main():
     rows = build_rows()
     table = render_table(rows)
     vtable = render_variants(build_variants())
+    otable = render_variant_offs(build_variant_offs())
 
     if "--check" in sys.argv:
         current = open(OUT, encoding="utf-8").read()
@@ -236,6 +291,11 @@ def main():
             print("Поправки вариантов РАЗОШЛИСЬ. Перегенерируйте:")
             print("  python3 dev/tools/measure_heads.py")
             return 1
+        oblock = re.search(r"const POSE_OFF : Dictionary = \{\n(.*?)^\}", current, re.S | re.M)
+        if oblock is None or oblock.group(1).strip() != otable.strip():
+            print("Смещения вариантов РАЗОШЛИСЬ. Перегенерируйте:")
+            print("  python3 dev/tools/measure_heads.py")
+            return 1
         print("Таблица совпадает со спрайтами (%d скинов)." % len(rows))
         return 0
 
@@ -245,6 +305,9 @@ def main():
                      current, flags=re.S | re.M)
     updated = re.sub(r"(const POSE_K : Dictionary = \{\n).*?(^\})",
                      lambda m: m.group(1) + vtable + "\n" + m.group(2),
+                     updated, flags=re.S | re.M)
+    updated = re.sub(r"(const POSE_OFF : Dictionary = \{\n).*?(^\})",
+                     lambda m: m.group(1) + otable + "\n" + m.group(2),
                      updated, flags=re.S | re.M)
     open(OUT, "w", encoding="utf-8").write(updated)
     print("Обновлено %d скинов в %s" % (len(rows), os.path.relpath(OUT, ROOT)))

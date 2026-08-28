@@ -83,6 +83,7 @@ const PIZZA_TEXTURE    := preload("res://assets/items/pizza.png")
 const DOLLAR_TEXTURE   := preload("res://assets/items/dollar.png")
 const STONE_TEXTURE    := preload("res://assets/items/stone.png")
 const TRASH_TEXTURE    := preload("res://assets/items/trash_bin.png")
+const HOMELESS_TEXTURE := preload("res://assets/items/homeless1.png")
 const GLOVE_TEXTURE    := preload("res://assets/items/boxing_glove.png")
 const SNAKE_TEXTURE    := preload("res://assets/items/snake.png")
 const BANANA_TEXTURE   := preload("res://assets/items/banana_peel.png")
@@ -5591,6 +5592,8 @@ func _start_game() -> void:
 		_build_dev_pizza_btn()
 		_build_dev_slots_btn()
 		_build_dev_thief_btn()
+		_build_dev_bum_wave_btn()
+		_build_dev_bum_barrel_btn()
 		_build_dev_immortal_btn()
 		_build_dev_boss_btn()
 		_build_dev_phase_btn()
@@ -5806,6 +5809,44 @@ func _build_dev_pizza_btn() -> void:
 	btn.pressed.connect(func():
 		if pizza_party and is_instance_valid(pizza_party):
 			pizza_party.dev_send_pizza_pack()
+	)
+	root.add_child(btn)
+
+# Дев-кнопки на два сет-писа с бомжами: волна и бомж с бочкой. Оба вызываются
+# редко и по случаю фазы — вручную их иначе не поймать, а именно их и надо
+# смотреть глазами: у волны вопрос «пролетаю ли я», у бочки — читается ли
+# подготовка.
+func _build_dev_bum_wave_btn() -> void:
+	_dev_spawner_btn(4, HOMELESS_TEXTURE, "dev_send_bum_crowd")
+
+func _build_dev_bum_barrel_btn() -> void:
+	_dev_spawner_btn(5, TRASH_TEXTURE, "dev_send_bum_barrel")
+
+# Общая сборка дев-кнопки в нижнем ряду: место в ряду, иконка, метод спавнера.
+func _dev_spawner_btn(slot: int, tex: Texture2D, method: String) -> void:
+	var vp   := get_viewport().get_visible_rect().size
+	const SZ := 44.0
+	var root := Node2D.new()
+	root.position = Vector2(8.0 + (SZ + 6.0) * float(slot), vp.y - SZ - 8.0)
+	add_child(root)
+
+	var bg := ColorRect.new()
+	bg.color = Color(0.06, 0.06, 0.10, 0.72)
+	bg.size  = Vector2(SZ, SZ)
+	root.add_child(bg)
+
+	var icon     := _make_icon(tex, SZ - 8.0)
+	icon.position = Vector2(4.0, 4.0)
+	root.add_child(icon)
+
+	var spawner := get_parent().get_node_or_null("Spawner")
+	var btn := Button.new()
+	btn.flat       = true
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.size       = Vector2(SZ, SZ)
+	btn.pressed.connect(func():
+		if spawner and is_instance_valid(spawner) and spawner.has_method(method):
+			spawner.call(method)
 	)
 	root.add_child(btn)
 

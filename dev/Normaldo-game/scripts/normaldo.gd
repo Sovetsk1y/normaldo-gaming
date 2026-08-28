@@ -369,15 +369,33 @@ func _apply_head_offset() -> void:
 	var tex : Texture2D = _skin_tex[fat_state]
 	if tex == null:
 		return
+	var pos : Vector2
 	if SaveData.active_skin == "classic" and not _fat_boss_active:
 		# У классики в кадре только голова, но нарисована со сдвигом влево.
 		# Правка ручная, в пикселях забега. На ЖИРОБОССЕ она умножается на
 		# множитель размера и уводит лицо за левый край — там берём замер.
-		_sprite.position = Vector2(-14.0, 0.0)
-		return
+		pos = Vector2(-14.0, 0.0)
+	else:
+		var sz  : Vector2 = tex.get_size()
+		var off := SkinMetrics.offset_for(SaveData.active_skin, fat_state)
+		pos = Vector2(-off.x * sz.x * _base_scale.x, -off.y * sz.y * _base_scale.y)
+	_sprite.position = pos
+	_recalc_head_anchor(tex, pos)
+
+# Точка, в которой стоит ЦЕНТР ГОЛОВЫ обычного кадра. К ней прикалываются кадры
+# варианта (см. _place_head): у них своя рамка, и без якоря голова на подмене
+# уезжает вбок — у классики «доллары в глазах» прыгали на четверть ширины.
+#
+# По вертикали якорь считается от y = 0, а не от pos.y: в забеге вертикаль
+# спрайта всё равно приводится к нулю (покачивание владеет y, см. ниже), и
+# считать якорь от pos.y значило бы целиться туда, где обычный кадр не стоит.
+func _recalc_head_anchor(tex: Texture2D, pos: Vector2) -> void:
 	var sz  : Vector2 = tex.get_size()
 	var off := SkinMetrics.offset_for(SaveData.active_skin, fat_state)
-	_sprite.position = Vector2(-off.x * sz.x * _base_scale.x, -off.y * sz.y * _base_scale.y)
+	_head_idle_pos = Vector2(pos.x, 0.0)
+	_head_anchor   = _head_idle_pos + Vector2(
+		off.x * sz.x * _base_scale.x, off.y * sz.y * _base_scale.y)
+	_head_home     = _head_idle_pos
 
 # Swap the sprite to the current fat-state texture + recompute _base_scale, WITHOUT
 # touching the live scale (the morph tween drives scale itself). Returns the base.
@@ -486,7 +504,7 @@ func enable_input() -> void:
 	_bobbing = false
 	_bob_t   = 0.0
 	if is_instance_valid(_sprite):
-		_sprite.position.y = 0.0
+		_sprite.position.y = _head_home.y
 	_skill_bonus_xp = 0
 	_dracula_immortal_ready    = true
 	_harry_second_chance_ready = true
@@ -1126,11 +1144,13 @@ func _physics_process(delta: float) -> void:
 
 	# Bob: only while the couch-idle flag is set (menu / pre-run). Gameplay
 	# clears it in enable_input() so the head stays steady during the run.
+	# Целимся не в ноль, а в посадку ТЕКУЩЕГО кадра: у кадров-вариантов она своя,
+	# и покачивание, целясь в ноль, стирало бы вертикальную поправку.
 	if _bobbing:
 		_bob_t += delta * 1.8
-		_sprite.position.y = lerp(_sprite.position.y, sin(_bob_t) * 3.0, 0.15)
+		_sprite.position.y = lerp(_sprite.position.y, _head_home.y + sin(_bob_t) * 3.0, 0.15)
 	else:
-		_sprite.position.y = lerp(_sprite.position.y, 0.0, 0.20)
+		_sprite.position.y = lerp(_sprite.position.y, _head_home.y, 0.20)
 
 	# Магнит — притягивает пиццы и доллары
 	var is_magnetic := _magnet_remaining > 0.0
@@ -1203,6 +1223,14 @@ func _update_mouth() -> void:
 # 2.7 раза крупнее и читались как пролаг). См. SkinMetrics.POSE_K.
 var _head_k : float = 1.0
 
+# Где стоит голова: якорь обычного кадра, посадка обычного кадра и посадка
+# ТЕКУЩЕГО кадра. Последняя — цель для покачивания: вертикалью спрайта владеет
+# оно, и если целиться в ноль, поправка варианта тут же стиралась бы.
+var _head_anchor   : Vector2 = Vector2.ZERO
+var _head_idle_pos : Vector2 = Vector2.ZERO
+var _head_home     : Vector2 = Vector2.ZERO
+var _head_variant  : String  = ""
+
 func _show_head(tex: Texture2D, variant: String) -> void:
 	if tex == null:
 		return
@@ -1210,6 +1238,28 @@ func _show_head(tex: Texture2D, variant: String) -> void:
 	_head_k = 1.0 if variant == "" \
 		else SkinMetrics.pose_k(SaveData.active_skin, variant, fat_state)
 	_sprite.scale = _base_scale * _head_k
+	_place_head(tex, variant)
+
+# Посадка кадра. Размер варианта уже приведён (POSE_K), но кадр нарисован в
+# своей рамке — и голова на подмене прыгает вбок. Считаем, куда сдвинуть спрайт,
+# чтобы ЦЕНТР ГОЛОВЫ варианта попал в тот же якорь, что и у обычного кадра.
+#
+# Вертикаль снимается ТОЛЬКО в момент смены кадра: между сменами y принадлежит
+# покачиванию, и переписывать его каждый вызов значило бы убить бобинг в меню.
+func _place_head(tex: Texture2D, variant: String) -> void:
+	var changed := variant != _head_variant
+	_head_variant = variant
+	if variant == "" or not SkinMetrics.has_pose_off(SaveData.active_skin, variant):
+		# Кадра нет в замерах — садимся как обычный: старое поведение, без сюрпризов.
+		_head_home = _head_idle_pos
+	else:
+		var off := SkinMetrics.pose_off(SaveData.active_skin, variant, fat_state)
+		var sz  : Vector2 = tex.get_size()
+		var sc  : Vector2 = _base_scale * _head_k
+		_head_home = _head_anchor - Vector2(off.x * sz.x * sc.x, off.y * sz.y * sc.y)
+	_sprite.position.x = _head_home.x
+	if changed:
+		_sprite.position.y = _head_home.y
 
 # Какой кадр головы сейчас на экране. Отдельной функцией, потому что вариантов
 # уже три пары: обычная, «ест» и серая призрачная у Дракулы под невидимостью.
@@ -1915,25 +1965,38 @@ const _POSE_SKIP : Array = ["explosive_fist"]
 # он заменяет летящий кулак, и именно поворот делает удар «в сторону», а не
 # «вообще».
 #
-# Угол ЗАЖАТ: голова нарисована в профиль, и честный поворот на тап позади себя
-# перевернул бы её вверх ногами. Наклон в пределах 40° читается как замах, а
-# переворота не даёт.
-const FACE_SNAP_MAX  : float = 0.70   # рад, ≈40°
+# Поворот ТОЧНЫЙ — ровно в точку дабл-тапа. Раньше угол зажимался 40°, и на
+# любой тап дальше сорока градусов Тайсон бил «примерно вправо»: игрок целится в
+# конкретный предмет, а голова смотрит мимо.
+#
+# Голова нарисована в профиль вправо, поэтому удар ВЛЕВО делается зеркалом по
+# горизонтали (flip_h) плюс поворотом на угол минус развёрнутый: честный поворот
+# на 170° показал бы лицо вверх ногами, а зеркало оставляет его прямым.
 const FACE_SNAP_BACK : float = 0.22   # возврат: плавный, но быстрый
 
 func _snap_face_to(dir: Vector2) -> void:
 	if not is_instance_valid(_sprite):
 		return
-	var ang := clampf(dir.angle(), -FACE_SNAP_MAX, FACE_SNAP_MAX)
-	if dir.x < 0.0:
-		ang = clampf(PI - dir.angle(), -FACE_SNAP_MAX, FACE_SNAP_MAX)
+	if dir.length_squared() < 0.000001:
+		return
+	var flip := dir.x < 0.0
+	# При зеркале «нос» спрайта смотрит в rotation + PI, отсюда и поправка.
+	var ang : float = wrapf(dir.angle() - PI, -PI, PI) if flip else dir.angle()
 	_sprite.rotation = ang
+	_sprite.flip_h   = flip
+	var spr := _sprite
 	var tw := _sprite.create_tween()
 	if tw == null:
 		_sprite.rotation = 0.0
+		_sprite.flip_h   = false
 		return
 	tw.tween_property(_sprite, "rotation", 0.0, FACE_SNAP_BACK)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# Зеркало снимается В КОНЦЕ возврата: снять его раньше — значит крутить
+	# голову обратно уже развёрнутой, и она проедет вверх ногами.
+	tw.tween_callback(func() -> void:
+		if is_instance_valid(spr):
+			spr.flip_h = false)
 
 # Короткий выпад головы в сторону удара — то, что делает мили-спелл «ударом», а
 # не срабатыванием невидимой зоны.
@@ -2166,6 +2229,11 @@ const WEB_SHOT_PX : float = 72.0   # было 50: снаряд терялся н
 var _web_line : Line2D = null
 var _web_proj : Node2D = null
 
+# Цвет нити — ЗАМЕР самой картинки паутины (assets/skills/spider_man/web*.png):
+# средний цвет непрозрачных пикселей ровно (109, 109, 121). Белёсая нить читалась
+# как луч, а не как паутина: снаряд серый, а тянется от него светящаяся леска.
+const WEB_COLOR : Color = Color(0.427, 0.427, 0.475, 0.95)
+
 func _attach_web_line(proj: Node2D) -> void:
 	if proj == null:
 		return
@@ -2175,8 +2243,8 @@ func _attach_web_line(proj: Node2D) -> void:
 	if is_instance_valid(_web_line):
 		_web_line.queue_free()
 	_web_line = Line2D.new()
-	_web_line.width         = 3.0
-	_web_line.default_color = Color(0.92, 0.94, 1.0, 0.85)
+	_web_line.width         = 4.0   # серая нить тоньше трёх пикселей теряется
+	_web_line.default_color = WEB_COLOR
 	_web_line.z_index       = 37          # под снарядом, но над предметами
 	_web_line.begin_cap_mode = Line2D.LINE_CAP_ROUND
 	_web_line.end_cap_mode   = Line2D.LINE_CAP_ROUND
@@ -3260,8 +3328,15 @@ func _on_area_entered(area: Area2D) -> void:
 # толстеешь на 3 пиццы», без оговорок. А работала она ТОЛЬКО через резист: в
 # волне бомжей, где резист либо не открыт, либо на откате, Дракула просто
 # получал урон — то есть карточка обещала одно, а игра делала другое.
+#
+# «Человек» — это не только бомж: бандит, коп и шаман нарисованы людьми, и
+# отжирать одного бомжа означало читать карточку выборочно. Ниндзя-нога сюда НЕ
+# входит намеренно: это босс, и съесть его с одного касания — не пассивка, а
+# отмена боя.
+const HUMAN_TAGS : Array = ["bum", "thief", "cop", "shaman"]
+
 func _bum_feast(tag: String) -> bool:
-	if _passive_id != "bum_feast" or tag != "bum":
+	if _passive_id != "bum_feast" or not HUMAN_TAGS.has(tag):
 		return false
 	for _i in 3:
 		_eat_pizza()

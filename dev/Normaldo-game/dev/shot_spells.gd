@@ -4,8 +4,9 @@ extends SceneTree
 #   xvfb-run -a godot --path . --display-driver x11 --rendering-driver opengl3 \
 #     --resolution 960x430 --script res://dev/shot_spells.gd -- <папка> <режим>
 #
-# режим: dollar | cash | hand | pirate3 | pirate4 | dracula | wings | wings_flap |
-#        glasses1 | glasses2 | kuss | fist_viking | fist_tyson | power
+# режим: dollar | cash | idle | hand | pirate3 | pirate4 | dracula | wings |
+#        wings_flap | glasses1 | glasses2 | kuss | fist_viking | fist_tyson |
+#        power | aim_left | aim_up | web
 
 func _initialize() -> void:
 	_bail_out()
@@ -40,9 +41,18 @@ func _initialize() -> void:
 		"fist_viking": skin = "viking";  fat = 2; delay = 0.13
 		"fist_tyson":  skin = "tyson";   fat = 2; delay = 0.13
 		"power":       skin = "viking";  fat = 2; delay = 0.40
+		# Доворот Тайсона: тап ПОЗАДИ и тап вверх-назад — ровно те направления,
+		# на которых прежний зажим в 40° показывал «бьёт куда-то вправо».
+		"aim_left":    skin = "tyson";   fat = 2; delay = 0.06
+		"aim_up":      skin = "tyson";   fat = 2; delay = 0.06
+		# Ловим паутину В ПОЛЁТЕ: на попадании нить снимается, а проверяем мы
+		# именно нить.
+		"web":         skin = "spider_man"; fat = 2; delay = 0.16
+		"idle":        skin = "classic"; fat = 1; delay = 0.20
 
 	save.dollars     = 12400
-	save.owned_skins = ["classic", "pirate", "dracula", "glasses", "kuss", "viking", "tyson"]
+	save.owned_skins = ["classic", "pirate", "dracula", "glasses", "kuss", "viking",
+		"tyson", "spider_man"]
 	save.active_skin = skin
 	save.skin_level  = 10
 	normaldo.call("reload_skin")
@@ -64,18 +74,30 @@ func _initialize() -> void:
 	# Мишень. Для «POWER!» она ставится ВНЕ хитбокса головы (radius ~32), но в
 	# пределах замаха викинга (92): ближе — и предмет съедает сам Нормальдо,
 	# кулак бьёт уже по пустому месту.
-	if mode in ["dollar", "cash", "power"]:
+	if mode in ["dollar", "cash", "power", "web"]:
 		var rock := Area2D.new()
 		rock.set_script(preload("res://scripts/hazard_item.gd"))
 		rock.set("kind", "safe")
 		rock.set("speed", 0.0)
-		rock.position = (normaldo as Node2D).position \
-			+ Vector2(72.0 if mode == "power" else 150.0, 0.0)
+		# Мишень паутине ставится ДАЛЬШЕ: нить снимается на попадании, а снять
+		# надо её саму — значит снаряду нужно время в полёте.
+		var reach : float = 150.0
+		if mode == "power":
+			reach = 72.0
+		elif mode == "web":
+			reach = 330.0
+		rock.position = (normaldo as Node2D).position + Vector2(reach, 0.0)
 		spawner.add_child(rock)
 		await process_frame
 
-	if not mode.begins_with("wings"):
-		normaldo.call("_try_fire_ability", (normaldo as Node2D).position + Vector2(400.0, 0.0))
+	# Куда «тапнули». По умолчанию — далеко вперёд; для доворота Тайсона нужны
+	# точки, до которых прежний зажатый угол не дотягивался.
+	var tap := Vector2(400.0, 0.0)
+	match mode:
+		"aim_left": tap = Vector2(-320.0, 40.0)
+		"aim_up":   tap = Vector2(-260.0, -220.0)
+	if not mode.begins_with("wings") and mode != "idle":
+		normaldo.call("_try_fire_ability", (normaldo as Node2D).position + tap)
 	# «POWER!» живёт треть секунды, и ловить его фиксированной задержкой —
 	# гадание: попадание случается когда случается. Ждём появления самого
 	# спрайта, а не отсчитываем время.

@@ -36,6 +36,10 @@ func _ready() -> void:
 	collision_layer = 2
 	collision_mask  = 0
 	add_to_group("obstacle")
+	# Своя группа нужна, чтобы вора можно было УЗНАТЬ. Без неё его тег пустой:
+	# иммунитет к вору (6-й уровень Бэтмена и Джокера) не срабатывал, и Дракула
+	# не отжирал бандита, хотя бандит тоже человек.
+	add_to_group("thief")
 	_spr = Sprite2D.new()
 	_spr.texture        = TEX1
 	_spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
