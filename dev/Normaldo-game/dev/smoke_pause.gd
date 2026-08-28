@@ -46,6 +46,8 @@ func _initialize() -> void:
 	await _test_settings(hud)
 	print("── Усадка переживает уход с экрана ──")
 	await _test_press_anim()
+	print("── Пульсация ждёт входа в дерево ──")
+	await _test_pulse()
 
 	print("")
 	if _fails == 0:
@@ -277,5 +279,32 @@ func _test_press_anim() -> void:
 		"вне дерева масштаб возвращается напрямую: ×%.2f" % visual.scale.x)
 
 	visual.free()
+	host.free()
+	await process_frame
+
+
+# Второй кирпич того же семейства. Экраны собирают карточки ОТЦЕПЛЕННЫМИ и
+# добавляют в дерево потом; `create_tween()` на отцепленном узле в Godot 4.2
+# возвращает null, и пульсация молча не заводится — экран выглядит собранным,
+# просто ничего не двигается. Проверяем контракт, а не версию движка: пока узел
+# вне дерева, пульсации нет; попал в дерево — пошла.
+func _test_pulse() -> void:
+	var host := Control.new()
+	var node := Control.new()
+	node.modulate = Color(1, 1, 1)
+	UiKit.pulse(node, "modulate", Color(1.4, 1.4, 1.4), Color(1, 1, 1), 0.2)
+	for _i in 12:
+		await process_frame
+	_check(is_equal_approx(node.modulate.r, 1.0),
+		"вне дерева пульсация не запускается: %.3f" % node.modulate.r)
+
+	get_root().add_child(host)
+	host.add_child(node)
+	var seen : Array = []
+	for _i in 30:
+		await process_frame
+		seen.append(node.modulate.r)
+	_check(seen.max() - seen.min() > 0.01,
+		"попал в дерево — пульсация пошла: размах %.3f" % (seen.max() - seen.min()))
 	host.free()
 	await process_frame

@@ -466,9 +466,13 @@ func _build_card_content(root: Node2D, pos: Vector2, size: Vector2, slot: int) -
 	if ready:
 		# Пульсация рамки: единственный элемент экрана, который двигается, —
 		# взгляд идёт к нему сам, без чтения.
-		var tw := panel.create_tween().set_loops()
-		tw.tween_property(panel, "modulate", Color(1.15, 1.12, 1.0), 0.55)
-		tw.tween_property(panel, "modulate", Color(1.0, 1.0, 1.0), 0.55)
+		#
+		# Через UiKit, а не своим твином: карточка собирается ОТЦЕПЛЕННОЙ и
+		# попадает в дерево только у вызывающего (`_slide_root.add_child(node)`).
+		# Свой `panel.create_tween()` здесь возвращал null — экран открывался с
+		# ошибкой в консоли, а готовая карточка не пульсировала.
+		UiKit.pulse(panel, "modulate",
+			Color(1.15, 1.12, 1.0), Color(1.0, 1.0, 1.0), 0.55)
 
 	_build_tier_badge(root, pos + Vector2(10.0, 10.0), look)
 

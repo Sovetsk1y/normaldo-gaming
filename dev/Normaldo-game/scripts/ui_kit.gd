@@ -74,6 +74,33 @@ static func press_anim(visual_root: Control, pressed: bool) -> void:
 	tw.tween_property(visual_root, "scale", target, PRESS_TIME)\
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
+# Пульсация — «единственный движущийся элемент» экрана.
+#
+# Узел на момент вызова часто ЕЩЁ НЕ В ДЕРЕВЕ: карточки собираются отдельной
+# функцией и добавляются в экран потом. `create_tween()` на отцепленном узле
+# возвращает null, и пульсация молча не заводится — экран выглядит собранным
+# правильно, просто ничего не двигается, а в консоль сыпется «Cannot call
+# method 'set_loops' on a null value».
+#
+# Поэтому старт откладывается до входа в дерево. Так вызывающему коду не нужно
+# знать, в каком порядке его собирают.
+static func pulse(node: CanvasItem, property: String, to_value: Variant,
+		back_value: Variant, half_period: float) -> void:
+	if not is_instance_valid(node):
+		return
+	if not node.is_inside_tree():
+		node.tree_entered.connect(
+			func() -> void:
+				UiKit.pulse(node, property, to_value, back_value, half_period),
+			CONNECT_ONE_SHOT)
+		return
+	var tw := node.create_tween()
+	if tw == null:
+		return
+	tw.set_loops()
+	tw.tween_property(node, property, to_value, half_period)
+	tw.tween_property(node, property, back_value, half_period)
+
 # Панель со скруглением — самый частый вызов, чтобы не писать три строки подряд.
 static func panel(parent: Node, pos: Vector2, size: Vector2, fill: Color,
 		radius: int, border: Color = Color(0, 0, 0, 0), border_w: int = 2) -> Panel:

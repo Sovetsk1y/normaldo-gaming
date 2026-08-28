@@ -740,11 +740,14 @@ func _claim_button(pos: Vector2, size: Vector2, text: String, action: Callable) 
 
 # Пульсирует ровно то, к чему игрок должен подойти: готовая строка и золотая
 # точка на её главе.
+# Через UiKit, а не своим твином: узел может быть ещё не в дереве, и тогда
+# create_tween() возвращает null — пульсация молча не заводится. Здесь сейчас
+# оба вызова идут по уже добавленным узлам, но полагаться на порядок сборки
+# нельзя: ровно так сломалась карточка задания.
 func _pulse_forever(node: Control) -> void:
 	node.pivot_offset = node.size * 0.5
-	var tw := node.create_tween().set_loops()
-	tw.tween_property(node, "modulate:a", 0.72, 0.55).set_trans(Tween.TRANS_SINE)
-	tw.tween_property(node, "modulate:a", 1.0, 0.55).set_trans(Tween.TRANS_SINE)
+	var col := node.modulate
+	UiKit.pulse(node, "modulate:a", 0.72, col.a, 0.55)
 
 # ── Шапка ────────────────────────────────────────────────────────────────────
 func _build_back_button(sx: float, sy: float) -> void:

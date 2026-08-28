@@ -205,6 +205,22 @@ func _test_states(hud: Node, qm: Node) -> void:
 			nums = false
 	_check(nums, "в каждой карточке есть номер сложности")
 
+	# Готовая карточка обязана ПУЛЬСИРОВАТЬ — это единственный движущийся
+	# элемент экрана, и по нему игрок находит награду, не читая. Проверяем не
+	# наличие твина, а сам факт движения: карточка собирается ОТЦЕПЛЕННОЙ, и
+	# create_tween() на ней возвращал null. Пульсация молча не заводилась, а
+	# экран при этом выглядел собранным правильно.
+	var panel : Panel = _find_panel(cards[0])
+	_check(panel != null, "у готовой карточки нашлась подложка")
+	if panel != null:
+		var seen : Array = []
+		for _i in 50:
+			await process_frame
+			seen.append(panel.modulate.r)
+		var lo : float = seen.min()
+		var hi : float = seen.max()
+		_check(hi - lo > 0.01, "и она пульсирует: размах %.3f" % (hi - lo))
+
 	# Забранная карточка показывает таймер до нового задания.
 	var cd : Array = scr.get("_cd_timer_lbls")
 	_check(is_instance_valid(cd[1]) and String(cd[1].text).length() == 8,
@@ -274,3 +290,13 @@ func _test_close(hud: Node) -> void:
 	for _i in 60:
 		await process_frame
 	_check(not is_instance_valid(scr), "экран освободился после закрытия")
+
+
+func _find_panel(node: Node) -> Panel:
+	if node is Panel:
+		return node
+	for c in node.get_children():
+		var f := _find_panel(c)
+		if f != null:
+			return f
+	return null
