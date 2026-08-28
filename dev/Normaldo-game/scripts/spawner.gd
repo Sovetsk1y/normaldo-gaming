@@ -582,10 +582,20 @@ func _breather(speed: float, lanes: Array, vp_w: float) -> void:
 
 # ── Director: scripted set-pieces (reuse the tier pattern fns) ─────────────────
 
+# Сет-писы, ВРЕМЕННО убранные из забега. Держатся отдельным списком, а не
+# вычёркиванием из CAMPAIGN_DIRECTOR: таблица — это запись замысла, и стереть из
+# неё вид значит потерять, в каких фазах он стоял. Код вида остаётся живым и
+# вызывается тестами и дев-кнопкой напрямую.
+const SP_DISABLED : Array = ["bum_barrel"]
+
 func _pick_set_piece(pool: Array) -> String:
 	if pool.is_empty():
 		return "sandwich"
 	var choices := pool.duplicate()
+	for off in SP_DISABLED:
+		choices.erase(off)
+	if choices.is_empty():
+		return "sandwich"
 	if choices.size() > 1 and _last_sp_id in choices:
 		choices.erase(_last_sp_id)   # no immediate repeats
 	var pick : String = choices[randi() % choices.size()]

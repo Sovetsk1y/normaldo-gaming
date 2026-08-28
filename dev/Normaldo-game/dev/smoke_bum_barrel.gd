@@ -12,7 +12,7 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 14
+const EXPECTED_CHECKS : int = 15
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -31,6 +31,19 @@ func _initialize() -> void:
 	sp.call("clear_items")
 	sp.set_process(false)
 	await process_frame
+
+	# Вид ВРЕМЕННО убран из забега (см. Spawner.SP_DISABLED): код живой, тесты и
+	# дев-кнопка зовут его напрямую, а в кампании он не выпадает. Проверяется
+	# именно выпадение, а не наличие в таблице фаз: таблица — запись замысла, и
+	# вид из неё не вычёркивался.
+	print("── Пока убран из забега ──")
+	var seen_in_campaign := false
+	for phase in sp.CAMPAIGN_DIRECTOR:
+		for i in 300:
+			if String(sp.call("_pick_set_piece", phase["sp"])) == "bum_barrel":
+				seen_in_campaign = true
+				break
+	_check(not seen_in_campaign, "в кампании не выпадает ни в одной фазе")
 
 	print("── Приезд, бочка, собака ──")
 	var vp : Vector2 = get_root().get_visible_rect().size
