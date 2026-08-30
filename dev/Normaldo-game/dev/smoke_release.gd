@@ -48,7 +48,7 @@ const DEV_TEXTS : Array = [
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 9
+const EXPECTED_CHECKS : int = 10
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -113,7 +113,9 @@ func _indent_of(line: String) -> int:
 func _test_screens() -> void:
 	if DevFlags.ENABLED:
 		# Рубильник включён — это рабочая сборка, кнопки на месте по замыслу.
-		for i in 5:
+		# Столько же проверок, сколько в ветке «выключён»: счётчик ловит «тест не
+		# отработал», и разное число проверок по веткам сделало бы его врущим.
+		for i in 7:
 			_check(true, "рубильник ВКЛЮЧЁН — сборка рабочая, экраны не проверяем")
 		return
 	_check(true, "рубильник ВЫКЛЮЧЕН — сборка готовится к раздаче")

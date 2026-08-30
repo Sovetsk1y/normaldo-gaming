@@ -100,9 +100,16 @@ func _test_ninja_kinds() -> void:
 	_check(solid, "и дым отнимает место, а не просто рисуется")
 
 	# И облако не висит вечно: иначе лейн превращается в стену до конца забега.
-	await _tick(4.6)
+	# Ждём СОБЫТИЯ, а не отсчитываем секунды: облако тает по таймеру реального
+	# времени, а счётчик теста считает кадры, и стоит игре просесть по частоте —
+	# фиксированная пауза начинает мерить не жизнь дыма, а скорость машины.
+	var t := 0.0
+	while t < 12.0 and not get_root().get_tree().get_nodes_in_group("smoke").is_empty():
+		get_root().get_tree().paused = false
+		await process_frame
+		t += 1.0 / 60.0
 	_check(get_root().get_tree().get_nodes_in_group("smoke").is_empty(),
-		"а потом рассеивается")
+		"а потом рассеивается (%.1f)" % t)
 	game.queue_free()
 	await process_frame
 

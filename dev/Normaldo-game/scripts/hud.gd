@@ -66,6 +66,7 @@ const MENU_TAP_ZONE_H : float = 122.0
 const MENU_MODE_BTN_X : float = 265.0
 const MENU_MODE_BTN_Y : float = 105.0
 const NINJA_FOOT_SCENE := preload("res://scenes/ninja_foot.tscn")
+const LEATHERHEAD_SCRIPT := preload("res://scripts/leatherhead.gd")
 
 const FAT_THRESHOLDS := [40, 120, 260]
 const SECTION_H      := 44.0
@@ -247,6 +248,7 @@ var _dev_immortal_lbl  : Label     = null
 # debug_collisions_hint so newly-spawned items inherit the state.
 var _dev_collisions_btn  : Node2D    = null
 var _dev_boss_btn        : Node2D    = null
+var _dev_croc_btn        : Node2D    = null
 var _dev_phase_btn       : Node2D    = null
 var _dev_phase_lbl       : Label     = null
 var _dev_collisions_bg   : ColorRect = null
@@ -5900,6 +5902,7 @@ func _start_game() -> void:
 		_build_dev_thief_btn()
 		_build_dev_bum_wave_btn()
 		_build_dev_bum_barrel_btn()
+		_build_dev_croc_btn()
 		_build_dev_immortal_btn()
 		_build_dev_boss_btn()
 		_build_dev_phase_btn()
@@ -6346,6 +6349,74 @@ func _dev_summon_boss() -> void:
 		_dev_boss_btn.queue_free()
 		_dev_boss_btn = null
 	_on_boss_time()
+
+# Шестой дев-чип — КРОКОДИЛ. Отдельной кнопкой, а не заменой боссу: пока он не
+# встроен в кампанию, вызывать его надо когда угодно и не проходя эпизод.
+func _build_dev_croc_btn() -> void:
+	var vp     := get_viewport().get_visible_rect().size
+	const SZ   := 44.0
+	const GAP  := 6.0
+	_dev_croc_btn          = Node2D.new()
+	_dev_croc_btn.position = Vector2(8.0, vp.y - SZ * 6.0 - 8.0 - GAP * 5.0)
+	add_child(_dev_croc_btn)
+
+	var bg := ColorRect.new()
+	bg.color = Color(0.06, 0.20, 0.08, 0.92)
+	bg.size  = Vector2(SZ, SZ)
+	_dev_croc_btn.add_child(bg)
+
+	var stripe := ColorRect.new()
+	stripe.color = Color(0.45, 1.0, 0.35, 0.85)
+	stripe.size  = Vector2(SZ, 2.0)
+	_dev_croc_btn.add_child(stripe)
+
+	var icon := _make_icon(LEATHERHEAD_SCRIPT.F_IDLE, SZ - 16.0)
+	icon.position = Vector2(8.0, 1.0)
+	_dev_croc_btn.add_child(icon)
+
+	var lbl := Label.new()
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", 9)
+	lbl.text                 = "КРОК"
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	lbl.modulate             = Color(0.60, 1.0, 0.50)
+	lbl.size                 = Vector2(SZ, SZ - 30.0)
+	lbl.position             = Vector2(0.0, 30.0)
+	_dev_croc_btn.add_child(lbl)
+
+	var btn := Button.new()
+	btn.flat       = true
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.size       = Vector2(SZ, SZ)
+	btn.pressed.connect(_dev_summon_croc)
+	_dev_croc_btn.add_child(btn)
+
+func _dev_summon_croc() -> void:
+	_play_btn_sfx()
+	if is_instance_valid(_dev_croc_btn):
+		_dev_croc_btn.queue_free()
+		_dev_croc_btn = null
+	summon_leatherhead(true)
+
+# Крокодил поднимается тем же путём, что и Нога Ниндзя: интерфейс забега
+# уезжает, босс получает Нормальдо, спавнер и корень сцены. В тестовом режиме
+# он по себе прибирает — возвращает поток, музыку и управление.
+func summon_leatherhead(test_mode: bool = false) -> void:
+	var game_root := get_parent() as Node2D
+	var normaldo  := get_parent().get_node_or_null("Normaldo") as Node2D
+	var spawner   := get_parent().get_node_or_null("Spawner")
+	if not normaldo or not game_root:
+		return
+	_slide_out_hud_for_boss()
+	var croc := Node2D.new()
+	croc.set_script(LEATHERHEAD_SCRIPT)
+	croc.call("setup", normaldo, spawner, game_root, test_mode)
+	game_root.add_child(croc)
+	if not test_mode:
+		croc.connect("defeated", _on_boss_defeated)
+	else:
+		croc.connect("tree_exited", _slide_in_hud)
 
 # Fifth dev chip — campaign-only fast-forward. Each tap jumps to the next
 # campaign phase; tapping past the final (pre-boss) phase summons the boss.

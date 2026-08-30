@@ -12,4 +12,4 @@
 # (A plain const, not OS.is_debug_build(), so an open-test build that happens to
 # be debug-signed still ships clean, and the toggle is explicit + greppable.)
 # ─────────────────────────────────────────────────────────────────────────────
-const ENABLED := false
+const ENABLED := true
