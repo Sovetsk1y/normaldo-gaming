@@ -1077,6 +1077,8 @@ func _input(event: InputEvent) -> void:
 		var d := event as InputEventScreenDrag
 		if _ignored_touches.has(d.index):
 			return
+		if _dash_active:
+			return   # рывком управляет тюин, палец в это время не тянет голову
 		if _touch_count > 0:
 			var speed = _effective_fat_speed(fat_state) * _move_speed_mult() * (SLOW_MULTIPLIER if _slow_remaining > 0.0 else 1.0)
 			if _invert_remaining > 0.0:
@@ -1092,6 +1094,7 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_update_web_line()
+	_update_dash_trail()
 	_tick_skill_cd(delta)
 
 	# Eat animation timer
@@ -1722,6 +1725,9 @@ func _try_fire_ability(target: Vector2) -> void:
 			active_denied.emit()
 			return
 		_active_charges = _active_max_charges   # cooldown finished → recharge
+	# Точка тапа запоминается ЦЕЛИКОМ, а не только направление: рывок Очков
+	# летит в конкретное место экрана, и нормализованного вектора ему мало.
+	_last_ability_target = target
 	var dir := (target - global_position)
 	if dir.length() < 4.0:
 		dir = Vector2.RIGHT
@@ -2075,15 +2081,8 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 			_play_skill_sfx(SkinSkills.DODGE)
 		"invisibility":
 			_cast_invisibility(float(_ability_cfg.get("duration", 2.0)))
-		"haste":
-			var boost := float(_ability_cfg.get("duration", 2.0))
-			apply_speed_boost(boost)
-			# Пока действует ускорение, голова остаётся «поехавшей» — это и есть
-			# признак работающего эффекта, а не вспышка на треть секунды.
-			# Ждём конца позы каста, иначе удержание перебьёт её первый кадр.
-			await get_tree().create_timer(SPELL_POSE_TIME * 2.0).timeout
-			if is_instance_valid(self):
-				_hold_pose("_spell2", maxf(0.1, boost - SPELL_POSE_TIME * 2.0))
+		"electric_dash":
+			_cast_electric_dash(_last_ability_target)
 		"helm_throw":
 			# Штурвал пробивает любые предметы на линии и НЕ ломается (pierce).
 			var spr := _make_sprite(_WHEEL_TEX, 56.0)
@@ -2359,6 +2358,179 @@ func _cast_invisibility(duration: float) -> void:
 	var tw2 := create_tween()
 	tw2.tween_property(_sprite, "modulate:a", 1.0, 0.18)
 	_invincible = false
+
+# ── Очки: электрический рывок ────────────────────────────────────────────────
+# Раньше спелл был «ускорением»: две секунды голова двигалась быстрее. Проблема
+# была не в силе, а в ЧИТАЕМОСТИ — на экране не происходило ничего, кроме того,
+# что палец начинал опережать голову. Спелл легендарного скина не должен
+# опознаваться по ощущению в пальце.
+#
+# Теперь это РЫВОК, и он читается тремя вещами подряд:
+#   1. Заряд. Играется нарисованная поза каста — «глотнул энергетик», потом
+#      «поехало». На втором кадре включается электричество: жёлтая обводка,
+#      мелкая тряска и искры. Это окно ожидания, по нему видно, что сейчас будет.
+#   2. Рывок. Голова уходит В ТОЧКУ ТАПА за четверть секунды, оставляя за собой
+#      хвост кометы — узкий у места старта и широкий у самой головы.
+#   3. Проход насквозь. Пока идёт рывок, предметы не задевают вообще: ни плохие,
+#      ни хорошие. Съеденная на лету пицца превратила бы рывок в способ фармить,
+#      а пропущенный удар — в способ не думать; ни то, ни другое к «пролетел
+#      насквозь» отношения не имеет.
+const DASH_COL      : Color = Color(1.00, 0.92, 0.15)   # электрический жёлтый
+const DASH_CHARGE_T : float = SPELL_POSE_TIME * 2.0     # ровно длина позы каста
+const DASH_T        : float = 0.24
+const DASH_TRAIL_W  : float = 84.0    # ширина хвоста У ГОЛОВЫ
+const DASH_TAIL_W   : float = 0.10    # и доля этой ширины на дальнем конце
+const DASH_RIM_GROW : float = 1.16
+const DASH_SHAKE    : float = 0.075   # рад: амплитуда дрожи
+const DASH_SHAKE_T  : float = 0.035   # и её период — быстро, как от тока
+
+var _last_ability_target : Vector2 = Vector2.ZERO
+var _dash_active  : bool    = false
+var _dash_trail   : Line2D  = null
+var _dash_from    : Vector2 = Vector2.ZERO
+var _dash_sparks  : CPUParticles2D = null
+
+func is_dashing() -> bool:
+	return _dash_active
+
+func _cast_electric_dash(target: Vector2) -> void:
+	if _dash_active:
+		return
+	# Электричество включается НА ВТОРОМ кадре позы: на первом он ещё пьёт, и
+	# искрить там нечему.
+	await get_tree().create_timer(SPELL_POSE_TIME).timeout
+	if not is_instance_valid(self):
+		return
+	var rim := _dash_rim(true)
+	_dash_sparks = _dash_spark_emitter()
+	_dash_shake(SPELL_POSE_TIME)
+	_play_oneshot(_SFX_GLITTER, -4.0)
+	await get_tree().create_timer(SPELL_POSE_TIME).timeout
+	if not is_instance_valid(self):
+		_dash_rim(false)
+		return
+
+	# ── Рывок ────────────────────────────────────────────────────────────────
+	_dash_active = true
+	_invincible  = true
+	_dash_from   = global_position
+	_dash_trail  = _make_dash_trail()
+	_show_floating_text("ЗЗЗАП!", DASH_COL)
+	_play_skill_sfx(SkinSkills.DODGE)
+	var vp := get_viewport_rect().size
+	var to := Vector2(clampf(target.x, 24.0, vp.x - 24.0), clampf(target.y, 24.0, vp.y - 24.0))
+	var tw := create_tween()
+	tw.tween_property(self, "global_position", to, DASH_T)\
+		.set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
+	await tw.finished
+
+	_dash_active = false
+	_invincible  = false
+	_dash_rim(false)
+	if is_instance_valid(_dash_sparks):
+		_dash_sparks.emitting = false
+		var sp := _dash_sparks
+		get_tree().create_timer(0.6).timeout.connect(func() -> void:
+			if is_instance_valid(sp):
+				sp.queue_free())
+	_dash_sparks = null
+	_fade_dash_trail()
+
+# Обводка — копия спрайта головы, чуть крупнее и позади. Тот же приём, что у
+# снарядов (_add_rim): дешевле шейдера и не зависит от кадра, который сейчас
+# показан, — копия берёт текстуру у оригинала в момент создания.
+func _dash_rim(on: bool) -> Sprite2D:
+	if not is_instance_valid(_sprite):
+		return null
+	var old := _sprite.get_node_or_null("DashRim")
+	if old != null:
+		old.queue_free()
+	if not on:
+		return null
+	var rim := Sprite2D.new()
+	rim.name           = "DashRim"
+	rim.texture        = _sprite.texture
+	rim.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	rim.scale          = Vector2.ONE * DASH_RIM_GROW
+	rim.modulate       = Color(DASH_COL.r, DASH_COL.g, DASH_COL.b, 0.95)
+	rim.z_index        = -1
+	_sprite.add_child(rim)
+	return rim
+
+# Дрожь — по ПОВОРОТУ, а не по позиции. Вертикалью спрайта владеет покачивание
+# (см. _place_head), и тряска позиции гасилась бы им на каждом кадре.
+func _dash_shake(duration: float) -> void:
+	if not is_instance_valid(_sprite):
+		return
+	var spr := _sprite
+	var tw := spr.create_tween()
+	if tw == null:
+		return
+	var steps : int = maxi(2, int(duration / DASH_SHAKE_T))
+	for i in steps:
+		var a : float = DASH_SHAKE * (1.0 if i % 2 == 0 else -1.0)
+		tw.tween_property(spr, "rotation", a, DASH_SHAKE_T)
+	tw.tween_property(spr, "rotation", 0.0, DASH_SHAKE_T)
+
+func _dash_spark_emitter() -> CPUParticles2D:
+	var p := CPUParticles2D.new()
+	p.amount               = 26
+	p.lifetime             = 0.45
+	p.explosiveness        = 0.0
+	p.direction            = Vector2.ZERO
+	p.spread               = 180.0
+	p.gravity              = Vector2.ZERO
+	p.initial_velocity_min = 90.0
+	p.initial_velocity_max = 210.0
+	p.scale_amount_min     = 1.5
+	p.scale_amount_max     = 3.5
+	p.color                = DASH_COL
+	p.z_index              = 6
+	p.emitting             = true
+	add_child(p)
+	return p
+
+func _make_dash_trail() -> Line2D:
+	var host := get_parent()
+	if host == null:
+		return null
+	var l := Line2D.new()
+	l.width         = DASH_TRAIL_W
+	l.default_color = Color(DASH_COL.r, DASH_COL.g, DASH_COL.b, 0.80)
+	l.z_index       = 6
+	l.begin_cap_mode = Line2D.LINE_CAP_ROUND
+	l.end_cap_mode   = Line2D.LINE_CAP_ROUND
+	l.joint_mode     = Line2D.LINE_JOINT_ROUND
+	# Кривая ширины и делает из полосы КОМЕТУ: у дальнего конца хвост почти
+	# сходится в точку, у головы — во всю ширину.
+	var c := Curve.new()
+	c.add_point(Vector2(0.0, DASH_TAIL_W))
+	c.add_point(Vector2(1.0, 1.0))
+	l.width_curve = c
+	l.points = PackedVector2Array([_dash_from, _dash_from])
+	host.add_child(l)
+	return l
+
+# Хвост — отрезок «откуда стартовал → где сейчас». Обновляется каждый кадр, а не
+# копится точками: рывок прямой, и двух точек хватает.
+func _update_dash_trail() -> void:
+	if not is_instance_valid(_dash_trail):
+		return
+	if not _dash_active:
+		return
+	_dash_trail.points = PackedVector2Array([_dash_from, global_position])
+
+func _fade_dash_trail() -> void:
+	if not is_instance_valid(_dash_trail):
+		return
+	var l := _dash_trail
+	_dash_trail = null
+	var tw := l.create_tween()
+	if tw == null:
+		l.queue_free()
+		return
+	tw.tween_property(l, "modulate:a", 0.0, 0.22)
+	tw.tween_callback(l.queue_free)
 
 # ── Крылья Дракулы ───────────────────────────────────────────────────────────
 # В архиве крыло ОДНО. Пара собирается зеркалом: правое — тот же спрайт с
@@ -3222,6 +3394,13 @@ func _classify_hit_group(area: Area2D) -> String:
 
 func _on_area_entered(area: Area2D) -> void:
 	if _dead: return
+
+	# Электрический рывок Очков проходит НАСКВОЗЬ — и через плохое, и через
+	# хорошее. Пропускать только удары значило бы сделать из рывка щит, а
+	# подбирать на лету — способ фармить; ни то, ни другое не «пролетел
+	# насквозь».
+	if _dash_active:
+		return
 
 	if area.is_in_group("mutagen"):
 		# FatBoss owns the freeze/mini-game; we just consume the pickup and signal.

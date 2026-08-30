@@ -31,7 +31,7 @@ func _initialize() -> void:
 	await _test_pirate_flair()
 	print("── Дракула: серый призрак ──")
 	await _test_dracula_ghost()
-	print("── Очки: поза каста в два кадра ──")
+	print("── Очки: электрический рывок ──")
 	await _test_glasses_pose()
 	print("── Классика: доллары в глазах ──")
 	await _test_cash_face()
@@ -242,20 +242,49 @@ func _test_glasses_pose() -> void:
 	var f2 : Texture2D = n.get("_skin_spell2_tex")[1]
 	_check(f1 != null and f2 != null, "оба кадра позы подгрузились")
 
-	n.call("_try_fire_ability", (n as Node2D).position + Vector2(300.0, 0.0))
+	var start : Vector2 = (n as Node2D).global_position
+	var tap   : Vector2 = start + Vector2(240.0, -70.0)
+	n.call("_try_fire_ability", tap)
 	await _wait(0.12)
 	_check(spr.texture == f1, "первый кадр: пьёт банку")
+
+	# На ВТОРОМ кадре включается электричество: обводка, дрожь и искры. На первом
+	# он ещё пьёт, и искрить там нечему.
 	await _wait(0.34)
 	_check(spr.texture == f2, "второй кадр: поехало")
+	_check(spr.get_node_or_null("DashRim") != null, "и появилась обводка")
+	_check(n.get("_dash_sparks") != null, "и полетели искры")
 
-	# «Поехало» ДЕРЖИТСЯ всё ускорение, а не мгновение: эффект длится две
-	# секунды, и если лицо возвращается через треть, спелл читается как
-	# мигание, а не как состояние.
-	await _wait(0.8)
-	_check(spr.texture == f2, "и держится, пока действует ускорение")
-	_check(float(n.get("_speed_boost_remaining")) > 0.0, "ускорение и правда идёт")
-	await _wait(1.6)
-	_check(spr.texture == normal, "кончилось ускорение — вернулся к обычной голове")
+	# Рывок: голова уходит В ТОЧКУ ТАПА, а не «куда-то вперёд». Он начинается
+	# ПОСЛЕ обоих кадров позы (0.34 + 0.34) и длится 0.24 — целимся в середину.
+	await _wait(0.30)
+	_check(bool(n.call("is_dashing")), "пошёл рывок")
+	var trail : Line2D = n.get("_dash_trail")
+	_check(trail != null, "и за ним тянется хвост")
+	if trail != null:
+		var c : Curve = trail.width_curve
+		_check(c != null and c.sample(0.0) < c.sample(1.0) * 0.5,
+			"хвост кометой: узкий у старта (%.2f), широкий у головы (%.2f)"
+				% [0.0 if c == null else c.sample(0.0), 0.0 if c == null else c.sample(1.0)])
+
+	# Сквозь всё подряд: и плохое, и хорошее. Кидаем препятствие прямо в него.
+	var fat_before : int = int(n.get("fat_state"))
+	var rock := _rock(e["sp"], (n as Node2D).global_position)
+	await process_frame
+	n.call("_on_area_entered", rock)
+	_check(is_instance_valid(rock) and int(n.get("fat_state")) == fat_before,
+		"предмет прошёл насквозь: жир %d, предмет цел %s"
+			% [int(n.get("fat_state")), str(is_instance_valid(rock))])
+
+	await _wait(0.5)
+	var landed : Vector2 = (n as Node2D).global_position
+	_check(landed.distance_to(tap) < 26.0,
+		"приземлился в точку тапа: (%.0f, %.0f) против (%.0f, %.0f)"
+			% [landed.x, landed.y, tap.x, tap.y])
+	_check(not bool(n.call("is_dashing")), "рывок кончился")
+	_check(spr.get_node_or_null("DashRim") == null, "обводка снялась")
+	_check(not bool(n.get("_invincible")), "и неуязвимость снялась вместе с ним")
+	_check(spr.texture == normal, "и голова вернулась обычной")
 	(e["game"] as Node).queue_free()
 	await process_frame
 

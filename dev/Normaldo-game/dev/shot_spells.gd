@@ -32,7 +32,9 @@ func _initialize() -> void:
 		"pirate4":  skin = "pirate";  fat = 3
 		"dracula":  skin = "dracula"; fat = 3; delay = 0.35
 		"glasses1": skin = "glasses"; fat = 2; delay = 0.12
-		"glasses2": skin = "glasses"; fat = 2; delay = 0.45
+		"glasses2": skin = "glasses"; fat = 2; delay = 0.55
+		# Середина рывка: заряд занимает 0.68, сам рывок 0.24.
+		"dash":     skin = "glasses"; fat = 2; delay = 0.80
 		"cash":       skin = "classic"; fat = 1; delay = 0.30
 		"wings":      skin = "dracula"; fat = 3; delay = 0.02
 		"wings_flap": skin = "dracula"; fat = 3; delay = 0.34
@@ -95,6 +97,7 @@ func _initialize() -> void:
 	var tap := Vector2(400.0, 0.0)
 	match mode:
 		"aim_left": tap = Vector2(-320.0, 40.0)
+		"dash":     tap = Vector2(330.0, -120.0)
 		"aim_up":   tap = Vector2(-260.0, -220.0)
 	if not mode.begins_with("wings") and mode != "idle":
 		normaldo.call("_try_fire_ability", (normaldo as Node2D).position + tap)
