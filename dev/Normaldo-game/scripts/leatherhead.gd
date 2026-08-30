@@ -491,6 +491,10 @@ func _recoil() -> void:
 # край, из которого он выйдет, загорается за 0.4 с.
 const TAIL_LEN_FRAC : float = 0.72   # какую долю высоты экрана перекрывает
 const TAIL_GLOW_T   : float = 0.40
+# Насколько хвост уходит ЗА КРАЙ. Основание — это срез, которым хвост крепится к
+# телу, и торчащий в кадр срез читается как «хвост оторвали и бросили», а не как
+# «крокодил бьёт хвостом из-за экрана». Прячем его целиком.
+const TAIL_HIDE_FRAC : float = 0.35
 const TAIL_SWEEPS : Array = [
 	{ "side": "bottom", "speed": 300.0 },
 	{ "side": "top",    "speed": 380.0 },
@@ -544,11 +548,16 @@ func _edge_glow(side: String, dur: float) -> void:
 
 func _tail_sweep(side: String, speed: float) -> void:
 	var vp  := get_viewport_rect().size
+	# len_px — то, что ВИДНО в кадре; хвост длиннее на TAIL_HIDE_FRAC, и лишнее
+	# уходит за край вместе с основанием.
 	var len_px : float = vp.y * TAIL_LEN_FRAC
-	var thick  : float = len_px * float(F_TAIL.get_height()) / float(F_TAIL.get_width())
-	# Стена заходит за край на десяток пикселей: иначе между хвостом и полом
-	# остаётся щель, и «хвост метёт по земле» превращается в «хвост висит».
-	var mid_y  : float = vp.y - len_px * 0.5 + 10.0 if side == "bottom" else len_px * 0.5 - 10.0
+	var hide   : float = len_px * TAIL_HIDE_FRAC
+	var full   : float = len_px + hide
+	var thick  : float = full * float(F_TAIL.get_height()) / float(F_TAIL.get_width())
+	# Полоса хвоста стоит так, чтобы её видимый конец упирался в край экрана, а
+	# спрятанный уходил наружу.
+	var mid_y  : float = vp.y + (hide - len_px) * 0.5 if side == "bottom" \
+		else (len_px - hide) * 0.5
 	var from_x : float = -thick if side == "bottom" else vp.x + thick
 	var to_x   : float = vp.x + thick if side == "bottom" else -thick
 
@@ -564,16 +573,20 @@ func _tail_sweep(side: String, speed: float) -> void:
 	var spr := Sprite2D.new()
 	spr.texture        = F_TAIL
 	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	spr.scale          = Vector2.ONE * (len_px / float(F_TAIL.get_width()))
-	# Хвост нарисован лежащим — ставим его стоймя: снизу растёт вверх, сверху
-	# свисает вниз.
-	spr.rotation       = -PI * 0.5 if side == "bottom" else PI * 0.5
+	spr.scale          = Vector2.ONE * (full / float(F_TAIL.get_width()))
+	# Хвост нарисован лежащим, ОСНОВАНИЕМ ВПРАВО (замер: у левого края толщина 2
+	# пикселя, у правого — 75). Разворачиваем так, чтобы основание смотрело В
+	# КРАЙ экрана, а в кадр торчал кончик.
+	spr.rotation       = PI * 0.5 if side == "bottom" else -PI * 0.5
 	node.add_child(spr)
 
+	# Бьёт только ВИДИМАЯ часть: спрятанный за краем кусок хитбоксом не считается,
+	# иначе стена оказалась бы выше того, что нарисовано.
 	var cs   := CollisionShape2D.new()
 	var rect := RectangleShape2D.new()
-	rect.size = Vector2(thick * 0.62, len_px * 0.92)
-	cs.shape  = rect
+	rect.size    = Vector2(thick * 0.62, len_px * 0.92)
+	cs.shape     = rect
+	cs.position  = Vector2(0.0, -hide * 0.5 if side == "bottom" else hide * 0.5)
 	node.add_child(cs)
 	_game_root.add_child(node)
 	_play_sfx(SFX_TAIL)
@@ -839,13 +852,16 @@ func _finale() -> void:
 	var big := Sprite2D.new()
 	big.texture        = F_TAIL
 	big.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	big.scale          = Vector2.ONE * (vp.y * 1.05 / float(F_TAIL.get_width()))
-	big.position       = Vector2(vp.x + vp.y, vp.y * 0.5)
+	# Длиннее экрана намеренно: оба конца всегда за кадром, и срез основания не
+	# проезжает по центру.
+	var big_len : float = vp.x * 1.3
+	big.scale          = Vector2.ONE * (big_len / float(F_TAIL.get_width()))
+	big.position       = Vector2(vp.x + big_len * 0.5, vp.y * 0.5)
 	big.z_index        = 46
 	_game_root.add_child(big)
 	_play_sfx(SFX_TAIL)
 	var sweep := big.create_tween()
-	sweep.tween_property(big, "position:x", -vp.y, 0.55).set_trans(Tween.TRANS_LINEAR)
+	sweep.tween_property(big, "position:x", -big_len * 0.5, 0.55).set_trans(Tween.TRANS_LINEAR)
 
 	await get_tree().create_timer(0.26).timeout
 	if not is_instance_valid(self):

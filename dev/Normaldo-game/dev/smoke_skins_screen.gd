@@ -55,8 +55,7 @@ func _initialize() -> void:
 # четырёх. Поэтому проверяется не «карточки нарисовались», а СВАЙП ЖИРА.
 func _test_cards(hud: Node, save: Node) -> void:
 	_setup_save(save, 12400)
-	hud.set("_skins_card_view", true)
-	var overlay : Control = await _open(hud)
+	var overlay : Control = await _open(hud, true)
 	_check(overlay != null, "карточный вид открылся")
 	if overlay == null:
 		return
@@ -100,7 +99,6 @@ func _test_cards(hud: Node, save: Node) -> void:
 				"и портрет действительно другой")
 
 	await _close(overlay)
-	hud.set("_skins_card_view", false)
 
 func _collect_cards(root: Node, out: Array) -> void:
 	if root is Control and String(root.name).begins_with("Card_"):
@@ -139,7 +137,11 @@ func _setup_save(save: Node, dollars: int) -> void:
 	save.active_skin = "viking"
 	save.skin_level  = 3
 
-func _open(hud: Node) -> Control:
+# Вид задаётся ЯВНО на каждое открытие. По умолчанию экран открывается
+# карточками, и проверки сетки, написанные до этого, молча искали бы ячейки в
+# ленте карточек и находили ноль — «сетка сломалась», хотя сломался тест.
+func _open(hud: Node, cards: bool = false) -> Control:
+	hud.set("_skins_card_view", cards)
 	var before : Array = hud.get_children()
 	hud.call("_show_shop", 0, true, true)   # from_slots=true — без анимации въезда
 	for _i in 8:

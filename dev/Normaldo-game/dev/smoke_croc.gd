@@ -18,7 +18,7 @@ const CROC := preload("res://scripts/leatherhead.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 16
+const EXPECTED_CHECKS : int = 18
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -190,6 +190,25 @@ func _test_tail() -> void:
 		var h : float = (cs.shape as RectangleShape2D).size.y if cs != null else 0.0
 		var vp : Vector2 = e["vp"]
 		_check(h < vp.y * 0.85, "и оставляет щель: стена %.0f при экране %.0f" % [h, vp.y])
+
+		# ОСНОВАНИЕ ХВОСТА не должно попадать в кадр: срез, которым хвост крепится
+		# к телу, читается как «хвост оторвали», а не как «бьёт из-за экрана».
+		# Проверяем, что нарисованный хвост длиннее видимой стены и вылезает за
+		# край, а кончик смотрит В кадр.
+		var spr : Sprite2D = null
+		for ch in tl.get_children():
+			if ch is Sprite2D:
+				spr = ch
+		if spr != null:
+			var drawn : float = float(spr.texture.get_width()) * spr.scale.x
+			_check(drawn > h * 1.2,
+				"нарисован длиннее стены: %.0f против %.0f" % [drawn, h])
+			# Основание хвоста — правый край рисунка (замер: слева толщина 2 px,
+			# справа 75). После разворота оно обязано уйти ЗА край экрана.
+			var base_local := Vector2(float(spr.texture.get_width()) * 0.5, 0.0)
+			var base_y : float = spr.to_global(base_local).y
+			_check(base_y > vp.y or base_y < 0.0,
+				"основание за краем экрана: y=%.0f при экране %.0f" % [base_y, vp.y])
 	e["game"].queue_free()
 	await process_frame
 
