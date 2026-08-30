@@ -127,6 +127,33 @@ func _initialize() -> void:
 			await process_frame
 			tb += 1.0 / 60.0
 
+	# Ниндзя трёх видов: ставим одного нужного вида и ждём его атаки.
+	if argv.size() > 5 and String(argv[5]).begins_with("ninja_"):
+		spawner.set_process(false)
+		spawner.call("clear_items")
+		for _i in 6:
+			await process_frame
+		var vpn : Vector2 = get_root().get_visible_rect().size
+		(normaldo as Node2D).position = Vector2(200.0, vpn.y * 0.5)
+		var nk := String(argv[5]).substr(6)
+		var nn := Area2D.new()
+		nn.set_script(load("res://scripts/ninja_item.gd"))
+		nn.set("speed", 250.0)
+		nn.set("kind", nk)
+		nn.position = Vector2(vpn.x + 40.0, vpn.y * 0.5)
+		spawner.add_child(nn)
+		var waits_n : Dictionary = {
+			"ninja_shuriken": 1.35,
+			"ninja_predator": 1.20,   # середина рывка
+			"ninja_smoke":    2.30,   # дым уже стоит
+		}
+		var tn := 0.0
+		var wn : float = float(waits_n.get(String(argv[5]), 1.5))
+		while tn < wn:
+			get_root().get_tree().paused = false
+			await process_frame
+			tn += 1.0 / 60.0
+
 	if argv.size() > 5 and String(argv[5]).begins_with("boss"):
 		var boss : Node = game.get_node_or_null("FatBoss")
 		var bar : float = 1.0

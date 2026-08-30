@@ -482,7 +482,7 @@ func _spawn_random_item(dc: Dictionary, speed: float, lanes: Array, vp_w: float)
 		elif h < 0.83: _spawn_scripted(ROADSIGN_BUM_SCRIPT, y, vp_w, speed)   # бомж со знаком
 		elif h < 0.87: _spawn_scripted(COMPASS_SCRIPT, y, vp_w, speed)        # компас (реверс)
 		elif h < 0.90: _spawn_effect_item("black_ace", y, vp_w, speed)        # чёрный туз (сжигает жир)
-		elif h < 0.94: _spawn_scripted(NINJA_SCRIPT, y, vp_w, speed)          # ниндзя (сюрикены)
+		elif h < 0.94: _spawn_ninja(y, vp_w, speed)                           # ниндзя (три вида)
 		elif h < 0.96: _spawn_effect_item("loser_ticket", y, vp_w, speed)     # чек лузера (обнуляет доллары)
 		else:          _spawn_hazard(_pick_hazard(), y, vp_w, speed)          # сейф/коктейль/коп/яд/птица/штурвал/шаман
 
@@ -508,6 +508,23 @@ func _spawn_hazard(kind: String, y: float, vp_w: float, speed: float) -> void:
 	node.set("kind", kind)
 	node.set("speed", speed)
 	node.position = Vector2(vp_w + 90.0, y)
+	_mark_base_span(y)
+	add_child(node)
+
+# Ниндзя трёх видов (см. ninja_item.gd). Чёрный чаще остальных: он самый
+# читаемый, по нему игрок и учится, что такое ниндзя. Красный и жёлтый — это уже
+# вариации на знакомом, и вываливать их наравне значило бы учить трём вещам
+# сразу.
+const NINJA_KINDS : Array = ["shuriken", "shuriken", "predator", "smoke"]
+
+func _spawn_ninja(y: float, vp_w: float, speed: float) -> void:
+	var node := Area2D.new()
+	node.set_script(NINJA_SCRIPT)
+	node.set("speed", speed)
+	# kind ставится ДО add_child: _ready() читает его, чтобы покрасить спрайт и
+	# записаться в свою группу.
+	node.set("kind", NINJA_KINDS[randi() % NINJA_KINDS.size()])
+	node.position = Vector2(vp_w + 80.0, y)
 	_mark_base_span(y)
 	add_child(node)
 
@@ -1354,7 +1371,7 @@ func _spawn_bonus_item(speed: float, vp_w: float, lanes: Array) -> void:
 	elif roll < 0.89: _spawn_effect_item("cola",       y, vp_w, speed)
 	elif roll < 0.93: _spawn_scripted(MAGIC_BOX_SCRIPT, y, vp_w, speed)
 	elif roll < 0.96: _spawn_effect_item("black_ace",    y, vp_w, speed)
-	elif roll < 0.98: _spawn_scripted(NINJA_SCRIPT,      y, vp_w, speed)
+	elif roll < 0.98: _spawn_ninja(y, vp_w, speed)
 	elif roll < 0.975: _spawn_effect_item("loser_ticket", y, vp_w, speed)
 	elif roll < 0.995: _spawn_hazard(_pick_hazard(), y, vp_w, speed)
 	else:              _spawn_effect_item("casino_chip",  y, vp_w, speed)

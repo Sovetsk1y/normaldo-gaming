@@ -36,6 +36,8 @@ func _initialize() -> void:
 	await _test_hazards()
 	print("── Пул мэджик бокса ──")
 	await _test_box_pool()
+	print("── Три вида ниндзя ──")
+	await _test_ninja_kinds()
 
 	print("")
 	if _fails == 0:
@@ -47,6 +49,82 @@ func _initialize() -> void:
 # Ящик — это СТАВКА НА ПОЛЕ, а не кошелёк: он обязан уметь выплюнуть гадость.
 # Жетон автомата из пула убран — валюта не создаёт на экране никакой ситуации,
 # её просто подбирают; освободившаяся доля ушла замедляющим.
+# Три вида отвечают на три РАЗНЫХ вопроса: чёрный — «куда он бросил», красный —
+# «где он пройдёт», жёлтый — «куда мне теперь нельзя». Проверяется именно это:
+# что каждый делает своё, а не что все трое собираются.
+func _test_ninja_kinds() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var sp : Node = game.get_node_or_null("Spawner")
+	var n  : Node = game.get_node_or_null("Normaldo")
+	sp.call("clear_items")
+	sp.set_process(false)
+	# Меню игры ставит дерево на паузу, а ниндзя живёт на _process и тюинах:
+	# под паузой он замирает на месте, и тест меряет не поведение, а паузу.
+	get_root().get_tree().paused = false
+	var vp : Vector2 = get_root().get_visible_rect().size
+	(n as Node2D).position = Vector2(180.0, vp.y * 0.5)
+	await process_frame
+
+	# Спавнер обязан выдавать все три: вид, который не выпадает, всё равно что
+	# не написан.
+	var seen : Dictionary = {}
+	for i in 400:
+		sp.call("_spawn_ninja", vp.y * 0.5, vp.x, 250.0)
+	for c in sp.get_children():
+		if c.get("kind") != null and c.is_in_group("ninja"):
+			seen[String(c.get("kind"))] = true
+	_check(seen.size() == 3, "спавнер выдаёт все три вида: %s" % str(seen.keys()))
+	sp.call("clear_items")
+	await process_frame
+
+	# Красный: доходит до места, замахивается и УХОДИТ ЗА ЛЕВЫЙ КРАЙ сквозь
+	# точку, где стоял Нормальдо. Ключевое — что он не останавливается.
+	var red : Node2D = _put_ninja(sp, "predator", vp)
+	await _tick(2.4)
+	var gone : bool = not is_instance_valid(red) or red.global_position.x < 40.0
+	_check(gone, "красный прошёл насквозь и ушёл")
+	sp.call("clear_items")
+	await process_frame
+
+	# Жёлтый: после броска на поле стоят облака дыма — они и есть его атака.
+	var yellow : Node2D = _put_ninja(sp, "smoke", vp)
+	await _tick(2.6)
+	var clouds : int = get_root().get_tree().get_nodes_in_group("smoke").size()
+	_check(clouds >= 1, "жёлтый поставил дым: облаков %d" % clouds)
+	var solid := true
+	for c in get_root().get_tree().get_nodes_in_group("smoke"):
+		if not c.is_in_group("obstacle"):
+			solid = false
+	_check(solid, "и дым отнимает место, а не просто рисуется")
+
+	# И облако не висит вечно: иначе лейн превращается в стену до конца забега.
+	await _tick(4.6)
+	_check(get_root().get_tree().get_nodes_in_group("smoke").is_empty(),
+		"а потом рассеивается")
+	game.queue_free()
+	await process_frame
+
+func _put_ninja(sp: Node, kind: String, vp: Vector2) -> Node2D:
+	var node := Area2D.new()
+	node.set_script(NINJA)
+	node.set("speed", 250.0)
+	node.set("kind", kind)
+	node.position = Vector2(vp.x + 40.0, vp.y * 0.5)
+	sp.add_child(node)
+	return node
+
+# Пауза снимается КАЖДЫЙ кадр, а не один раз на входе: меню игры ставит дерево
+# на паузу отложенно и может сделать это посреди прогона. Ниндзя живёт на
+# _process и тюинах, и под паузой тест меряет не поведение, а паузу.
+func _tick(sec: float) -> void:
+	var t := 0.0
+	while t < sec:
+		get_root().get_tree().paused = false
+		await process_frame
+		t += 1.0 / 60.0
+
 func _test_box_pool() -> void:
 	var sp : Node = Node2D.new()
 	sp.set_script(SPAWNER)

@@ -13,12 +13,66 @@ extends Area2D
 #
 # Сам ниндзя тоже бьёт при касании (группа obstacle, урон 1).
 #
+# ── Три вида ─────────────────────────────────────────────────────────────────
+# Вид задаётся полем `kind`, скрипт один: отличаются они не механикой полёта, а
+# ТЕМ, ЧЕМ БЬЮТ, и разводить под это три файла значило бы трижды скопировать
+# въезд, покачивание, дым и уход.
+#
+#   shuriken (чёрный) — веер наводящихся сюрикенов. Уклоняться надо ПОСЛЕ
+#       броска: снаряд наводится в момент вылета.
+#   predator (красный) — не тормозит вовсе, а РАЗГОНЯЕТСЯ и проходит насквозь
+#       через место, где стоял Нормальдо, с занесённым мечом. Тот же приём, что
+#       у босса (ninja_foot._predator_attack), но одним заходом. Уклоняться надо
+#       ДО рывка: после начала траектория уже не меняется.
+#   smoke (жёлтый) — кидает дымовые шашки, и на их месте встают облака дыма.
+#       Уклоняться не надо вообще — надо ПЕРЕСТАТЬ ТУДА ЛЕТАТЬ: дым не летит, он
+#       отнимает место.
+#
+# Три вида и отвечают на три разных вопроса: «куда он бросил», «где он пройдёт»
+# и «куда мне теперь нельзя».
+#
 # См. /Концепция/Паттерны препятствий.md → «Ниндзя»
 
 const NINJA_TEX      := preload("res://assets/bosses/ninja_foot/ninja_foot1.png")
 const SHURIKEN_SCENE := preload("res://scenes/shuriken.tscn")
 const THROW_SFX      := preload("res://assets/audio/shurikens.mp3")
 const SMOKE_TEX      := preload("res://assets/bosses/ninja_foot/ninja_foot_smoke.png")
+const SWORD1_TEX     := preload("res://assets/bosses/ninja_foot/sword1.png")
+const SWORD2_TEX     := preload("res://assets/bosses/ninja_foot/sword2.png")
+const CLOUD_TEX      := preload("res://assets/bosses/ninja_foot/smoke.png")
+const BOMB_TEX       := preload("res://assets/bosses/ninja_foot/smoke_projectile.png")
+const SMOKE_SCRIPT   := preload("res://scripts/smoke_obstacle.gd")
+const PREDATOR_SFX   := preload("res://assets/audio/shredder_predator.mp3")
+
+# Цвет — единственное, чем виды различаются на глаз, и различать их надо ДО
+# первой атаки: у красного она без телеграфа по месту, уходить надо заранее.
+#
+# Красит НЕ modulate, а обводка. Ниндзя нарисован фиолетовым (много красного и
+# синего, зелёного почти нет), а modulate умножает: жёлтый на фиолетовом даёт
+# бурый, и «жёлтый» с «красным» на экране становились одним и тем же грязным
+# цветом. Обводка своим цветом рисуется поверх чужого и читается сразу.
+const KIND_TINT : Dictionary = {
+	"shuriken": Color(1.00, 1.00, 1.00),
+	"predator": Color(1.25, 0.80, 0.80),
+	"smoke":    Color(1.25, 1.15, 0.80),
+}
+const KIND_RIM : Dictionary = {
+	"predator": Color(1.00, 0.14, 0.10),
+	"smoke":    Color(1.00, 0.86, 0.16),
+}
+const RIM_GROW : float = 1.18
+
+# Красный: разбег, рывок и меч.
+const PRED_WINDUP_T : float = 0.42    # замах: видно, куда он сейчас пойдёт
+const PRED_SPEED    : float = 760.0
+const PRED_ARM_PX   : float = 86.0
+
+# Жёлтый: шашки и облака.
+const SMOKE_BOMBS   : int   = 3
+const SMOKE_GAP     : float = 0.45
+const SMOKE_LIFE    : float = 3.4
+const SMOKE_SZ      : float = 118.0
+const BOMB_SPEED    : float = 620.0
 
 # Ниндзя крупнее рядового предмета — он «персонаж», а не мусор в трубе.
 const NINJA_PX : float = 96.0
@@ -32,10 +86,13 @@ const SHURIKEN_SPEED   : float = 430.0
 const EXIT_SPEED_MULT  : float = 2.6    # рывок на выход
 
 @export var speed : float = 250.0
+@export var kind  : String = "shuriken"
 
 var damage : int = 1
 
-enum State { ENTER, ATTACK, EXIT }
+# EXIT_FROZEN — рывок красного: позицией в это время владеет тюин, и обычный
+# EXIT, который сам двигает узел влево, тянул бы его в другую сторону.
+enum State { ENTER, ATTACK, EXIT, EXIT_FROZEN }
 var _state    : int     = State.ENTER
 var _park_x   : float   = 0.0
 var _bob_t    : float   = 0.0
@@ -48,10 +105,25 @@ func _ready() -> void:
 	add_to_group("obstacle")
 	add_to_group("ninja")
 
+	add_to_group("ninja_" + kind)
+
 	_sprite = Sprite2D.new()
 	_sprite.texture = NINJA_TEX
+	_sprite.modulate = KIND_TINT.get(kind, Color.WHITE)
+	# z_index поднят намеренно: обводка рисуется на слой НИЖЕ спрайта, и при
+	# нулевом z она уходила под фон — цветного канта не было видно вовсе.
+	_sprite.z_index  = 2
 	ItemSizing.fit_sprite(_sprite, NINJA_PX)
 	add_child(_sprite)
+	if KIND_RIM.has(kind):
+		var rim := Sprite2D.new()
+		rim.name           = "Rim"
+		rim.texture        = NINJA_TEX
+		rim.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		rim.scale          = Vector2.ONE * RIM_GROW
+		rim.modulate       = KIND_RIM[kind]
+		rim.z_index        = -1
+		_sprite.add_child(rim)
 
 	var cs    := CollisionShape2D.new()
 	var rect  := RectangleShape2D.new()
@@ -83,7 +155,10 @@ func _process(delta: float) -> void:
 			if position.x <= _park_x:
 				position.x = _park_x
 				_state     = State.ATTACK
-				_run_attack()
+				match kind:
+					"predator": _run_predator()
+					"smoke":    _run_smoke()
+					_:          _run_attack()
 		State.ATTACK:
 			pass   # висит на месте, бросками управляет _run_attack()
 		State.EXIT:
@@ -109,12 +184,171 @@ func _run_attack() -> void:
 	_puff()
 	_state = State.EXIT
 
+# ── Красный: удар предатора ──────────────────────────────────────────────────
+# Один заход того же приёма, что у босса: замах на месте (видно, КУДА он сейчас
+# пойдёт), потом рывок насквозь через точку, где стоял Нормальдо, и за край.
+#
+# Направление берётся ОДИН РАЗ, в конце замаха. Наводящийся всю дорогу ниндзя
+# не оставил бы игроку хода: уклонение тут делается ДО рывка, а не во время.
+func _run_predator() -> void:
+	if _normaldo == null or not is_instance_valid(_normaldo):
+		_state = State.EXIT
+		return
+	# Замах: раздувается и заносит меч. Это и есть телеграф — без него рывок
+	# читается как «внезапно умер».
+	var arm := Sprite2D.new()
+	arm.texture        = SWORD1_TEX
+	arm.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	arm.scale          = Vector2.ONE * ItemSizing.fit_scale(SWORD1_TEX, PRED_ARM_PX)
+	arm.z_index        = 1
+	add_child(arm)
+	_play_sfx(PREDATOR_SFX)
+
+	var base := _sprite.scale
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(_sprite, "scale", base * 1.35, PRED_WINDUP_T)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_sprite, "modulate", Color(2.0, 0.5, 0.45), PRED_WINDUP_T * 0.5)
+	await tw.finished
+	if not is_instance_valid(self) or not is_instance_valid(_normaldo):
+		return
+
+	var dir : Vector2 = (_normaldo.global_position - global_position).normalized()
+	if dir.length() < 0.01:
+		dir = Vector2.LEFT
+	arm.position = dir * NINJA_PX * 0.55
+	arm.rotation = dir.angle()
+	_sprite.flip_h = dir.x > 0.0
+
+	var vp := get_viewport_rect().size
+	var dest := _normaldo.global_position + dir * vp.length()
+	var dur : float = global_position.distance_to(dest) / PRED_SPEED
+	_state = State.EXIT_FROZEN
+	var rush := create_tween()
+	rush.tween_property(self, "global_position", dest, dur).set_trans(Tween.TRANS_LINEAR)
+	# Меч в рывке проворачивается — по нему и читается, что это УДАР, а не
+	# «ниндзя пролетел мимо».
+	var spin := create_tween()
+	spin.tween_interval(dur * 0.30)
+	spin.tween_callback(func() -> void:
+		if is_instance_valid(arm):
+			arm.texture = SWORD2_TEX)
+	spin.tween_property(arm, "rotation", dir.angle() + TAU, dur * 0.55)\
+		.set_trans(Tween.TRANS_SINE)
+	await rush.finished
+	if is_instance_valid(self):
+		queue_free()
+
+# ── Жёлтый: дымовые шашки ────────────────────────────────────────────────────
+# Кидает шашки по случайным лейнам; там, куда шашка долетела, встаёт облако и
+# держится несколько секунд. Уклоняться от дыма не надо — надо перестать туда
+# летать: он не гонится, он отнимает место.
+func _run_smoke() -> void:
+	for i in SMOKE_BOMBS:
+		if not is_instance_valid(self):
+			return
+		await _telegraph()
+		if not is_instance_valid(self):
+			return
+		_throw_bomb()
+		if i < SMOKE_BOMBS - 1:
+			await get_tree().create_timer(SMOKE_GAP).timeout
+	if not is_instance_valid(self):
+		return
+	await get_tree().create_timer(0.35).timeout
+	if not is_instance_valid(self):
+		return
+	_puff()
+	_state = State.EXIT
+
+func _throw_bomb() -> void:
+	var host := get_parent()
+	if host == null:
+		return
+	var vp := get_viewport_rect().size
+	var lane : int = randi() % 5
+	var to := Vector2(vp.x * randf_range(0.18, 0.62), vp.y * (float(lane) + 0.5) / 5.0)
+
+	var proj := Sprite2D.new()
+	proj.texture        = BOMB_TEX
+	proj.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	proj.scale          = Vector2.ONE * ItemSizing.fit_scale(BOMB_TEX, 34.0)
+	proj.modulate       = KIND_TINT["smoke"]
+	proj.position       = position
+	proj.z_index        = 3
+	host.add_child(proj)
+
+	var dur : float = maxf(0.12, proj.position.distance_to(to) / BOMB_SPEED)
+	var tw := proj.create_tween()
+	tw.tween_property(proj, "position", to, dur)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(proj, "rotation", TAU * 1.5, dur)
+	tw.tween_callback(func() -> void:
+		if is_instance_valid(proj):
+			_spawn_cloud(proj.position)
+			proj.queue_free())
+
+	var audio := AudioStreamPlayer.new()
+	audio.stream = THROW_SFX
+	host.add_child(audio)
+	audio.play()
+	audio.finished.connect(audio.queue_free)
+
+func _spawn_cloud(at: Vector2) -> void:
+	var host := get_parent()
+	if host == null:
+		return
+	var node := Area2D.new()
+	node.set_script(SMOKE_SCRIPT)
+	node.collision_layer = 2
+	node.collision_mask  = 0
+	node.position        = at
+	node.z_index         = 4
+
+	var spr := Sprite2D.new()
+	spr.texture        = CLOUD_TEX
+	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	spr.scale          = Vector2.ONE * ItemSizing.fit_scale(CLOUD_TEX, SMOKE_SZ)
+	spr.modulate       = Color(1.35, 1.20, 0.55, 0.0)
+	node.add_child(spr)
+
+	var cs     := CollisionShape2D.new()
+	var circle := CircleShape2D.new()
+	circle.radius = SMOKE_SZ * 0.36
+	cs.shape      = circle
+	node.add_child(cs)
+
+	host.add_child.call_deferred(node)
+	await get_tree().process_frame
+	if not is_instance_valid(node):
+		return
+	node.add_to_group("obstacle")
+	node.add_to_group("smoke")
+	# Проявляется и тает сам: облако, висящее до конца забега, превратило бы
+	# лейн в стену.
+	var tw := spr.create_tween()
+	tw.tween_property(spr, "modulate:a", 0.92, 0.22)
+	tw.tween_interval(SMOKE_LIFE)
+	tw.tween_property(spr, "modulate:a", 0.0, 0.45)
+	tw.tween_callback(node.queue_free)
+
+func _play_sfx(stream: AudioStream) -> void:
+	var host := get_parent()
+	if host == null:
+		return
+	var a := AudioStreamPlayer.new()
+	a.stream = stream
+	host.add_child(a)
+	a.play()
+	a.finished.connect(a.queue_free)
+
 # Красная вспышка-предупреждение: у игрока есть THROW_TELEGRAPH, чтобы начать
 # уходить с линии броска.
 func _telegraph() -> void:
 	var tw := create_tween()
-	tw.tween_property(_sprite, "modulate", Color(1.6, 0.45, 0.45), THROW_TELEGRAPH * 0.5)
-	tw.tween_property(_sprite, "modulate", Color(1.0, 1.0, 1.0), THROW_TELEGRAPH * 0.5)
+	var tint : Color = KIND_TINT.get(kind, Color.WHITE)
+	tw.tween_property(_sprite, "modulate", tint * 1.6, THROW_TELEGRAPH * 0.5)
+	tw.tween_property(_sprite, "modulate", tint, THROW_TELEGRAPH * 0.5)
 	await tw.finished
 
 func _throw() -> void:
