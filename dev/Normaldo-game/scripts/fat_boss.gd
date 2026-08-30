@@ -36,7 +36,6 @@ const CRASH_SFX   := preload("res://assets/audio/crash.mp3")
 const FIRECRACKER := preload("res://assets/audio/firecracker.mp3")
 const UI_FONT    := preload("res://assets/fonts/RussoOne-Regular.ttf")
 const FINGER_TEX := preload("res://assets/ui/quests/back_arrow.png")
-const SLAKE_TEX  := preload("res://assets/normaldo/slakebake.png")   # parting "slake bake" stamp
 
 # ── Tunables (designer-facing) ────────────────────────────────────────────────
 @export var enabled         : bool  = true
@@ -580,7 +579,7 @@ func _run_outro() -> void:
 
 	# Только теперь сдуваемся и возвращаемся на место забега.
 	await _deflate()
-	_show_slake()
+	# Печать SLAKE BAKE переехала в общий такт окна итогов (minigame_payout.gd).
 	_tap_particles()
 	if _normaldo.has_method("end_fat_boss"):
 		_normaldo.end_fat_boss()
@@ -614,24 +613,6 @@ func _deflate() -> void:
 		tw.parallel().tween_property(_normaldo, "position", _pre_boss_pos, DEFLATE_T) \
 			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	await tw.finished
-
-# Parting "slake bake" image: pops in over the now-deflated Normaldo, holds, fades.
-func _show_slake() -> void:
-	if not is_instance_valid(_normaldo):
-		return
-	var s : float = 170.0 / maxf(1.0, float(SLAKE_TEX.get_height()))   # ~170 px tall
-	var spr := Sprite2D.new()
-	spr.texture  = SLAKE_TEX
-	spr.position = _normaldo.position + Vector2(0.0, -150.0)   # well above his head
-	spr.scale    = Vector2(s, s) * 0.2
-	spr.z_index  = 10
-	_ui.add_child(spr)
-	var tw := spr.create_tween()
-	tw.tween_property(spr, "scale", Vector2(s, s), 0.26) \
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tw.tween_interval(1.1)
-	tw.tween_property(spr, "modulate:a", 0.0, 0.3)
-	tw.tween_callback(spr.queue_free)
 
 # ── Phase-B item spawning ─────────────────────────────────────────────────────
 

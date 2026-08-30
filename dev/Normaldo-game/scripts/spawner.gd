@@ -1467,10 +1467,19 @@ func build_random_item(speed: float) -> Node2D:
 		return _effect_node("cola", speed)
 	elif roll < 0.83:
 		return _effect_node("hourglass", speed)
-	elif roll < 0.86:
-		return _effect_node("casino_chip", speed)
 	elif roll < 0.92:
-		var sl := (BANANA_PEEL_SCENE if randf() < 0.5 else BEER_SCENE).instantiate()
+		# Замедляющие — банан, пиво и коктейль. Их доля выросла за счёт жетона
+		# автомата: жетон из ящика выпадать перестал. Жетон — валюта, а ящик по
+		# замыслу ставка на ПОЛЕ: выпавшая валюта не создаёт на экране никакой
+		# ситуации, её просто подбирают.
+		var sl : Node2D
+		var pick := randf()
+		if pick < 0.34:
+			sl = BANANA_PEEL_SCENE.instantiate()
+		elif pick < 0.68:
+			sl = BEER_SCENE.instantiate()
+		else:
+			return _hazard_node("cocktail", speed)
 		sl.speed = speed
 		return sl
 	elif roll < 0.97:
@@ -1479,6 +1488,15 @@ func build_random_item(speed: float) -> Node2D:
 		return sn
 	else:
 		return _effect_node("black_ace", speed)
+
+# Опасный предмет ОТДЕЛЬНЫМ узлом, без постановки в поток: мэджик бокс сам
+# решает, куда его выплюнуть (см. magic_box.gd), и позиция ему выдаётся позже.
+func _hazard_node(kind: String, speed: float) -> Node2D:
+	var node := Area2D.new()
+	node.set_script(HAZARD_ITEM_SCRIPT)
+	node.set("kind", kind)
+	node.set("speed", speed)
+	return node
 
 func _effect_node(kind: String, speed: float) -> Node2D:
 	var node := Area2D.new()

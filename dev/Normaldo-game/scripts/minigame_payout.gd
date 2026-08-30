@@ -31,6 +31,7 @@ const STOP_SFX   := preload("res://assets/audio/tap.mp3")
 const WIN_SFX    := preload("res://assets/audio/magic_glitter.mp3")
 const BIG_SFX    := preload("res://assets/audio/firecracker.mp3")
 const MACH_TEX   := preload("res://assets/slots/slot_machine.png")
+const SLAKE_TEX  := preload("res://assets/normaldo/slakebake.png")
 
 # ── Геометрия ─────────────────────────────────────────────────────────────────
 # Корпус — тот же автомат, что стоит на экране «СЛОТЫ» (assets/slots/
@@ -399,9 +400,74 @@ func _run() -> void:
 	await _grow_numbers()
 	await _wait(0.35)
 	await _fly_to_hud()
+	await _slake_stamp()
 
 	finished.emit(_mult)
 	queue_free()
+
+# ── Печать SLAKE BAKE ────────────────────────────────────────────────────────
+# Финальный такт: штамп ВЫЛЕТАЕТ КРУПНО ПО ЦЕНТРУ сразу после барабанов.
+#
+# Раньше он был у двух мини-игр из четырёх (слоты и жиробосс), висел мелко над
+# головой Нормальдо и приходил на своём такте у каждой — то до итогов, то после.
+# Игрок видел его как случайную наклейку. Здесь он стоит на общем такте: чем бы
+# ни кончилась мини-игра, последним кадром идёт одна и та же печать — «эпизод
+# закрыт». Ради этого и живёт в окне итогов, а не в самих мини-играх.
+#
+# Размер — в долях ЭКРАНА, а не в пикселях: штамп обязан читаться как печать
+# поверх всего, и 170 px над головой этого не делали.
+#
+# Меряется ВЫСОТА, а не ширина. Кадр почти квадратный (600×600), а экран широкий
+# и низкий (960×430): нормируй по ширине — и штамп вылезет за верх и низ. По
+# высоте он занимает почти весь экран, и это и есть «крупно».
+#
+# Считается по РИСУНКУ, а не по рамке: вокруг штампа в файле поля, и по рамке он
+# выходит заметно мельче заказанного.
+const SLAKE_H_FRAC : float = 0.88    # доля высоты экрана, которую занимает рисунок
+const SLAKE_W_MAX  : float = 0.72    # но не шире этой доли ширины
+const SLAKE_IN     : float = 0.30
+const SLAKE_HOLD   : float = 0.75
+const SLAKE_OUT    : float = 0.28
+
+func _slake_stamp() -> void:
+	var vp := get_viewport().get_visible_rect().size
+	var spr := TextureRect.new()
+	spr.texture           = SLAKE_TEX
+	spr.expand_mode       = TextureRect.EXPAND_IGNORE_SIZE
+	spr.stretch_mode      = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	spr.texture_filter    = CanvasItem.TEXTURE_FILTER_NEAREST
+	spr.mouse_filter      = Control.MOUSE_FILTER_IGNORE
+	var fr : Rect2i = ItemSizing.content_rect(SLAKE_TEX)
+	var full : Vector2 = SLAKE_TEX.get_size()
+	var ink_h : float = maxf(1.0, float(fr.size.y)) / maxf(1.0, full.y)   # доля рисунка в кадре
+	var h : float = vp.y * SLAKE_H_FRAC / ink_h
+	var w : float = h * full.x / maxf(1.0, full.y)
+	if w > vp.x * SLAKE_W_MAX:
+		var k : float = vp.x * SLAKE_W_MAX / w
+		w *= k
+		h *= k
+	spr.size         = Vector2(w, h)
+	spr.position     = (vp - spr.size) * 0.5
+	spr.pivot_offset = spr.size * 0.5
+	spr.scale        = Vector2.ONE * 0.25
+	spr.rotation     = -0.22        # печать «шлёпается» слегка косо
+	spr.modulate.a   = 0.0
+	_root.add_child(spr)
+	_play_once(BIG_SFX, -4.0)
+
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(spr, "scale", Vector2.ONE, SLAKE_IN) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(spr, "rotation", -0.04, SLAKE_IN) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(spr, "modulate:a", 1.0, SLAKE_IN * 0.5)
+	await tw.finished
+	await _wait(SLAKE_HOLD)
+	var out := create_tween().set_parallel(true)
+	out.tween_property(spr, "modulate:a", 0.0, SLAKE_OUT)
+	out.tween_property(spr, "scale", Vector2.ONE * 1.14, SLAKE_OUT)
+	await out.finished
+	spr.queue_free()
 
 # «×N» вылезает из-под барабанов и уезжает в плашку.
 func _fly_mult_into_plaque() -> void:

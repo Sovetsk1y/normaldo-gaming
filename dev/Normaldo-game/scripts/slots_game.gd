@@ -22,7 +22,6 @@ const BOOM1_TEX   := preload("res://assets/items/boombox1.png")
 const BOOM2_TEX   := preload("res://assets/items/boombox2.png")
 const NOTA1_TEX   := preload("res://assets/items/nota.png")
 const NOTA2_TEX   := preload("res://assets/items/nota2.png")
-const SLAKE_TEX   := preload("res://assets/normaldo/slakebake.png")
 
 const ITEM_SCENE     := preload("res://scenes/item.tscn")
 const HOMELESS_SCENE := preload("res://scenes/homeless.tscn")
@@ -525,8 +524,10 @@ func _end_minigame() -> void:
 	_columns_live = false
 	# All items have cleared the centre — celebrate with particle fireworks.
 	_fireworks()
-	# Parting "slake bake" stamp over Normaldo (same as the ЖИРОБОСС outro).
-	_show_slake()
+	# Печать SLAKE BAKE больше НЕ здесь: она стала общим финальным тактом окна
+	# итогов (minigame_payout.gd) — крупно по центру, сразу после барабанов.
+	# Мелкий штамп над головой на своём такте у каждой мини-игры читался как
+	# случайная наклейка.
 	# The last items have already passed Normaldo — fade out every slots element
 	# (boomboxes, any stragglers, the bg dim) before handing back to the run.
 	await _fade_out_elements()
@@ -548,25 +549,6 @@ func _end_minigame() -> void:
 	_event_frozen = false
 	_arm_timer = repeat_interval
 	_state = State.IDLE
-
-# Parting "slake bake" image, popped high over Normaldo, holds, fades. Lives on the
-# controller (world == screen here) so it can outlive the fade.
-func _show_slake() -> void:
-	if not is_instance_valid(_normaldo):
-		return
-	var s : float = 170.0 / maxf(1.0, float(SLAKE_TEX.get_height()))
-	var spr := Sprite2D.new()
-	spr.texture  = SLAKE_TEX
-	spr.position = _normaldo.position + Vector2(0.0, -150.0)   # well above his head
-	spr.scale    = Vector2(s, s) * 0.2
-	spr.z_index  = 60
-	add_child(spr)
-	var tw := spr.create_tween()
-	tw.tween_property(spr, "scale", Vector2(s, s), 0.26) \
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tw.tween_interval(1.1)
-	tw.tween_property(spr, "modulate:a", 0.0, 0.3)
-	tw.tween_callback(spr.queue_free)
 
 # Fade boomboxes + any leftover items to transparent and un-dim the background,
 # all over the same beat. Normaldo isn't faded — he carries on into the run.

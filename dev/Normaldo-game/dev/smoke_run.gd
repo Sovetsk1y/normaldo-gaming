@@ -216,6 +216,38 @@ func _test_payout(game: Node) -> void:
 		_check(not is_instance_valid(w), "×%d: окно итогов закрылось само" % mult)
 		_check(got == [mult], "×%d: сигнал finished принёс тот же множитель: %s" % [mult, got])
 
+	# Финальный такт — печать SLAKE BAKE: крупно и ПО ЦЕНТРУ. Раньше её ставили
+	# сами мини-игры, мелко над головой и каждая на своём такте, — игрок читал её
+	# как случайную наклейку. Проверяем именно размер и место: штамп, вылезающий
+	# на пол-экрана сбоку, формально «есть», а работу не делает.
+	var w3 : Node = load("res://scripts/minigame_payout.gd").new()
+	w3.call("setup", 7, 4, 3, Vector2(120.0, 14.0), Vector2(180.0, 14.0))
+	game.add_child(w3)
+	var slake : Texture2D = load("res://assets/normaldo/slakebake.png")
+	var stamp : Control = null
+	var ts := 0.0
+	while ts < 8.0 and is_instance_valid(w3):
+		await process_frame
+		ts += 1.0 / 60.0
+		var f : Control = _find_texture_rect(w3, slake)
+		if f != null and f.scale.x > 0.9:
+			stamp = f
+			break
+	_check(stamp != null, "печать SLAKE BAKE появилась")
+	if stamp != null:
+		var vp : Vector2 = get_root().get_visible_rect().size
+		var mid : Vector2 = stamp.position + stamp.size * 0.5
+		# «Крупно» на широком низком экране меряется ПО ВЫСОТЕ: кадр почти
+		# квадратный, и требовать половину ширины значило бы требовать штамп,
+		# вылезающий за верх и низ.
+		_check(stamp.size.y > vp.y * 0.85,
+			"и она крупная: %.0f px в высоту при экране %.0f" % [stamp.size.y, vp.y])
+		_check(mid.distance_to(vp * 0.5) < 12.0,
+			"и стоит по центру: (%.0f, %.0f) против (%.0f, %.0f)"
+				% [mid.x, mid.y, vp.x * 0.5, vp.y * 0.5])
+	while is_instance_valid(w3):
+		await process_frame
+
 	# Отдельно — что именно встало на барабанах. Ждём остановки и читаем ленту.
 	var w2 : Node = load("res://scripts/minigame_payout.gd").new()
 	w2.call("setup", 7, 4, 4, Vector2(120.0, 14.0), Vector2(180.0, 14.0))
@@ -245,3 +277,12 @@ func _test_payout(game: Node) -> void:
 	if is_instance_valid(w2):
 		w2.queue_free()
 	await process_frame
+
+func _find_texture_rect(root: Node, tex: Texture2D) -> Control:
+	if root is TextureRect and (root as TextureRect).texture == tex:
+		return root
+	for c in root.get_children():
+		var f := _find_texture_rect(c, tex)
+		if f != null:
+			return f
+	return null

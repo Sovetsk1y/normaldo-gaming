@@ -16,6 +16,7 @@ const SHOTS : Array = [
 	[3.10, "3_mult"],
 	[3.80, "4_grown"],
 	[4.25, "5_flyout"],
+	[4.90, "6_slake"],
 ]
 
 func _initialize() -> void:

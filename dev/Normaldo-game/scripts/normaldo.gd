@@ -2052,10 +2052,12 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 			_arm_frames(pb, bat, 18.0)
 			_play_skill_sfx(SkinSkills.DODGE)
 		"wand_shot":
-			# Маг: магический шар, 4 кадра пульсации.
+			# Маг: магический шар, 4 кадра пульсации. Во что попал — то стало
+			# МЭДЖИК БОКСОМ: спелл не ломает предмет и не выдаёт добычу, а
+			# превращает угрозу в ставку.
 			var ball := _make_anim_sprite("res://assets/skills/wizard/", "magicball", 4, 44.0)
 			var pw := _spawn_skill_projectile(dir, 520.0, ball, 26.0,
-				_RYAG_HIT_GROUPS, _break_once_handler(), 0.0)
+				_RYAG_HIT_GROUPS, _to_magic_box_handler(), 0.0)
 			_arm_frames(pw, ball, 16.0)
 			_play_oneshot(_SFX_GLITTER, -6.0)
 		"web_pull":
@@ -2538,6 +2540,38 @@ func _break_once_handler() -> Callable:
 			return false
 		_vfx_resist_break((node as Node2D).global_position)
 		_kill_item(node)
+		return true
+
+# Маг: задетый предмет становится МЭДЖИК БОКСОМ. Отдельно от _transform_handler,
+# который бросает монетку пицца-или-доллар: там добыча выдаётся сразу, а тут
+# спелл выдаёт СТАВКУ — ящик ещё надо поймать, и он выплюнет что попало.
+# В этом и разница между магом и классикой: классика обналичивает, маг — играет.
+const _MAGIC_BOX_SCRIPT := preload("res://scripts/magic_box.gd")
+
+func _to_magic_box_handler() -> Callable:
+	return func(node):
+		if not is_instance_valid(node):
+			return false
+		var pos : Vector2 = (node as Node2D).global_position
+		var spd := 250.0
+		if node.get("speed") != null:
+			spd = float(node.get("speed"))
+		if node.has_method("on_hit"):
+			node.on_hit()
+		else:
+			node.queue_free()
+		var host := get_parent()
+		if host != null:
+			var box := Area2D.new()
+			box.set_script(_MAGIC_BOX_SCRIPT)
+			box.set("speed", spd)   # ящик едет с потоком, как заменённый предмет
+			# Позиция ставится ДО добавления, а добавление откладывается: попадание
+			# приходит из обработки столкновений, и новый Area2D прямо посреди неё
+			# физика принять не может («can't change this state while flushing»).
+			box.position = (host as Node2D).to_local(pos) if host is Node2D else pos
+			host.call_deferred("add_child", box)
+		_vfx_particles(SkinSkills.TRANSFORM)
+		_play_oneshot(_SFX_POOF, -3.0)
 		return true
 
 func _transform_handler() -> Callable:

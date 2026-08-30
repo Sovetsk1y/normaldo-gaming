@@ -14,7 +14,7 @@ var _checks : int = 0
 
 # Нижняя граница числа проверок. Держать точной незачем — она ловит не «стало на
 # одну меньше», а «не отработало вообще ничего».
-const EXPECTED_CHECKS : int = 70
+const EXPECTED_CHECKS : int = 74
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -51,6 +51,8 @@ func _initialize() -> void:
 	await _test_human_feast()
 	print("── Спайдер: нить цвета паутины ──")
 	await _test_web_color()
+	print("── Маг: предмет → мэджик бокс ──")
+	await _test_wizard_box()
 
 	print("")
 	# Зелёный прогон, в котором НИЧЕГО не проверялось, — худший из возможных
@@ -554,6 +556,37 @@ func _test_web_color() -> void:
 	_check(mx - mn < 0.10, "нить обесцвечена (разброс каналов %.3f)" % (mx - mn))
 	_check(mx < 0.60, "и не белая (ярчайший канал %.2f)" % mx)
 	_check(mx > 0.30, "но и не чёрная (ярчайший канал %.2f)" % mx)
+
+# ── Маг ──────────────────────────────────────────────────────────────────────
+# Раньше шар просто ломал предмет — то же самое, что у Бэтмена и Кусса, только
+# другой картинкой. Теперь маг превращает угрозу в СТАВКУ: на месте предмета
+# остаётся мэджик бокс, который ещё надо поймать и который выплюнет что попало.
+func _test_wizard_box() -> void:
+	var skills : Node = get_root().get_node_or_null("SkinSkills")
+	var ab : Dictionary = skills.call("get_ability", "wizard")
+	_check(is_equal_approx(float(ab.get("cd", 0.0)), 3.0),
+		"откат 3 секунды: %.1f" % ab.get("cd", 0.0))
+
+	var e : Dictionary = await _boot("wizard", 1)
+	var n : Node = e["n"]
+	var sp : Node = e["sp"]
+	var boxes_before : int = _count_group(e["game"], "magic_box")
+	var rock := _rock(sp, (n as Node2D).position + Vector2(120.0, 0.0))
+	var rock_pos : Vector2 = (rock as Node2D).global_position
+	await process_frame
+	n.call("_try_fire_ability", (n as Node2D).position + Vector2(300.0, 0.0))
+	await _wait(0.6)
+
+	_check(not is_instance_valid(rock), "предмет исчез")
+	var boxes : Array = get_root().get_tree().get_nodes_in_group("magic_box")
+	_check(boxes.size() - boxes_before == 1,
+		"на его месте ровно один ящик: %d" % (boxes.size() - boxes_before))
+	if not boxes.is_empty():
+		var b : Node2D = boxes[boxes.size() - 1]
+		_check(b.global_position.distance_to(rock_pos) < 90.0,
+			"и стоит ТАМ, где был предмет: %.0f px" % b.global_position.distance_to(rock_pos))
+	(e["game"] as Node).queue_free()
+	await process_frame
 
 func _all_sprites(root: Node, out: Array) -> Array:
 	if root is Sprite2D and (root as Sprite2D).texture != null:

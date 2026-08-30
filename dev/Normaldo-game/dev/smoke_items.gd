@@ -34,6 +34,8 @@ func _initialize() -> void:
 	await _test_slow_mo()
 	print("── Угрозы под резисты скинов ──")
 	await _test_hazards()
+	print("── Пул мэджик бокса ──")
+	await _test_box_pool()
 
 	print("")
 	if _fails == 0:
@@ -41,6 +43,33 @@ func _initialize() -> void:
 	else:
 		print("ПРОВАЛОВ: ", _fails)
 	quit(1 if _fails > 0 else 0)
+
+# Ящик — это СТАВКА НА ПОЛЕ, а не кошелёк: он обязан уметь выплюнуть гадость.
+# Жетон автомата из пула убран — валюта не создаёт на экране никакой ситуации,
+# её просто подбирают; освободившаяся доля ушла замедляющим.
+func _test_box_pool() -> void:
+	var sp : Node = Node2D.new()
+	sp.set_script(SPAWNER)
+	get_root().add_child(sp)
+	await process_frame
+	var kinds : Dictionary = {}
+	for i in 1200:
+		var n : Node2D = sp.call("build_random_item", 250.0)
+		var k : String = String(n.get("kind")) if n.get("kind") != null else n.name
+		if n.get("item_group") != null and String(n.get("item_group")) != "":
+			k = String(n.get("item_group"))
+		elif n.get("script") != null:
+			k = String(n.get_script().resource_path).get_file().get_basename() if k == n.name else k
+		kinds[k] = int(kinds.get(k, 0)) + 1
+		n.free()
+	_check(not kinds.has("casino_chip"), "жетона автомата в пуле нет: %s" % str(kinds))
+	# Банан и пиво — один скрипт slowing_item.gd, коктейль — hazard_item с
+	# kind="cocktail". Считаем всех троих.
+	var slow : int = int(kinds.get("slowing_item", 0)) + int(kinds.get("cocktail", 0))
+	_check(slow > 60, "замедляющие выпадают: %d из 1200" % slow)
+	_check(int(kinds.get("cocktail", 0)) > 0, "и коктейль среди них: %d" % kinds.get("cocktail", 0))
+	sp.queue_free()
+	await process_frame
 
 func _test_sizing() -> void:
 	# Ради этого всё и затевалось: исходники различаются в разы, на экране —
