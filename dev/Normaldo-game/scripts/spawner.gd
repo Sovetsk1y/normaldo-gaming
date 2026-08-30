@@ -93,13 +93,17 @@ var _boss_test_t      : float = 0.0
 # (×0.68), поэтому форма кривой сложности осталась прежней — просто плотнее.
 # Каденцию сет-писов в CAMPAIGN_DIRECTOR ужали тем же коэффициентом, иначе на
 # укороченных фазах успевало показаться вдвое меньше сценок.
+# Длительности пересчитаны под БУКВЫ: эпизод теперь кончается не по таблице фаз,
+# а после последней буквы NORMALDO (см. «Буквы»), то есть на 240-й секунде.
+# Прежние 285 с ужаты ×0.842 — пропорционально, поэтому форма кривой сложности
+# осталась прежней, изменилась только длина.
 const CAMPAIGN_PHASES : Array = [
-	{ "speed": 220.0, "duration":  45.0, "no_pizza": false },  # T1
-	{ "speed": 242.0, "duration":  55.0, "no_pizza": false },  # T2
-	{ "speed": 264.0, "duration":  60.0, "no_pizza": false },  # T3
-	{ "speed": 297.0, "duration":  60.0, "no_pizza": false },  # T4
-	{ "speed": 330.0, "duration":  50.0, "no_pizza": false },  # T5
-	{ "speed": 330.0, "duration":  15.0, "no_pizza": true  },  # pre-boss
+	{ "speed": 220.0, "duration":  38.0, "no_pizza": false },  # T1
+	{ "speed": 242.0, "duration":  46.0, "no_pizza": false },  # T2
+	{ "speed": 264.0, "duration":  50.0, "no_pizza": false },  # T3
+	{ "speed": 297.0, "duration":  50.0, "no_pizza": false },  # T4
+	{ "speed": 330.0, "duration":  42.0, "no_pizza": false },  # T5
+	{ "speed": 330.0, "duration":  14.0, "no_pizza": true  },  # pre-boss
 ]
 
 # Per-phase pattern tier weights: [T1_w, T2_w, T3_w, T45_w]
@@ -219,13 +223,17 @@ func _process(delta: float) -> void:
 		if not _pattern_running and not _frozen and _spawn_timer <= 0.0:
 			_pattern_running = true
 			_run_campaign_pattern()
+		_tick_letters(delta)
 		var dur := CAMPAIGN_PHASES[_phase]["duration"] as float
 		if _phase_elapsed >= dur:
 			_phase        += 1
 			_phase_elapsed = 0.0
 			if _phase >= CAMPAIGN_PHASES.size():
-				set_process(false)
-				boss_time.emit()
+				# Боссом командует ПОСЛЕДНЯЯ БУКВА, а не таблица фаз: иначе эпизод
+				# кончался бы посреди слова. Кончились фазы — держимся на
+				# последней и ждём букву.
+				_phase = CAMPAIGN_PHASES.size() - 1
+				_phase_elapsed = dur
 				return
 			phase_entered.emit(_phase)
 			_spawn_timer = 0.8
@@ -241,6 +249,105 @@ func _process(delta: float) -> void:
 		var dur := ENDLESS_PHASES[_phase]["duration"] as float
 		if dur != INF and _phase_elapsed >= dur:
 			_advance_endless_phase()
+
+# ── Буквы NORMALDO ───────────────────────────────────────────────────────────
+# Раз в 30 секунд поток ЗАМИРАЕТ и через экран проплывает одна буква слова
+# NORMALDO — во весь экран по высоте, целиком собранная из пицц или из долларов.
+#
+# Зачем это нужно. Забег устроен как непрерывное давление: предметы идут стеной,
+# и единственная пауза в нём — смерть. Оазис даёт ритм — восемь точек, в которых
+# игрок не уворачивается, а СОБИРАЕТ, и по ним же читает, сколько эпизода
+# осталось: буквы складываются в слово, и когда выложено NORMALDO — приходит
+# босс. Это часы, которые не надо рисовать отдельно.
+#
+# Оазис означает буквально «никакие другие предметы не вылетают»: на время
+# пролёта буквы поток заморожен. Буква, разбавленная бочками, перестаёт быть
+# передышкой и становится обычным паттерном с редкой формой.
+#
+# Из пиццы буква или из долларов — бросок на каждую. Пицца кормит (жир, а с ним
+# и запас жизней), доллар платит; смешивать в одной букве нельзя — тогда она
+# читается как случайная россыпь, а не как выложенный знак.
+#
+# Глиф — сетка 5×7. Тот же формат, что у растровых шрифтов восьмибитных машин, и
+# по той же причине: меньше пяти столбцов не читается M, больше семи строк не
+# влезает в высоту экрана.
+const LETTER_WORD   : String = "NORMALDO"
+const LETTER_PERIOD : float  = 30.0    # раз в столько секунд
+const LETTER_ROWS   : int    = 7
+const LETTER_COLS   : int    = 5
+const LETTER_H_FRAC : float  = 0.86    # какую долю высоты экрана занимает буква
+const LETTER_GLYPHS : Dictionary = {
+	"N": ["X...X", "XX..X", "X.X.X", "X.X.X", "X..XX", "X...X", "X...X"],
+	"O": [".XXX.", "X...X", "X...X", "X...X", "X...X", "X...X", ".XXX."],
+	"R": ["XXXX.", "X...X", "X...X", "XXXX.", "X.X..", "X..X.", "X...X"],
+	"M": ["X...X", "XX.XX", "X.X.X", "X.X.X", "X...X", "X...X", "X...X"],
+	"A": ["..X..", ".X.X.", "X...X", "X...X", "XXXXX", "X...X", "X...X"],
+	"L": ["X....", "X....", "X....", "X....", "X....", "X....", "XXXXX"],
+	"D": ["XXXX.", "X...X", "X...X", "X...X", "X...X", "X...X", "XXXX."],
+}
+
+var _letter_idx    : int   = 0
+var _letter_timer  : float = LETTER_PERIOD
+var _letter_active : bool  = false
+
+func letters_done() -> int:
+	return _letter_idx
+
+func _tick_letters(delta: float) -> void:
+	if _letter_active or _letter_idx >= LETTER_WORD.length():
+		return
+	_letter_timer -= delta
+	if _letter_timer <= 0.0:
+		_letter_timer = LETTER_PERIOD
+		_run_letter()
+
+func _run_letter() -> void:
+	var ch : String = LETTER_WORD[_letter_idx]
+	_letter_idx += 1
+	_letter_active   = true
+	# Замораживаем ПОТОК, но не сам спавнер: set_process(false) остановил бы и
+	# часы фаз, и отсчёт до следующей буквы.
+	_frozen          = true
+	_pattern_running = false
+
+	var vp    := get_viewport_rect().size
+	var speed : float = _campaign_item_speed()
+	var cell  : float = vp.y * LETTER_H_FRAC / float(LETTER_ROWS)
+	var top   : float = (vp.y - cell * float(LETTER_ROWS)) * 0.5 + cell * 0.5
+	var as_pizza : bool = randf() < 0.5
+	var glyph : Array = LETTER_GLYPHS.get(ch, LETTER_GLYPHS["O"])
+
+	for row in LETTER_ROWS:
+		var line : String = glyph[row]
+		for col in LETTER_COLS:
+			if col >= line.length() or line[col] != "X":
+				continue
+			var item : Node = _make_item(
+				PIZZA_TEX if as_pizza else DOLLAR_TEX,
+				0.09 if as_pizza else 0.36,
+				speed, 0, as_pizza, true, as_pizza)
+			if not as_pizza:
+				item.item_group = "dollar"
+			item.position = Vector2(vp.x + 90.0 + float(col) * cell,
+				top + float(row) * cell)
+			add_child(item)
+
+	# Держим оазис, пока буква не пройдёт мимо игрока. Ждать полного ухода за
+	# левый край незачем: за спиной у Нормальдо поток уже никому не мешает.
+	var width : float = cell * float(LETTER_COLS)
+	var hold  : float = (vp.x + 90.0 + width - 160.0) / maxf(speed, 1.0)
+	await get_tree().create_timer(hold).timeout
+	if not is_inside_tree():
+		return
+	_letter_active = false
+	_frozen        = false
+	_spawn_timer   = 0.6
+	_reset_spans()
+	# Слово выложено — дальше босс. Именно тут, а не по таблице фаз: эпизод
+	# должен кончаться на последней букве, а не посреди слова.
+	if _letter_idx >= LETTER_WORD.length():
+		set_process(false)
+		boss_time.emit()
 
 # Забыть резервы, до которых предмету уже не догнать.
 func _prune_spans(speed: float) -> void:

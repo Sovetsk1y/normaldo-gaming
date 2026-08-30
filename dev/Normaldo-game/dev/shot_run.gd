@@ -127,6 +127,21 @@ func _initialize() -> void:
 			await process_frame
 			tb += 1.0 / 60.0
 
+	# Буква NORMALDO: ставим её вручную и ждём, пока доедет до центра экрана.
+	if argv.size() > 5 and String(argv[5]).begins_with("letter"):
+		spawner.set_process(false)
+		spawner.call("clear_items")
+		for _i in 6:
+			await process_frame
+		spawner.set("campaign_mode", true)
+		spawner.set("_frozen", false)
+		spawner.call("_run_letter")
+		var tl := 0.0
+		while tl < 3.1:
+			get_root().get_tree().paused = false
+			await process_frame
+			tl += 1.0 / 60.0
+
 	# Ниндзя трёх видов: ставим одного нужного вида и ждём его атаки.
 	if argv.size() > 5 and String(argv[5]).begins_with("ninja_"):
 		spawner.set_process(false)
