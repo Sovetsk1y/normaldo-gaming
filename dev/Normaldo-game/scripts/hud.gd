@@ -2426,9 +2426,21 @@ func _show_shop(restore_scroll: int = 0, from_slots: bool = false, skip_open_ani
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 		_on_skins_open_anim_start(SK_SLIDE_TIME, Tween.TRANS_QUAD, Tween.EASE_IN)
 
-	# ── GRID of small cells (vertical scroll) ──────────────────────────────
+	# ── Переключатель вида ─────────────────────────────────────────────────
+	# Сетка отвечает на вопрос «что у меня есть» — вся коллекция разом. Карточки
+	# отвечают на «каков он» — одна голова крупно, с жиром, уровнем и спеллом.
+	# Это разные задачи, и одним экраном они не решаются: сетка, дорощенная до
+	# подробностей, перестаёт помещаться, а карточки, ужатые до обзора,
+	# перестают что-либо показывать.
+	_build_skins_view_toggle(overlay, vp, scale_x, scale_y, from_slots)
+
 	var grid_y := HDR_H + 6.0
 	var grid_h := vp.y - grid_y - 6.0
+	if _skins_card_view:
+		_build_skins_cards(overlay, vp, grid_y, grid_h, from_slots)
+		return
+
+	# ── GRID of small cells (vertical scroll) ──────────────────────────────
 	var scroll := ScrollContainer.new()
 	scroll.size                   = Vector2(vp.x, grid_h)
 	scroll.position               = Vector2(0.0, grid_y)
@@ -4243,6 +4255,304 @@ func _skin_btn_label(parent: Node, text: String, pos: Vector2, size: Vector2, co
 # Карточка скина в сетке. Четыре состояния, и каждое названо СЛОВОМ, а не
 # передано одним лишь цветом: АКТИВЕН / НАДЕТЬ / цена / замок и «НЕТ ДЕНЕГ».
 # См. /Концепция/Экран скинов.md
+# ── Экран скинов: два вида ───────────────────────────────────────────────────
+# Сетка отвечает на «что у меня есть» — вся коллекция на одном экране. Карточки
+# отвечают на «каков он» — одна голова крупно, с жиром, уровнем и спеллом.
+# Задачи разные, и одним экраном не решаются: сетка, дорощенная до подробностей,
+# перестаёт помещаться, а карточки, ужатые до обзора, перестают показывать.
+#
+# Выбор живёт в поле, а не в сейве, намеренно: это не настройка, а способ
+# посмотреть прямо сейчас, и переживать перезапуск ему незачем.
+var _skins_card_view : bool = false
+
+func _build_skins_view_toggle(overlay: Control, vp: Vector2,
+		scale_x: float, scale_y: float, from_slots: bool) -> void:
+	var w : float = 78.0 * scale_x
+	var h : float = 16.0 * scale_y
+	var x : float = 10.0 * scale_x + 24.0 * scale_x + 8.0 * scale_x
+	var y : float = 6.0 * scale_y
+	var visual := Control.new()
+	visual.size         = Vector2(w, h)
+	visual.position     = Vector2(x, y)
+	visual.pivot_offset = visual.size * 0.5
+	visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	overlay.add_child(visual)
+	UiKit.panel(visual, Vector2.ZERO, Vector2(w, h),
+		Color(0.10, 0.09, 0.13, 0.95), 6, Color(0.55, 0.72, 0.95, 0.9))
+	var lbl := Label.new()
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", 9)
+	_apply_menu_caption_fx(lbl)
+	# Подпись называет то, КУДА переключишься, а не то, где ты сейчас: кнопка,
+	# подписанная текущим состоянием, читается ровно наоборот.
+	lbl.text                 = "СЕТКА" if _skins_card_view else "КАРТОЧКИ"
+	lbl.modulate             = Color(0.80, 0.90, 1.0)
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(visual, lbl, Vector2.ZERO, Vector2(w, h))
+
+	var btn := Button.new()
+	btn.flat       = true
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.size       = Vector2(w, h) + Vector2(10.0, 10.0)
+	btn.position   = Vector2(x - 5.0, y - 5.0)
+	btn.pressed.connect(func() -> void:
+		_play_btn_sfx()
+		_skins_card_view = not _skins_card_view
+		if is_instance_valid(overlay):
+			overlay.queue_free()
+		# skip_open_anim: экран уже открыт, и повторный въезд снизу читался бы
+		# как «меня выкинуло и вернуло».
+		_show_shop(0, from_slots, true))
+	btn.button_down.connect(_menu_btn_press_anim.bind(visual, true))
+	btn.button_up.connect(_menu_btn_press_anim.bind(visual, false))
+	btn.mouse_exited.connect(_menu_btn_press_anim.bind(visual, false))
+	overlay.add_child(btn)
+
+# ── Карточный вид ────────────────────────────────────────────────────────────
+# Горизонтальная лента крупных карточек. Главное здесь — ЖИР СВАЙПОМ прямо в
+# карточке: до этого посмотреть, как скин выглядит на четвёртом жире, можно было
+# только докормив его в забеге, то есть покупка делалась вслепую по одной
+# картинке из четырёх.
+const SKC_GAP     : float = 14.0
+const SKC_W_FRAC  : float = 0.34   # доля ширины экрана на карточку
+const SKC_W_MIN   : float = 230.0
+const SKC_W_MAX   : float = 320.0
+
+func _build_skins_cards(overlay: Control, vp: Vector2, top: float, height: float,
+		from_slots: bool) -> void:
+	var skins : Array = []
+	for sd in SkinRegistry.SKINS:
+		if sd["id"] == "new_year":
+			continue
+		skins.append(sd)
+
+	var scroll := ScrollContainer.new()
+	scroll.size                   = Vector2(vp.x, height)
+	scroll.position               = Vector2(0.0, top)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_DISABLED
+	overlay.add_child(scroll)
+
+	var cw : float = clampf(vp.x * SKC_W_FRAC, SKC_W_MIN, SKC_W_MAX)
+	var ch : float = height - 10.0
+	var content := Control.new()
+	content.custom_minimum_size = Vector2(
+		SKC_GAP + skins.size() * (cw + SKC_GAP), ch)
+	content.mouse_filter        = Control.MOUSE_FILTER_PASS
+	scroll.add_child(content)
+
+	for i in skins.size():
+		_build_skin_card(content, Vector2(SKC_GAP + i * (cw + SKC_GAP), 4.0),
+			cw, ch, skins[i], overlay, from_slots)
+
+	# Лента открывается на АКТИВНОМ скине, а не на первом: экран открывают, чтобы
+	# посмотреть на своего, и заставлять его искать листанием незачем.
+	var active_i : int = 0
+	for i in skins.size():
+		if String(skins[i]["id"]) == SaveData.active_skin:
+			active_i = i
+	var target : float = maxf(0.0, SKC_GAP + active_i * (cw + SKC_GAP) - (vp.x - cw) * 0.5)
+	scroll.set_deferred("scroll_horizontal", int(target))
+
+func _build_skin_card(parent: Control, pos: Vector2, w: float, h: float,
+		skin_data: Dictionary, overlay: Control, from_slots: bool) -> void:
+	var skin_id : String = skin_data["id"]
+	var rarity  : int    = skin_data.get("rarity", 0)
+	var rc      : Color  = SkinRegistry.RARITY_COLORS[rarity]
+	var is_owned  := SaveData.owns_skin(skin_id)
+	var is_active := SaveData.active_skin == skin_id
+	var price     : int  = skin_data.get("price", 0)
+	var can_buy   := not is_owned and SaveData.dollars >= price
+
+	var card := Control.new()
+	card.name         = "Card_" + skin_id
+	card.position     = pos
+	card.size         = Vector2(w, h)
+	card.mouse_filter = Control.MOUSE_FILTER_PASS
+	parent.add_child(card)
+
+	var fill : Color = Color(0.10, 0.09, 0.13, 0.97) if (is_owned or can_buy) \
+		else Color(0.07, 0.06, 0.08, 0.94)
+	if is_active:
+		fill = Color(0.13, 0.22, 0.19, 0.98)
+	UiKit.panel(card, Vector2.ZERO, Vector2(w, h), fill, 14,
+		Color(0.95, 1.0, 0.96, 1.0) if is_active else Color(rc.r, rc.g, rc.b, 0.85),
+		3 if is_active else 2)
+	if not is_owned and not can_buy:
+		card.modulate = Color(1, 1, 1, 0.72)
+
+	var y : float = 8.0
+	var rar := _strong_label(SkinRegistry.RARITY_NAMES[rarity], 9,
+		Color(rc.r, rc.g, rc.b, 1.0), 2)
+	rar.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	rar.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(card, rar, Vector2(0.0, y), Vector2(w, 12.0))
+	y += 16.0
+
+	# ── Портрет со свайпом жира ──────────────────────────────────────────────
+	# Портрет — главное в карточке, и места ему отдаётся половина высоты: ради
+	# него карточный вид и делался.
+	var box : float = minf(w - 40.0, h * 0.52)
+	var holder := _skin_head_icon(skin_id, 0, box)
+	holder.name     = "Portrait"
+	holder.position = Vector2((w - box) * 0.5, y)
+	card.add_child(holder)
+
+	var max_fat : int = SkinProgression.max_fat_state(skin_id,
+		SaveData.get_skin_level_for(skin_id) if is_owned else 1)
+	var state := { "fat": 0 }
+
+	# Замок поверх портрета — на состояниях, которые ещё не открыты лестницей.
+	var lock := _strong_label("ЗАКРЫТО", 10, Color(0.85, 0.85, 0.90), 3)
+	lock.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lock.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	lock.visible              = false
+	UiKit.place(card, lock, Vector2(0.0, y + box * 0.5 - 8.0), Vector2(w, 16.0))
+
+	# Точки-состояния под портретом: сколько их и какое сейчас.
+	var dots : Array = []
+	var dot_y : float = y + box + 6.0
+	var dot_sz : float = 8.0
+	var dot_gap : float = 8.0
+	var dots_w : float = 4.0 * dot_sz + 3.0 * dot_gap
+	for i in 4:
+		var d := ColorRect.new()
+		d.size         = Vector2(dot_sz, dot_sz)
+		d.position     = Vector2((w - dots_w) * 0.5 + i * (dot_sz + dot_gap), dot_y)
+		d.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(d)
+		dots.append(d)
+
+	var repaint := func() -> void:
+		var f : int = int(state["fat"])
+		var r := _head_icon_rect(holder)
+		if r != null:
+			_fit_head_rect(r, _avatar_texture(skin_id, f), skin_id, f, box)
+		holder.modulate = Color(1, 1, 1, 0.35) if f > max_fat else Color.WHITE
+		lock.visible    = f > max_fat
+		for i in dots.size():
+			var lit : bool = i == f
+			var open_i : bool = i <= max_fat
+			(dots[i] as ColorRect).color = Color(1.00, 0.62, 0.12) if lit \
+				else (Color(0.45, 0.45, 0.52) if open_i else Color(0.26, 0.22, 0.22))
+	repaint.call()
+
+	var step := func(dir: int) -> void:
+		state["fat"] = clampi(int(state["fat"]) + dir, 0, 3)
+		repaint.call()
+		var r := _head_icon_rect(holder)
+		if r != null and r.is_inside_tree():
+			# Короткий подскок на смене: без него подмена читается как «картинка
+			# моргнула», а не как «я пролистнул».
+			var tw := r.create_tween()
+			if tw != null:
+				r.scale = Vector2.ONE * 0.88
+				tw.tween_property(r, "scale", Vector2.ONE, 0.16)\
+					.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+	# Свайп по портрету. Порог в 22 px намеренно больше дрожания пальца: экран
+	# лежит в горизонтальном скролле, и мелкое движение обязано доставаться
+	# ленте, а не карточке.
+	var swipe := Control.new()
+	swipe.name         = "FatSwipe"
+	swipe.size         = Vector2(box, box)
+	swipe.position     = Vector2((w - box) * 0.5, y)
+	swipe.mouse_filter = Control.MOUSE_FILTER_STOP
+	card.add_child(swipe)
+	var drag := { "x": 0.0, "active": false }
+	swipe.gui_input.connect(func(ev: InputEvent) -> void:
+		if ev is InputEventScreenTouch or ev is InputEventMouseButton:
+			var pressed : bool = ev.pressed
+			if pressed:
+				drag["active"] = true
+				drag["x"] = 0.0
+			else:
+				drag["active"] = false
+		elif drag["active"] and (ev is InputEventScreenDrag or ev is InputEventMouseMotion):
+			drag["x"] = float(drag["x"]) + ev.relative.x
+			if absf(float(drag["x"])) >= 22.0:
+				step.call(-1 if float(drag["x"]) > 0.0 else 1)
+				drag["x"] = 0.0)
+
+	# Стрелки — для тех, кто свайп не нашёл. Свайп быстрее, стрелки очевиднее.
+	var arr_y : float = y + box * 0.5 - 12.0
+	_skin_card_arrow(card, Vector2(4.0, arr_y), "<", func() -> void: step.call(-1))
+	_skin_card_arrow(card, Vector2(w - 28.0, arr_y), ">", func() -> void: step.call(1))
+
+	y = dot_y + dot_sz + 8.0
+
+	var name_lbl := _strong_label(skin_data.get("name_ru", skin_id), 13, Color(1, 1, 1, 0.97), 3)
+	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(card, name_lbl, Vector2(4.0, y), Vector2(w - 8.0, 18.0))
+	y += 20.0
+
+	# Спелл — то, ради чего скин и покупают. В сетке для него нет места, в
+	# карточке есть.
+	var ab : Dictionary = SkinSkills.get_ability(skin_id)
+	if not ab.is_empty():
+		var sp_lbl := _strong_label("%s · %.0f с" % [ab.get("label", ""), ab.get("cd", 0.0)],
+			9, Color(0.72, 0.86, 1.0), 2)
+		sp_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		sp_lbl.clip_text            = true
+		sp_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+		UiKit.place(card, sp_lbl, Vector2(4.0, y), Vector2(w - 8.0, 14.0))
+	y += 18.0
+
+	if is_owned:
+		var lvl := SaveData.get_skin_level_for(skin_id)
+		var lv := _strong_label("★ МАСТЕРСТВО" if lvl >= 10 else "УРОВЕНЬ %d" % lvl,
+			9, Color(0.70, 0.92, 1.0), 2)
+		lv.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lv.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+		UiKit.place(card, lv, Vector2(4.0, y), Vector2(w - 8.0, 13.0))
+		y += 15.0
+		var bw : float = w - 40.0
+		UiKit.panel(card, Vector2(20.0, y), Vector2(bw, 6.0),
+			Color(0.05, 0.04, 0.03, 0.95), 3, Color(0.30, 0.30, 0.36, 0.9))
+		var frac : float = SaveData.xp_level_progress_for(skin_id)
+		if frac > 0.0:
+			UiKit.panel(card, Vector2(21.0, y + 1.0),
+				Vector2(maxf(3.0, (bw - 2.0) * frac), 4.0), Color(0.45, 0.80, 1.0), 3)
+
+	var act_h : float = 26.0
+	var act_y : float = h - act_h - 8.0
+	_skin_action_button(card, 12.0, act_y, w - 24.0, act_h, skin_id,
+		func(): if is_instance_valid(overlay): overlay.queue_free(); _show_shop(0, from_slots, true))
+
+	# «Подробнее» — узкой полосой над кнопкой, а не всей карточкой: карточка
+	# целиком под тапом съела бы и свайп жира.
+	var more := Button.new()
+	more.flat       = true
+	more.focus_mode = Control.FOCUS_NONE
+	more.size       = Vector2(w - 24.0, 18.0)
+	more.position   = Vector2(12.0, act_y - 20.0)
+	more.text       = "ПОДРОБНЕЕ"
+	more.add_theme_font_override("font", UI_FONT)
+	more.add_theme_font_size_override("font_size", 9)
+	more.add_theme_color_override("font_color", Color(0.70, 0.78, 0.92))
+	more.pressed.connect(func():
+		_play_btn_sfx()
+		_show_skin_detail(skin_data, from_slots, overlay))
+	card.add_child(more)
+
+func _skin_card_arrow(parent: Control, pos: Vector2, glyph: String, on_tap: Callable) -> void:
+	var btn := Button.new()
+	btn.flat       = true
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.size       = Vector2(24.0, 24.0)
+	btn.position   = pos
+	btn.text       = glyph
+	btn.add_theme_font_override("font", UI_FONT)
+	btn.add_theme_font_size_override("font_size", 14)
+	btn.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
+	btn.pressed.connect(func() -> void:
+		_play_btn_sfx()
+		on_tap.call())
+	parent.add_child(btn)
+
 func _build_skin_grid_cell(parent: Control, pos: Vector2, w: float, h: float,
 		skin_data: Dictionary, overlay: Control, from_slots: bool) -> void:
 	var skin_id : String = skin_data["id"]

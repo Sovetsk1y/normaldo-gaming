@@ -38,7 +38,11 @@ func _initialize() -> void:
 	save.active_skin = "harry_potter"
 	save.skin_level  = 4
 
-	if detail != "":
+	if detail == "cards":
+		# Карточный вид: тот же экран, другой режим показа.
+		hud.set("_skins_card_view", true)
+		hud.call("_show_shop")
+	elif detail != "":
 		var reg : Node = get_root().get_node_or_null("SkinRegistry")
 		hud.call("_show_skin_detail", reg.get_skin(detail), true, null, true)
 	else:

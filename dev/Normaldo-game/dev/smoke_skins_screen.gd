@@ -38,6 +38,8 @@ func _initialize() -> void:
 	await _test_equip(hud, save)
 	print("── Нет денег ──")
 	await _test_broke(hud, save)
+	print("── Карточный вид ──")
+	await _test_cards(hud, save)
 
 	print("")
 	if _fails == 0:
@@ -45,6 +47,88 @@ func _initialize() -> void:
 	else:
 		print("ПРОВАЛОВ: ", _fails)
 	quit(1 if _fails > 0 else 0)
+
+# ── Карточный вид ────────────────────────────────────────────────────────────
+# Сетка отвечает на «что у меня есть», карточки — на «каков он». Ради второго
+# всё и делалось: до этого посмотреть скин на четвёртом жире можно было только
+# докормив его в забеге, то есть покупка делалась вслепую по одной картинке из
+# четырёх. Поэтому проверяется не «карточки нарисовались», а СВАЙП ЖИРА.
+func _test_cards(hud: Node, save: Node) -> void:
+	_setup_save(save, 12400)
+	hud.set("_skins_card_view", true)
+	var overlay : Control = await _open(hud)
+	_check(overlay != null, "карточный вид открылся")
+	if overlay == null:
+		return
+
+	var cards : Array = []
+	_collect_cards(overlay, cards)
+	_check(cards.size() >= 10, "карточек на всю коллекцию: %d" % cards.size())
+
+	# Лента ГОРИЗОНТАЛЬНАЯ: карточки стоят в ряд, а не столбцом.
+	if cards.size() >= 2:
+		var a : Control = cards[0]
+		var b : Control = cards[1]
+		_check(absf(a.position.y - b.position.y) < 2.0 and b.position.x > a.position.x,
+			"и стоят в ряд: (%.0f, %.0f) и (%.0f, %.0f)"
+				% [a.position.x, a.position.y, b.position.x, b.position.y])
+
+	# Свайп по портрету листает ЖИР. Событие подаётся настоящее — то же, что
+	# придёт от пальца.
+	var card : Control = _card_named(overlay, "Card_viking")
+	_check(card != null, "карточка викинга на месте")
+	if card != null:
+		var holder : Control = card.get_node_or_null("Portrait")
+		var swipe  : Control = card.get_node_or_null("FatSwipe")
+		_check(holder != null and swipe != null, "у неё есть портрет и зона свайпа")
+		if holder != null and swipe != null:
+			var rect : TextureRect = hud.call("_head_icon_rect", holder)
+			var fat0 : int = int(rect.get_meta("head_fat", -1))
+			_swipe(swipe, -40.0)
+			await process_frame
+			var fat1 : int = int(rect.get_meta("head_fat", -1))
+			_check(fat1 == fat0 + 1, "свайп влево листает вперёд: %d → %d" % [fat0, fat1])
+			_swipe(swipe, 40.0)
+			await process_frame
+			_check(int(rect.get_meta("head_fat", -1)) == fat0,
+				"свайп вправо возвращает: %d" % int(rect.get_meta("head_fat", -1)))
+
+			# И меняется именно КАРТИНКА, а не только число.
+			_swipe(swipe, -40.0)
+			await process_frame
+			_check(rect.texture != hud.call("_avatar_texture", "viking", fat0),
+				"и портрет действительно другой")
+
+	await _close(overlay)
+	hud.set("_skins_card_view", false)
+
+func _collect_cards(root: Node, out: Array) -> void:
+	if root is Control and String(root.name).begins_with("Card_"):
+		out.append(root)
+	for c in root.get_children():
+		_collect_cards(c, out)
+
+func _card_named(root: Node, nm: String) -> Control:
+	var stack : Array = [root]
+	while not stack.is_empty():
+		var n : Node = stack.pop_back()
+		if n is Control and String(n.name) == nm:
+			return n
+		for c in n.get_children():
+			stack.append(c)
+	return null
+
+# Настоящая последовательность событий пальца: касание, протяжка, отпускание.
+func _swipe(ctrl: Control, dx: float) -> void:
+	var down := InputEventScreenTouch.new()
+	down.pressed = true
+	ctrl.gui_input.emit(down)
+	var mv := InputEventScreenDrag.new()
+	mv.relative = Vector2(dx, 0.0)
+	ctrl.gui_input.emit(mv)
+	var up := InputEventScreenTouch.new()
+	up.pressed = false
+	ctrl.gui_input.emit(up)
 
 # ── Хелперы ───────────────────────────────────────────────────────────────────
 

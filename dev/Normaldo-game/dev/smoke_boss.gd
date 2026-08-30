@@ -298,8 +298,10 @@ func _test_restore(boss: Node, normaldo: Node) -> void:
 	_check(back.x > vp.x * 0.10,
 		"точка возврата не у левого края: x=%.0f" % back.x)
 	await _play(boss, 30.0, 0.0)
-	# Аутро сдувает голову и возвращает забег.
-	for _i in 300:
+	# Аутро сдувает голову и возвращает забег. Запас кадров с добавлением печати
+	# SLAKE BAKE в окно итогов вырос: такт длится около полутора секунд, и
+	# прежних пяти секунд ожидания стало впритык.
+	for _i in 600:
 		if int(boss.get("_state")) == 0:   # State.IDLE
 			break
 		await process_frame
