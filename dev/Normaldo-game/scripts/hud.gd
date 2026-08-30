@@ -114,7 +114,7 @@ var _fat_bar_width : float = 0.0
 # y of the bottom edge of the resources + fat panels — wizard / one-shot
 # panels anchor themselves below this so nothing overlaps.
 var _left_stack_bottom_y : float = 0.0
-var _fat_icons     : Array[TextureRect] = []
+var _fat_gauge     : FatGauge = null
 var _fat_name_lbl  : Label = null
 var _fat_left_lbl  : Label = null
 var _prev_fat_state : int = 0
@@ -754,15 +754,16 @@ func _build_ui() -> void:
 	var bar_y : float = fat_y + FAT_PANEL_PAD + FAT_ICON_SZ + FAT_ICON_BAR_GAP
 	_fat_bar_width = bar_w - 2.0
 
-	# Icons above the bar, anchored to its left / right edges.
+	# Над полосой — ЧЕРЕП и F A T вместо двух копий скина. Скин и так на экране,
+	# крупный и в центре; индикатор должен отвечать не «как я выгляжу», а
+	# «сколько у меня осталось запаса». См. fat_gauge.gd.
 	var icon_y : float = fat_y + FAT_PANEL_PAD
-	var cur_icon := _make_icon(FAT_TEXTURES[0], FAT_ICON_SZ)
-	cur_icon.position = Vector2(bar_x + FAT_ICON_PAD, icon_y)
-	_left_container.add_child(cur_icon)
-
-	var next_icon := _make_icon(FAT_TEXTURES[1], FAT_ICON_SZ)
-	next_icon.position = Vector2(bar_x + bar_w - FAT_ICON_PAD - FAT_ICON_SZ, icon_y)
-	_left_container.add_child(next_icon)
+	_fat_gauge = FatGauge.new()
+	_fat_gauge.setup(FAT_ICON_SZ)
+	var gw : float = _fat_gauge.gauge_size().x
+	_fat_gauge.position = Vector2(bar_x + (bar_w - gw) * 0.5, icon_y)
+	_left_container.add_child(_fat_gauge)
+	_fat_gauge.set_state(0, _max_unlocked_fat(), false)
 
 	var bar_bg : ColorRect = ColorRect.new()
 	bar_bg.color    = Color(0.08, 0.08, 0.08, 0.70)
@@ -799,11 +800,6 @@ func _build_ui() -> void:
 	_left_container.add_child(_fat_left_lbl)
 	_fat_left_lbl.position = Vector2(bar_x + 5.0, bar_y)
 	_fat_left_lbl.size     = Vector2(bar_w - 10.0, FAT_BAR_H)
-
-	# Stash both — _refresh_fat_icons / _on_stats_changed swap textures on
-	# them based on the current fat_state.
-	_fat_icons.append(cur_icon)
-	_fat_icons.append(next_icon)
 
 	# Bottom y of the entire left stack — exposed to the panel helpers so the
 	# wizard/oneshot blocks place themselves cleanly below the fat panel.
@@ -7801,16 +7797,12 @@ func _skin_fat_tex(i: int) -> Texture2D:
 		return load(path)
 	return FAT_TEXTURES[idx]
 
+# Смена скина двигает ПОТОЛОК жира (лестница у каждого своя), а само состояние
+# не трогает: анимировать тут нечего, состояние просто такое.
 func _refresh_fat_icons() -> void:
-	# Only two icons now: [0] = current state, [1] = next. They're updated
-	# dynamically by _on_stats_changed, so a skin swap just needs to nudge
-	# the textures with the current fat_state.
-	if _fat_icons.size() < 2:
+	if not is_instance_valid(_fat_gauge):
 		return
-	var cur_i  : int = clampi(_prev_fat_state, 0, FAT_TEXTURES.size() - 1)
-	var next_i : int = clampi(cur_i + 1,        0, FAT_TEXTURES.size() - 1)
-	_fat_icons[0].texture = _skin_fat_tex(cur_i)
-	_fat_icons[1].texture = _skin_fat_tex(next_i)
+	_fat_gauge.set_state(_prev_fat_state, _max_unlocked_fat(), false)
 
 func _on_stats_changed(fat_state: int, pizza_count: int, total_pizzas: int) -> void:
 	_pizza_label.text = str(total_pizzas)
@@ -7836,25 +7828,13 @@ func _on_stats_changed(fat_state: int, pizza_count: int, total_pizzas: int) -> v
 	if is_instance_valid(_fat_left_lbl):
 		_fat_left_lbl.text = left_txt
 
-	# Swap textures on the two-icon panel: left = current state, right =
-	# next reachable state. Both render at full brightness — the bar tells
-	# the story, the icons just identify "what I am / what I'm becoming".
-	if _fat_icons.size() >= 2:
-		var next_idx : int = mini(fat_state + 1, FAT_TEXTURES.size() - 1)
-		_fat_icons[0].texture  = _skin_fat_tex(fat_state)
-		_fat_icons[0].modulate = CLR_CURRENT
-		_fat_icons[1].texture  = _skin_fat_tex(next_idx)
-		_fat_icons[1].modulate = CLR_CURRENT
+	# Лампы 💀 F A T: загорание и сбивание анимирует сам индикатор — он один
+	# знает, какая лампа изменилась и в какую сторону.
+	if is_instance_valid(_fat_gauge):
+		_fat_gauge.set_state(fat_state, max_fat, true)
 
 	if fat_state < _prev_fat_state and _prev_fat_state <= max_fat:
 		QuestManager.notify_damage_taken()
-		# Flash the CURRENT icon red on damage — communicates "you just lost
-		# a tier" without needing the now-removed icon row.
-		if _fat_icons.size() >= 1:
-			var lost : TextureRect = _fat_icons[0]
-			var tw   := create_tween()
-			tw.tween_property(lost, "modulate", Color(1.0, 0.10, 0.10, 1.0), 0.07)
-			tw.tween_property(lost, "modulate", CLR_CURRENT,                 0.30)
 
 	QuestManager.notify_stats_changed(fat_state, total_pizzas, _prev_fat_state)
 	_prev_fat_state = fat_state

@@ -45,6 +45,8 @@ func _initialize() -> void:
 	await _test_badges(hud, normaldo, save)
 	print("── Полоса жира ──")
 	await _test_fat_bar(hud, normaldo, save)
+	print("── Лампы 💀 F A T ──")
+	await _test_fat_gauge(hud, normaldo, save)
 
 	print("")
 	if _fails == 0:
@@ -52,6 +54,75 @@ func _initialize() -> void:
 	else:
 		print("ПРОВАЛОВ: ", _fails)
 	quit(1 if _fails > 0 else 0)
+
+# ── Лампы жира ───────────────────────────────────────────────────────────────
+# На этом месте стояли ДВЕ КОПИИ СКИНА — текущее состояние и следующее. Скин и
+# так на экране, крупный и в центре; индикатор должен отвечать не «как я
+# выгляжу», а «сколько у меня осталось запаса». Теперь это череп и F A T.
+func _test_fat_gauge(hud: Node, normaldo: Node, save: Node) -> void:
+	var g : Control = hud.get("_fat_gauge")
+	_check(g != null, "индикатор собрался")
+	if g == null:
+		return
+	_check(g.get_child_count() == 4, "ламп ровно четыре: %d" % g.get_child_count())
+
+	# Ни одной картинки скина в индикаторе: ради этого всё и затевалось.
+	var pics : int = 0
+	for c in g.get_children():
+		if c is TextureRect and (c as TextureRect).texture != null:
+			pics += 1
+	_check(pics == 0, "и ни одной картинки скина в нём: %d" % pics)
+
+	save.skin_level = 10
+	for fat in 4:
+		g.call("set_state", fat, 3, false)
+		await process_frame
+		var lit : int = 0
+		var wrong : int = 0
+		for i in g.get_child_count():
+			var l : Control = g.get_child(i)
+			if bool(l.get("lit")):
+				lit += 1
+			if bool(l.get("lit")) != (i <= fat):
+				wrong += 1
+		_check(wrong == 0 and lit == fat + 1,
+			"жир %d: горит %d ламп, лишних нет" % [fat + 1, lit])
+
+	# Череп в одиночестве — предупреждение: следующий удар убивает. Он пульсирует
+	# ровно на нижнем состоянии и молчит, как только загорелась первая буква.
+	g.call("set_state", 0, 3, false)
+	await process_frame
+	var tw = g.get("_pulse_tw")
+	_check(tw != null and tw.is_valid(), "жир 1: череп тревожно пульсирует")
+	g.call("set_state", 1, 3, false)
+	await process_frame
+	var tw2 = g.get("_pulse_tw")
+	_check(tw2 == null or not tw2.is_valid(), "жир 2: пульс погашен")
+
+	# Закрытое лестницей состояние — под замком. Пустая ячейка читалась бы как
+	# «сюда я ещё не дорос», а замок — как «сюда не пускают».
+	g.call("set_state", 1, 2, false)
+	await process_frame
+	var locked : Array = []
+	for i in g.get_child_count():
+		if bool(g.get_child(i).get("locked")):
+			locked.append(i)
+	_check(locked == [3], "закрытое состояние под замком: %s" % str(locked))
+
+	# Сбили жир — лампа гаснет. Проверяется именно ГАШЕНИЕ, а не анимация
+	# падения: падение косметика, а погасшая лампа — это состояние.
+	g.call("set_state", 3, 3, false)
+	await process_frame
+	g.call("set_state", 1, 3, true)
+	var t := 0.0
+	while t < 0.8:
+		await process_frame
+		t += 1.0 / 60.0
+	var still_lit : Array = []
+	for i in g.get_child_count():
+		if bool(g.get_child(i).get("lit")):
+			still_lit.append(i)
+	_check(still_lit == [0, 1], "после удара горят только череп и F: %s" % str(still_lit))
 
 # ── Хелперы ───────────────────────────────────────────────────────────────────
 

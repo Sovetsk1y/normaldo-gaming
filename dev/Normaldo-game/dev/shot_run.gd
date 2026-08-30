@@ -35,6 +35,10 @@ func _initialize() -> void:
 	save.owned_skins  = ["classic", "viking", "tyson", "harry_potter", "joker", "batman"]
 	save.active_skin  = skin
 	save.skin_level   = 10          # чтобы были открыты все способности
+	# Режим «fatlock» — первый уровень скина: верхние состояния жира ещё закрыты,
+	# и в индикаторе должны стоять замки.
+	if argv.size() > 5 and String(argv[5]) == "fatlock":
+		save.skin_level = 1
 	normaldo.call("reload_skin")
 	normaldo.call("_build_skin_runtime")
 
