@@ -1806,12 +1806,9 @@ func _build_menu_right_column(vp: Vector2) -> void:
 	_build_menu_icon_btn(vp, MENU_ICON_SLOTS, Vector2(353, 54),
 		"СЛОТЫ", _show_slots)
 
-	# ЗАДАНИЯ — единственная кнопка БЕЗ программного индикатора: красная точка
-	# нарисована прямо в спрайте иконки, и второй, живой, дал бы две точки рядом.
-	# Пока точка в рисунке, она горит всегда; вернуть индикатор можно ровно в тот
-	# момент, когда придёт иконка без неё.
-	_build_menu_icon_btn(vp, MENU_ICON_QUESTS, Vector2(353, 92),
+	var quests_btn := _build_menu_icon_btn(vp, MENU_ICON_QUESTS, Vector2(353, 92),
 		"ЗАДАНИЯ", _show_quests)
+	_quest_badge = _attach_canvas_badge(quests_btn, QuestManager.has_daily_badge())
 
 	_build_menu_icon_btn(vp, MENU_ICON_LEADERS, Vector2(353, 130),
 		"ЛИДЕРЫ", _show_leaderboard.bind(0))
