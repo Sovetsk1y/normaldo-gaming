@@ -58,22 +58,27 @@ func _initialize() -> void:
 	# 1. Летит как обычный предмет.
 	await _until(func() -> bool: return node.position.x < vp.x - 40.0, 4.0)
 	await _shot(out, "bb_1_enter")
-	# 2. Затормозил.
+	# 2. Затормозил и держит бочку перед собой.
 	await _until(func() -> bool: return String(node.get("_phase")) != "enter", 4.0)
 	await _wait(0.5)
 	await _shot(out, "bb_2_stop")
-	# 3. Бочка открылась.
+	# 3. Тычок: подался вперёд, бочка пошла вниз.
+	var bum : Sprite2D = node.get("_bum")
+	await _until(func() -> bool:
+		return is_instance_valid(bar) and bar.rotation < -0.2, 4.0)
+	await _shot(out, "bb_3_push")
+	# 4. Бочка открылась.
 	await _until(func() -> bool:
 		return is_instance_valid(bar) \
 			and bar.texture == load("res://assets/items/barrel_open2.png"), 4.0)
-	await _shot(out, "bb_3_open")
-	# 4. Собака пошла по своей линии.
+	await _shot(out, "bb_4_open")
+	# 5. Собака пошла по своей линии.
 	await _until(func() -> bool:
 		for c in sp.get_children():
 			if c.scene_file_path.ends_with("dog.tscn"):
 				return c.position.x < vp.x * 0.62
 		return false, 4.0)
-	await _shot(out, "bb_4_dog")
+	await _shot(out, "bb_5_dog")
 	print("saved")
 	quit(0)
 

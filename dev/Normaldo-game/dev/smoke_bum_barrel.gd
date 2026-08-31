@@ -12,7 +12,7 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 20
+const EXPECTED_CHECKS : int = 22
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -126,8 +126,25 @@ func _initialize() -> void:
 	var x_mid : float = node.position.x if is_instance_valid(node) else -1.0
 	_check(x_mid < vp.x, "успел затормозить в кадре: x=%.0f" % x_mid)
 
+	# ТЫЧОК. Бомж коротко подаётся вперёд и возвращается — от этого бочка и
+	# валится. Без него она заваливалась сама собой, и связи «уронил её ОН» на
+	# экране не было: бомж просто стоял рядом с падающей бочкой. Проверяется
+	# именно ВОЗВРАТ: подавшийся и не вернувшийся бомж — это не тычок, а сдвиг.
+	var bx_home : float = -1e9
+	var bx_min  : float =  1e9
+	var t_s := 0.0
+	while t_s < 1.6:
+		await process_frame
+		t_s += 1.0 / 60.0
+		var bx : float = bum.position.x
+		bx_home = maxf(bx_home, bx)
+		bx_min  = minf(bx_min, bx)
+	_check(bx_home - bx_min > 8.0,
+		"бомж толкнул бочку: подался вперёд на %.0f px" % (bx_home - bx_min))
+	_check(absf(bum.position.x - bx_home) < 3.0,
+		"и вернулся назад: %.0f против %.0f" % [bum.position.x, bx_home])
+
 	# А дальше — открытая бочка и собака из неё.
-	await _wait(1.6)
 	# У бочки два кадра: закрыта и открыта. Третьим когда-то был `trash_bin.png` —
 	# обычная мусорка из потока, нарисованная С КРАСНОЙ ОБВОДКОЙ, то есть с меткой
 	# «этот бьёт». В сет-писе она врала: бьёт собака, а не бочка.
