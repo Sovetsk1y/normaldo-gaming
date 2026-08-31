@@ -788,14 +788,21 @@ func _buckshot(count: int, spread: float) -> void:
 		return
 	_set_pose(F_SHOT_DOWN[4])
 
-# Три залпа по три дробины, и каждый наводится ЗАНОВО.
+# ТРИ ВОЛНЫ ПО ТРИ ВЫСТРЕЛА, и в каждом выстреле полный веер дробин.
 #
-# Было два по пять: дробин больше, а СОБЫТИЙ меньше — два залпа подряд читаются
-# как один длинный выстрел, и уходить от него надо ровно один раз. Три залпа с
-# перенаводкой заставляют двигаться трижды, и каждый раз он стреляет туда, куда
-# игрок только что ушёл.
-const RAGE_VOLLEYS : int = 3
-const RAGE_PELLETS : int = 3
+# Форма ровно в этом: очередь — пауза — очередь — пауза — очередь. Плотность даёт
+# очередь, а играется такт на паузах: три выстрела подряд переставиться не дают,
+# и единственное окно — полторы секунды между волнами. Ровный поток той же
+# плотности читался бы как «пережди», а не как «выбери момент».
+#
+# Внутри очереди он наводится заново каждым выстрелом, но за две десятых секунды
+# игрок почти не смещается — значит найденная щель держится всю очередь. Это
+# намеренно: очередь обязана быть проходимой, если в неё зашли правильно.
+const RAGE_WAVES    : int   = 3
+const RAGE_SHOTS    : int   = 3     # выстрелов в волне, подряд
+const RAGE_PELLETS  : int   = 5     # дробин в выстреле
+const RAGE_SHOT_GAP : float = 0.20
+const RAGE_WAVE_GAP : float = 1.40
 
 # Веер: дробины расходятся от одной точки к линиям, разнесённым на `spread` в
 # ПЛОСКОСТИ ИГРОКА. Наводится на то, где он сейчас, — телеграфом тут служит сам
@@ -815,19 +822,29 @@ func _rage_volley() -> void:
 			return
 		_set_pose(F_RAGE[idx])
 		await get_tree().create_timer(0.14).timeout
-	for v in RAGE_VOLLEYS:
+	for w in RAGE_WAVES:
+		for s in RAGE_SHOTS:
+			if not _alive():
+				return
+			# Пасть со вспышкой нарисована в двух кадрах — чередуем, иначе очередь
+			# выглядит одним застывшим кадром, мигающим сам в себя.
+			_set_pose(F_RAGE[3] if s % 2 == 0 else F_RAGE[5])
+			_play_sfx(SFX_BUCKSHOT)
+			_fire_fan(_muzzle(MUZZLE_RAGE), RAGE_PELLETS, RAGE_SPREAD)
+			_recoil()
+			_screen_shake(5.0, 4)
+			await get_tree().create_timer(0.10).timeout
+			if not _alive():
+				return
+			_set_pose(F_RAGE[4])       # пасть закрылась
+			await get_tree().create_timer(maxf(RAGE_SHOT_GAP - 0.10, 0.02)).timeout
 		if not _alive():
 			return
-		_set_pose(F_RAGE[3])           # пасть раскрыта, вспышка
-		_play_sfx(SFX_BUCKSHOT)
-		_fire_fan(_muzzle(MUZZLE_RAGE), RAGE_PELLETS, RAGE_SPREAD)
-		_recoil()
-		_screen_shake(6.0, 5)
-		await get_tree().create_timer(0.16).timeout
-		if not _alive():
-			return
-		_set_pose(F_RAGE[4])           # пасть закрылась — вот тут и уходить
-		await get_tree().create_timer(0.34).timeout
+		if w < RAGE_WAVES - 1:
+			# Перерыв. Единственное окно всего такта — и по кадру видно, что он
+			# перезаряжается, а не закончил.
+			_set_pose(F_RAGE[6])
+			await get_tree().create_timer(RAGE_WAVE_GAP).timeout
 	if not _alive():
 		return
 	_set_pose(F_RAGE[6])

@@ -18,7 +18,7 @@ const CROC := preload("res://scripts/leatherhead.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 47
+const EXPECTED_CHECKS : int = 48
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -41,7 +41,7 @@ func _initialize() -> void:
 	await _test_shotgun()
 	print("── Акт 3: сквозь картечь можно пройти ──")
 	await _test_buckshot_gap()
-	print("── Акт 3: злая картечь бьёт трижды ──")
+	print("── Акт 3: злая картечь идёт волнами ──")
 	await _test_rage_volleys()
 	print("── Акт 3: пасть доходит до игрока ──")
 	await _test_jaw_reaches()
@@ -489,10 +489,10 @@ func _test_rage_volleys() -> void:
 	var c : Node2D = _croc(e)
 	await process_frame
 	c.call("_rage_volley")
-	var seen    : Dictionary = {}
-	var volleys : Array = []       # время появления каждой новой порции
+	var seen  : Dictionary = {}
+	var shots : Array = []         # [когда, сколько дробин] на каждый выстрел
 	var t := 0.0
-	while t < 8.0:
+	while t < 12.0:
 		get_root().get_tree().paused = false
 		await process_frame
 		t += 1.0 / 60.0
@@ -503,14 +503,30 @@ func _test_rage_volleys() -> void:
 				seen[id] = true
 				fresh += 1
 		if fresh > 0:
-			volleys.append(fresh)
-	_check(volleys.size() == int(CROC.RAGE_VOLLEYS),
-		"залпов ровно %d: %s" % [CROC.RAGE_VOLLEYS, volleys])
-	var by_three := true
-	for n in volleys:
-		if int(n) != int(CROC.RAGE_PELLETS):
-			by_three = false
-	_check(by_three, "и в каждом по %d дробины: %s" % [CROC.RAGE_PELLETS, volleys])
+			shots.append([t, fresh])
+	var want : int = int(CROC.RAGE_WAVES) * int(CROC.RAGE_SHOTS)
+	_check(shots.size() == want,
+		"выстрелов ровно %d (%d волны по %d): %d" % [want, CROC.RAGE_WAVES,
+			CROC.RAGE_SHOTS, shots.size()])
+	var counts : Array = []
+	var full := true
+	for s in shots:
+		counts.append(s[1])
+		if int(s[1]) != int(CROC.RAGE_PELLETS):
+			full = false
+	_check(full, "и в каждом полный веер по %d дробин: %s" % [CROC.RAGE_PELLETS, counts])
+
+	# Форма такта — очередь, пауза, очередь. Ровный поток той же плотности дал бы
+	# ровно те же девять выстрелов, и по одному их числу его не отличить.
+	var big : int = 0
+	var gaps : Array = []
+	for i in range(1, shots.size()):
+		var g : float = float(shots[i][0]) - float(shots[i - 1][0])
+		gaps.append("%.2f" % g)
+		if g > float(CROC.RAGE_WAVE_GAP) * 0.5:
+			big += 1
+	_check(big == int(CROC.RAGE_WAVES) - 1,
+		"и собраны в волны: длинных пауз %d при %s" % [big, gaps])
 	e["game"].queue_free()
 	await process_frame
 
