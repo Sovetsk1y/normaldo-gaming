@@ -12,7 +12,7 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 15
+const EXPECTED_CHECKS : int = 16
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -32,18 +32,18 @@ func _initialize() -> void:
 	sp.set_process(false)
 	await process_frame
 
-	# Вид ВРЕМЕННО убран из забега (см. Spawner.SP_DISABLED): код живой, тесты и
-	# дев-кнопка зовут его напрямую, а в кампании он не выпадает. Проверяется
-	# именно выпадение, а не наличие в таблице фаз: таблица — запись замысла, и
-	# вид из неё не вычёркивался.
-	print("── Пока убран из забега ──")
+	# Вид ВЕРНУЛСЯ в забег: его убирали, пока хореография не читалась. Проверяется
+	# именно выпадение, а не наличие в таблице фаз: вид из таблицы и не
+	# вычёркивался, он гасился списком Spawner.SP_DISABLED, и вернуть его забыв
+	# этот список — самый естественный способ «починить и не заметить».
+	print("── Выпадает в кампании ──")
 	var seen_in_campaign := false
 	for phase in sp.CAMPAIGN_DIRECTOR:
 		for i in 300:
 			if String(sp.call("_pick_set_piece", phase["sp"])) == "bum_barrel":
 				seen_in_campaign = true
 				break
-	_check(not seen_in_campaign, "в кампании не выпадает ни в одной фазе")
+	_check(seen_in_campaign, "в кампании выпадает")
 
 	print("── Приезд, бочка, собака ──")
 	var vp : Vector2 = get_root().get_visible_rect().size
@@ -97,15 +97,24 @@ func _initialize() -> void:
 
 	# А дальше — открытая бочка и собака из неё.
 	await _wait(1.6)
-	_check(bar.texture == load("res://assets/items/trash_bin.png"),
-		"к выстрелу бочка ОТКРЫТА (последний кадр, а не первый)")
+	# У бочки два кадра: закрыта и открыта. Третьим когда-то был `trash_bin.png` —
+	# обычная мусорка из потока, нарисованная С КРАСНОЙ ОБВОДКОЙ, то есть с меткой
+	# «этот бьёт». В сет-писе она врала: бьёт собака, а не бочка.
+	_check(bar.texture == load("res://assets/items/barrel_open2.png"),
+		"к выстрелу бочка ОТКРЫТА — вторым кадром, а не мусоркой из потока")
 	var dogs : Array = _dog_nodes(sp)
 	_check(dogs.size() >= 1, "собака вылетела: %d" % dogs.size())
 	if not dogs.is_empty():
 		var d : Node2D = dogs[0]
-		_check(absf(d.position.y - (n as Node2D).position.y) < 30.0,
-			"и летит по линии Нормальдо: %.0f против %.0f"
-				% [d.position.y, (n as Node2D).position.y])
+		# По СВОЕЙ линии — той, что бомж занял и держал всю подготовку, — а не по
+		# линии Нормальдо. Наведённая на голову собака обесценила бы подготовку:
+		# сходить с линии было бы незачем, всё равно прилетит куда встал.
+		var lane : float = float(node.get("lane_y"))
+		_check(absf(d.position.y - lane) < 30.0,
+			"и летит по СВОЕЙ линии: %.0f против %.0f" % [d.position.y, lane])
+		# И быстрее потока: это выстрел, а не ещё один предмет.
+		_check(float(d.get("speed")) > 250.0 * 1.4,
+			"и заметно быстрее потока: %.0f против 250" % float(d.get("speed")))
 
 	# Бочку он БРОСАЕТ. Раньше уезжала вся сцена целиком, и бомж утаскивал
 	# только что поставленную бочку за собой.

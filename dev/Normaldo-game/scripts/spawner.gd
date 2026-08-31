@@ -710,7 +710,10 @@ func _breather(speed: float, lanes: Array, vp_w: float) -> void:
 # вычёркиванием из CAMPAIGN_DIRECTOR: таблица — это запись замысла, и стереть из
 # неё вид значит потерять, в каких фазах он стоял. Код вида остаётся живым и
 # вызывается тестами и дев-кнопкой напрямую.
-const SP_DISABLED : Array = ["bum_barrel"]
+#
+# Сейчас список пуст: бомжа с бочкой убирали, пока хореография не читалась, и
+# вернули, когда она пришла раскадровкой (см. scripts/bum_barrel.gd).
+const SP_DISABLED : Array = []
 
 func _pick_set_piece(pool: Array) -> String:
 	if pool.is_empty():
