@@ -18,7 +18,7 @@ const CROC := preload("res://scripts/leatherhead.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 38
+const EXPECTED_CHECKS : int = 42
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -85,6 +85,12 @@ func _tick(sec: float) -> void:
 		await process_frame
 		t += 1.0 / 60.0
 
+func _croc_sprite(c: Node) -> Sprite2D:
+	for ch in c.get_children():
+		if ch is Sprite2D:
+			return ch
+	return null
+
 func _count(group: String) -> int:
 	return get_root().get_tree().get_nodes_in_group(group).size()
 
@@ -118,6 +124,34 @@ func _test_assets() -> void:
 	var m : Array = [CROC.MUZZLE_AIM, CROC.MUZZLE_DOWN, CROC.MUZZLE_RAGE]
 	var distinct : bool = m[0] != m[1] and m[1] != m[2] and m[0] != m[2]
 	_check(distinct, "у трёх поз своё положение дула: %s" % str(m))
+
+	# Морда в кат-сценах обязана быть ТОГО ЖЕ размера, что голова в бою. idle
+	# нарисован в своей рамке и занят ею целиком, поэтому общей шириной с боевыми
+	# позами не обойтись: голова выходила вдвое больше, и пицца, падающая ему на
+	# лицо, оказывалась вдвое мельче задуманного. Меряется по пикселям, а не по
+	# доверию к константе.
+	var head_in_fight : float = _head_width(CROC.F_GUN) \
+		* CROC.W_FIGHT / float(CROC.F_GUN.get_width())
+	var head_in_scene : float = _head_width(CROC.F_IDLE) \
+		* CROC.W_FACE / float(CROC.F_IDLE.get_width())
+	_check(absf(head_in_fight - head_in_scene) < head_in_fight * 0.12,
+		"морда в кат-сцене того же размера, что голова в бою: %.0f и %.0f px"
+			% [head_in_fight, head_in_scene])
+
+# Ширина ГОЛОВЫ в кадре. У боевых поз в кадре лежит ещё и ружьё — оно ниже, так
+# что нижняя треть кадра не в счёт.
+func _head_width(tex: Texture2D) -> float:
+	var img := tex.get_image()
+	var w := img.get_width()
+	var h := img.get_height()
+	var lo := w
+	var hi := -1
+	for y in range(0, int(float(h) * 0.62)):
+		for x in range(w):
+			if img.get_pixel(x, y).a > 0.15:
+				lo = mini(lo, x)
+				hi = maxi(hi, x)
+	return float(hi - lo) if hi >= 0 else 0.0
 
 func _test_hunt() -> void:
 	var e : Dictionary = await _boot()
@@ -215,12 +249,16 @@ func _test_tail() -> void:
 	var glow_at := -1.0
 	var tail_at := -1.0
 	var bait_at := -1.0
+	var full_at := -1.0
 	var t := 0.0
 	while t < 6.0 and (glow_at < 0.0 or tail_at < 0.0):
 		await process_frame
 		t += 1.0 / 60.0
-		if bait_at < 0.0 and _count("pizza") + _count("dollar") > 0:
+		var loot_n : int = _count("pizza") + _count("dollar")
+		if bait_at < 0.0 and loot_n > 0:
 			bait_at = t
+		if full_at < 0.0 and loot_n >= int(CROC.BAIT_COUNT):
+			full_at = t
 		if glow_at < 0.0:
 			for ch in e["game"].get_children():
 				if ch is ColorRect and (ch as ColorRect).size.y < 20.0:
@@ -232,11 +270,13 @@ func _test_tail() -> void:
 	_check(tail_at > 0.0 and tail_at > glow_at,
 		"хвост пошёл ПОСЛЕ свечения: %.2f против %.2f" % [tail_at, glow_at])
 
-	# ПРИМАНКА. Дорожка обязана лечь РАНЬШЕ свечения: позвать одновременно с
-	# предупреждением — значит не позвать вовсе. И лежать она обязана в той
-	# полосе, которую хвост перекроет, иначе это не байт, а просто еда.
-	_check(bait_at > 0.0 and bait_at < glow_at,
-		"дорожка легла до свечения: %.2f против %.2f" % [bait_at, glow_at])
+	# ПРИМАНКА. Дорожка выкладывается ВМЕСТЕ со свечением, а хвост выходит сразу
+	# за последней пиццей: пауза после дорожки означала бы, что её можно спокойно
+	# собрать и вернуться, и приманка перестала бы быть выбором.
+	_check(bait_at > 0.0 and full_at > 0.0,
+		"дорожка выложилась целиком: с %.2f по %.2f" % [bait_at, full_at])
+	_check(tail_at > full_at and tail_at - full_at < 0.40,
+		"хвост пошёл сразу за последней пиццей: через %.2f с" % (tail_at - full_at))
 	var vp0 : Vector2 = e["vp"]
 	var loot : Array = []
 	for g in ["pizza", "dollar"]:
@@ -306,6 +346,11 @@ func _test_shotgun() -> void:
 	var c : Node2D = _croc(e)
 	await process_frame
 
+	# Крокодил ОДНОГО размера во всей битве: интро он открывает тем же, каким
+	# пойдёт в первую атаку. Разный размер читается как «он отодвинулся».
+	_check(is_equal_approx(float(_croc_sprite(c).get_meta("w", 0.0)), CROC.W_FIGHT),
+		"на выходе он боевого размера: %.0f" % float(_croc_sprite(c).get_meta("w", 0.0)))
+
 	# Веер: три дробины за раз, и они РАЗЪЕЗЖАЮТСЯ. Три пули в одну точку — это
 	# одна пуля, только громче.
 	c.call("_buckshot", 3, CROC.BUCK_SPREAD)
@@ -331,6 +376,13 @@ func _test_shotgun() -> void:
 	c.call("_jaw_lunge")
 	await _tick(0.4)
 	_check(bool(c.get("_lunging")), "пасть пошла на игрока")
+
+	# Пасть перекрывает ВСЕ линии. Пока от неё можно уйти, игрок уходит, а не
+	# бьёт — и такт читается как «босс зачем-то немного проехал влево».
+	var jaw : Sprite2D = _croc_sprite(c)
+	var jaw_h : float = float(jaw.texture.get_height()) * jaw.scale.y
+	_check(jaw_h >= (e["vp"] as Vector2).y,
+		"и перекрывает весь экран: %.0f при высоте %.0f" % [jaw_h, (e["vp"] as Vector2).y])
 	var x0 : float = (c as Node2D).position.x
 	var hp0 : int  = int(c.get("_lunge_hp"))
 	var loot0 : int = _count("pizza") + _count("dollar")

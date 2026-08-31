@@ -102,8 +102,21 @@ const BOSS_STINGER := preload("res://assets/audio/boss_fight.mp3")
 const TAP_SFX      := preload("res://assets/audio/tap.mp3")
 
 # ── Геометрия ────────────────────────────────────────────────────────────────
-const W_INTRO : float = 250.0   # в интро он большой: это выход, а не атака
 const W_FIGHT : float = 178.0   # в бою — полторы головы Нормальдо
+
+# Крокодил ОДНОГО размера во всей битве, включая обе кат-сцены. Раньше в интро
+# он выходил на 250 («это выход, а не атака»), и первая же атака после этого
+# читалась как «он отодвинулся», хотя он просто уменьшился.
+#
+# Морда без ружья (`idle`/`squint`) нарисована в СВОЕЙ рамке и целиком ею
+# занята, поэтому одна ширина с боевыми позами дала бы вдвое большую голову.
+# Замер: в боевом кадре 256×245 голова занимает столбцы 110…241 и строки
+# 30…155, то есть 131×125. При ширине спрайта 178 она выходит 91 пикселем — вот
+# столько и должна занимать морда в финале. Без этого пицца, падающая ему на
+# лицо, оказывалась вдвое мельче, чем задумано.
+const W_FACE : float = 91.0
+# Пасть в последнем такте — во весь экран. См. «Акт 3».
+const W_JAW  : float = 470.0
 
 # Положение ДУЛА в долях кадра. Замерено не на глаз, а по вспышке: она
 # ярко-жёлтая и в кадре одна, так что центр жёлтого пятна и есть срез ствола.
@@ -165,8 +178,8 @@ func _ready() -> void:
 	_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_sprite.visible        = true
 	add_child(_sprite)
-	_set_pose(F_GUN, W_INTRO)
-	position = Vector2(get_viewport_rect().size.x + W_INTRO, get_viewport_rect().size.y * 0.5)
+	_set_pose(F_GUN, W_FIGHT)
+	position = Vector2(get_viewport_rect().size.x + W_FIGHT, get_viewport_rect().size.y * 0.5)
 
 	_music = AudioStreamPlayer.new()
 	var ms := BOSS_MUSIC.duplicate() as AudioStreamMP3
@@ -248,7 +261,7 @@ func _aim_at(target: Vector2) -> void:
 
 func _run_boss() -> void:
 	var vp := get_viewport_rect().size
-	position = Vector2(vp.x + W_INTRO, vp.y * 0.5)
+	position = Vector2(vp.x + W_FIGHT, vp.y * 0.5)
 
 	if is_instance_valid(_spawner):
 		_spawner.set_process(false)
@@ -306,7 +319,7 @@ func _intro() -> void:
 	current_act = "intro"
 	var vp := get_viewport_rect().size
 	var tw_in := create_tween()
-	tw_in.tween_property(self, "position:x", vp.x - W_INTRO * 0.62, 0.85)\
+	tw_in.tween_property(self, "position:x", vp.x - W_FIGHT * 0.62, 0.85)\
 		.set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 	await tw_in.finished
 	if not _alive():
@@ -352,7 +365,7 @@ func _show_speech() -> void:
 	var h : float = 84.0
 	var root := Control.new()
 	root.size         = Vector2(w, h)
-	root.position     = Vector2(vp.x - W_INTRO - w - 20.0, vp.y * 0.34)
+	root.position     = Vector2(vp.x - W_FIGHT - w - 20.0, vp.y * 0.34)
 	root.pivot_offset = Vector2(w, h * 0.5)
 	root.scale        = Vector2(0.2, 0.2)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -550,7 +563,9 @@ func _recoil() -> void:
 # Уворачиваться от него нельзя — можно только заранее быть не там, поэтому
 # край, из которого он выйдет, загорается за 0.4 с.
 const TAIL_LEN_FRAC : float = 0.72   # какую долю высоты экрана перекрывает
-const TAIL_GLOW_T   : float = 0.40
+# Свечение края горит РОВНО столько, сколько выкладывается дорожка: они идут
+# вместе и вместе же заканчиваются — последняя пицца встала, и хвост пошёл.
+const TAIL_GLOW_T   : float = 0.45
 # Насколько хвост уходит ЗА КРАЙ. Основание — это срез, которым хвост крепится к
 # телу, и торчащий в кадр срез читается как «хвост оторвали и бросили», а не как
 # «крокодил бьёт хвостом из-за экрана». Прячем его целиком.
@@ -577,26 +592,20 @@ func _act_tail() -> void:
 		if not _alive():
 			return
 		var s : Dictionary = TAIL_SWEEPS[i]
-		# Приманка ложится ПЕРВОЙ, до свечения: она должна успеть позвать, иначе
-		# это не выбор, а надпись «не ходи туда».
+		# Свечение края идёт ВМЕСТЕ с укладкой дорожки, а не после неё: дорожка
+		# сама по себе — половина предупреждения (она ведёт туда, откуда ударят),
+		# и вторая половина обязана гореть уже во время неё.
+		_edge_glow(String(s["side"]), TAIL_GLOW_T)
 		await _bait_trail(String(s["side"]))
 		if not _alive():
 			return
-		await get_tree().create_timer(0.30).timeout
-		if not _alive():
-			return
-		await _edge_glow(String(s["side"]), TAIL_GLOW_T)
-		if not _alive():
-			return
+		# Последняя пицца встала — хвост пошёл. Пауза здесь сломала бы весь смысл
+		# дорожки: игрок успевал бы собрать её и спокойно вернуться, и приманка
+		# переставала быть выбором.
 		await _tail_sweep(String(s["side"]), float(s["speed"]))
 		if not _alive():
 			return
-		# Между проходами — пицца на свободной стороне. Акт не должен быть
-		# чистым уворотом: голый уворот читается как наказание, а не как бой.
-		if i < TAIL_SWEEPS.size() - 1:
-			_drop_loot(vp * Vector2(0.55, 0.5) + Vector2(0.0,
-				vp.y * (-0.34 if String(s["side"]) == "bottom" else 0.34)))
-			await get_tree().create_timer(0.35).timeout
+		await get_tree().create_timer(0.35).timeout
 
 # ── Приманка перед взмахом ───────────────────────────────────────────────────
 # Голый уворот — это «угадал / не угадал», и играется как наказание. Дорожка
@@ -801,24 +810,32 @@ func _rage_volley() -> void:
 			_screen_shake(6.0, 5)
 		await get_tree().create_timer(0.14).timeout
 
-# Пасть: крокодил идёт по линии игрока, тапы его отталкивают. Это возвращённый
-# «РАЗДУВ» из старого замысла — единственная точка битвы, где игрок не
-# уворачивается, а отвечает. Каждый тап выбивает добычу: удар по боссу обязан
+# Пасть: крокодил ВО ВЕСЬ ЭКРАН идёт на игрока, тапы его отталкивают. Это
+# возвращённый «РАЗДУВ» из старого замысла — единственная точка битвы, где игрок
+# не уворачивается, а отвечает. Каждый тап выбивает добычу: удар по боссу обязан
 # что-то ДАВАТЬ, иначе тапают из вежливости.
-var _lunging   : bool = false
-var _lunge_hp  : int  = 0
+#
+# Первая версия шла боевым размером по линии игрока, и такт читался как «босс
+# зачем-то немного проехал влево». Смысла в нём не было видно ровно потому, что
+# уйти с дороги было можно: пока можно увернуться, игрок уворачивается, а не
+# бьёт. Пасть перекрывает ВСЕ линии — уходить некуда, и остаётся единственное,
+# что вообще осталось делать: бить.
+var _lunging    : bool  = false
+var _lunge_hp   : int   = 0
+var _lunge_hint : Label = null
 
 func _jaw_lunge() -> void:
 	var vp := get_viewport_rect().size
-	var target_y : float = _normaldo.global_position.y if is_instance_valid(_normaldo) \
-		else vp.y * 0.5
-	position  = Vector2(vp.x + W_FIGHT * 0.5, target_y)
+	# По центру и во весь экран: это не «атака по линии», от неё не уходят.
+	position  = Vector2(vp.x + W_JAW * 0.5, vp.y * 0.5)
 	_sprite.rotation = 0.0
-	_set_pose(F_RAGE[3])
+	_set_pose(F_RAGE[3], W_JAW)
 	_play_sfx(SFX_ROAR)
-	_lunge_hp = LUNGE_TAPS
-	_lunging  = true
-	var hint := _tap_hint()
+	_screen_shake(7.0, 6)
+	_lunge_hp   = LUNGE_TAPS
+	_lunging    = true
+	_lunge_hint = _tap_hint()
+	var hint : Label = _lunge_hint
 
 	# Пасть щёлкает: кадр с открытой пастью и кадр с закрытой по очереди.
 	var chomp := create_tween()
@@ -832,17 +849,22 @@ func _jaw_lunge() -> void:
 			_set_pose(F_RAGE[4]))
 	chomp.tween_interval(0.14)
 
-	var reach_x : float = (_normaldo.global_position.x + 60.0) if is_instance_valid(_normaldo) \
-		else vp.x * 0.25
+	# Докуда он дойдёт, если не отбиться: пасть накрывает игрока целиком.
+	# Считается от НОСА (левого края пасти), а не от центра — иначе гигантский
+	# спрайт «доезжал» до игрока, уже давно его проглотив.
+	var reach_x : float = ((_normaldo.global_position.x if is_instance_valid(_normaldo) \
+		else vp.x * 0.22) + W_JAW * 0.5)
+	var start_x : float = position.x
 	var t := 0.0
 	while t < LUNGE_TIME and _lunge_hp > 0 and _alive():
 		await get_tree().process_frame
 		var dt := get_process_delta_time()
 		t += dt
-		position.x -= ((vp.x - reach_x) / LUNGE_TIME) * dt
+		position.x -= ((start_x - reach_x) / LUNGE_TIME) * dt
 		if position.x <= reach_x:
 			break
-	_lunging = false
+	_lunging    = false
+	_lunge_hint = null
 	if is_instance_valid(chomp):
 		chomp.kill()
 	if is_instance_valid(hint):
@@ -854,11 +876,16 @@ func _jaw_lunge() -> void:
 		if is_instance_valid(_normaldo) and _normaldo.has_method("_take_hit"):
 			_normaldo.call("_take_hit", 1)
 		_play_sfx(SFX_TAIL_HIT)
+	# Уходит целиком за правый край и только там возвращается к боевому размеру:
+	# ужаться в кадре значило бы «крокодил сдулся», а он отступает.
 	var back := create_tween()
-	back.tween_property(self, "position:x", vp.x - W_FIGHT * 0.62, 0.45)\
+	back.tween_property(self, "position:x", vp.x + W_JAW * 0.62, 0.45)\
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	await back.finished
-	_set_pose(F_SHOT_DOWN[0])
+	if not _alive():
+		return
+	_set_pose(F_SHOT_DOWN[0], W_FIGHT)
+	position.y = vp.y * 0.5
 
 func _input(event: InputEvent) -> void:
 	if not _lunging:
@@ -871,9 +898,13 @@ func _on_lunge_tap() -> void:
 		return
 	_lunge_hp -= 1
 	var vp := get_viewport_rect().size
-	position.x = minf(position.x + vp.x * 0.055, vp.x + W_FIGHT * 0.5)
+	position.x = minf(position.x + vp.x * 0.055, vp.x + W_JAW * 0.5)
 	_play_sfx(TAP_SFX)
 	_spit_loot()
+	# Сколько ещё бить. Без счётчика такт читается как «тапай, пока не надоест»:
+	# видно, что что-то происходит, но не видно, что это работает.
+	if is_instance_valid(_lunge_hint):
+		_lunge_hint.text = "ТАПАЙ!  %d" % _lunge_hp
 	var tw := create_tween()
 	tw.tween_property(_sprite, "modulate", Color(1.7, 0.7, 0.7), 0.05)
 	tw.tween_property(_sprite, "modulate", Color.WHITE, 0.12)
@@ -885,7 +916,7 @@ func _tap_hint() -> Label:
 	l.add_theme_font_size_override("font_size", 20)
 	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	l.add_theme_constant_override("outline_size", 5)
-	l.text                 = "ТАПАЙ!"
+	l.text                 = "ТАПАЙ!  %d" % LUNGE_TAPS
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.modulate             = Color(1.0, 0.92, 0.25)
 	l.size                 = Vector2(vp.x, 30.0)
@@ -931,7 +962,7 @@ func _finale() -> void:
 	await tw.finished
 	if not _alive():
 		return
-	_set_pose(F_IDLE, W_FIGHT)
+	_set_pose(F_IDLE, W_FACE)
 
 	# Пицца падает сверху ему на морду.
 	var pie := Sprite2D.new()
