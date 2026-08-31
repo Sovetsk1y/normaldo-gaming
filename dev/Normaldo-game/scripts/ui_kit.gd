@@ -101,6 +101,35 @@ static func pulse(node: CanvasItem, property: String, to_value: Variant,
 	tw.tween_property(node, property, to_value, half_period)
 	tw.tween_property(node, property, back_value, half_period)
 
+# Одиночный переезд свойства — выезд панели, уход интерфейса за край и прочее
+# «доехать отсюда туда».
+#
+# Третье место, где вылезает та же беда, что у `press_anim` и `pulse`: узел уже
+# вынут из дерева, а `create_tween()` на таком возвращает null. Здесь она
+# приходит с неожиданной стороны — не от кнопки, а от ЧУЖОГО сигнала. Босс на
+# своём `tree_exited` возвращает интерфейс забега, и при перезагрузке сцены из
+# дерева вынимают обоих: босс уходит, дёргает обработчик, а интерфейс к этому
+# моменту уже отцеплен.
+#
+# Значение при этом обязано доехать: анимировать нечего, но если бросить
+# полпути, интерфейс останется стоять за краем экрана. Поэтому не в дереве —
+# ставим напрямую и выходим.
+static func slide_to(node: CanvasItem, property: String, to_value: Variant,
+		duration: float, trans: int = Tween.TRANS_SINE,
+		ease_type: int = Tween.EASE_OUT) -> void:
+	if not is_instance_valid(node):
+		return
+	if not node.is_inside_tree():
+		node.set_indexed(property, to_value)
+		return
+	# Твин привязан к тому, что анимирует, — и умирает вместе с ним.
+	var tw := node.create_tween()
+	if tw == null:
+		node.set_indexed(property, to_value)
+		return
+	tw.tween_property(node, property, to_value, duration) \
+		.set_trans(trans).set_ease(ease_type)
+
 # Панель со скруглением — самый частый вызов, чтобы не писать три строки подряд.
 static func panel(parent: Node, pos: Vector2, size: Vector2, fill: Color,
 		radius: int, border: Color = Color(0, 0, 0, 0), border_w: int = 2) -> Panel:

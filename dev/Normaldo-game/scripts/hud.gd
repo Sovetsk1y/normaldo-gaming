@@ -1070,10 +1070,15 @@ func _build_resist_marks(normaldo: Node) -> void:
 	layer.call("setup", normaldo)
 	_resist_marks_layer = layer
 
+# Левая стопка (пауза + ресурсы + жир) въезжает из-за края. Зовут отсюда трое:
+# начало забега, победа над боссом и — в тестовом режиме — сам босс своим
+# `tree_exited`. Последний и приносил падение: «ЕЩЁ РАЗ» на экране смерти
+# перезагружает сцену, из дерева вынимают и крокодила, и интерфейс, крокодил
+# уходит первым и дёргает этот обработчик у уже отцепленного HUD.
+# Всё, что про отцепленное дерево, живёт в UiKit.slide_to().
 func _slide_in_hud() -> void:
-	var tw := create_tween()
-	tw.tween_property(_left_container,  "position:x", 0.0, 0.45) \
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	UiKit.slide_to(_left_container, "position:x", 0.0, 0.45,
+		Tween.TRANS_BACK, Tween.EASE_OUT)
 
 func _build_player_cell(vp: Vector2) -> void:
 	const CELL_W : float = 230.0
@@ -6613,11 +6618,8 @@ func _on_boss_time() -> void:
 # Slide the left HUD stack (pause chip + resources + fat panel) off to the
 # left while the boss is on stage. Reversed by _slide_in_hud() after defeat.
 func _slide_out_hud_for_boss() -> void:
-	if not is_instance_valid(_left_container):
-		return
-	var tw := create_tween()
-	tw.tween_property(_left_container, "position:x", -_left_slide_w - 10.0, 0.45)\
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	UiKit.slide_to(_left_container, "position:x", -_left_slide_w - 10.0, 0.45,
+		Tween.TRANS_QUAD, Tween.EASE_IN)
 
 func _on_boss_defeated() -> void:
 	# Boss defeat → endless mode unlock + the standard death-screen flow with

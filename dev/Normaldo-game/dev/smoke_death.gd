@@ -42,6 +42,8 @@ func _initialize() -> void:
 	await _test_quests(hud, save)
 	print("── Награда за уровень ──")
 	await _test_reward(hud, save)
+	print("── Перезагрузка сцены по «ЕЩЁ РАЗ» ──")
+	_test_teardown(hud)
 
 	print("")
 	if _fails == 0:
@@ -237,3 +239,41 @@ func _test_reward(hud: Node, save: Node) -> void:
 	_check(_count(_texts(fresh2), "УРОВЕНЬ") == 0,
 		"без повышения про уровень молчим: %s" % [_texts(fresh2)])
 	await _shut(hud, fresh2)
+
+# «ЕЩЁ РАЗ» перезагружает сцену, а reload_current_scene() вынимает её из дерева
+# СРАЗУ и удаляет только на следующем кадре. В это окно попадают чужие
+# обработчики: крокодил на своём `tree_exited` возвращает интерфейс забега — а
+# интерфейс к этому моменту уже отцеплен. На Godot 4.2 `create_tween()` у
+# отцепленного узла возвращает null, и выходило «Cannot call method
+# 'tween_property' on a null value».
+#
+# Здешний Godot 4.3 такого null не даёт, поэтому проверяется не падение (его тут
+# не воспроизвести), а СВОЙСТВО, из-за которого падать нечему: вне дерева
+# значение обязано доехать напрямую, без твина. Заодно это ловит и обратную
+# ошибку — «просто выйти, если не в дереве»: тогда интерфейс навсегда остался бы
+# стоять за краем экрана.
+func _test_teardown(hud: Node) -> void:
+	var probe := Node2D.new()                       # намеренно НЕ в дереве
+	probe.position = Vector2(-500.0, 7.0)
+	UiKit.slide_to(probe, "position:x", 0.0, 0.45)
+	_check(is_equal_approx(probe.position.x, 0.0),
+		"вне дерева значение доезжает сразу: x = %.1f" % probe.position.x)
+	_check(is_equal_approx(probe.position.y, 7.0),
+		"и соседняя ось не трогается")
+	probe.free()
+
+	# Тот самый обработчик на отцепленном HUD.
+	var lc : Node2D = hud.get("_left_container")
+	if lc == null:
+		_check(false, "левая стопка интерфейса не собрана — проверять нечего")
+		return
+	var game : Node = hud.get_parent()
+	get_root().remove_child(game)
+	lc.position.x = -400.0
+	hud.call("_slide_in_hud")
+	_check(is_equal_approx(lc.position.x, 0.0),
+		"_slide_in_hud() на отцепленном HUD довозит стопку: x = %.1f" % lc.position.x)
+	hud.call("_slide_out_hud_for_boss")
+	_check(lc.position.x < -10.0,
+		"_slide_out_hud_for_boss() там же уводит её за край: x = %.1f" % lc.position.x)
+	game.free()
