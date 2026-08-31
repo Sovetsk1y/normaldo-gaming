@@ -633,65 +633,85 @@ func _test_wizard_box() -> void:
 	await process_frame
 
 # ── Выкрики ──────────────────────────────────────────────────────────────────
-# Реплика на резист и на удар. Проверяется не «надпись появилась» — проверяются
-# два свойства, без которых выкрики портят игру, а не украшают её.
+# Нарисованные граффити-стикеры на резист и на удар. Проверяется не «картинка
+# появилась» — проверяются свойства, без которых выкрики портят игру, а не
+# украшают её.
 func _test_shouts() -> void:
 	_check(not Phrases.RESIST.is_empty() and not Phrases.HIT.is_empty(),
-		"списки не пустые: %d на резист, %d на удар"
+		"обе таблицы не пустые: %d на резист, %d на удар"
 			% [Phrases.RESIST.size(), Phrases.HIT.size()])
 
-	# ПОДРЯД ОДНА И ТА ЖЕ не выпадает. На списке в десяток строк случайный выбор
-	# повторяется чаще, чем кажется — каждый десятый показ, — а повтор читается
-	# как «игра залипла», а не как реплика.
+	# ГЛАВНОЕ: таблицы НЕ ПЕРЕСЕКАЮТСЯ. Победные выкрики на удар — это игра,
+	# празднующая собственное попадание по игроку; ровно так и было, пока пул был
+	# общий и на снятый жир выпадало «POW!» или «LOL».
+	var shared : Array = []
+	for t in Phrases.HIT:
+		if Phrases.RESIST.has(t):
+			shared.append(String((t as Texture2D).resource_path).get_file())
+	_check(shared.is_empty(), "и не пересекаются: общие %s" % [shared])
+
+	# ПОДРЯД ОДИН И ТОТ ЖЕ не выпадает. На списке в пять-шесть штук случайный
+	# выбор повторяется чаще, чем кажется — каждый пятый показ, — а повтор
+	# читается как «игра залипла», а не как реплика.
 	var repeats := 0
-	var prev := ""
+	var prev : Texture2D = null
 	for i in 300:
-		var s := Phrases.hit()
+		var s : Texture2D = Phrases.hit()
 		if s == prev:
 			repeats += 1
 		prev = s
-	_check(repeats == 0, "две одинаковые подряд не выпадают (%d повторов на 300)" % repeats)
+	_check(repeats == 0, "два одинаковых подряд не выпадают (%d повторов на 300)" % repeats)
 
-	# И реплика реально вылетает — отдельной надписью, не вместо служебной.
-	# Служебная говорит ЧТО произошло, выкрик — как Нормальдо к этому относится;
-	# подменять одно другим значило бы отобрать у игрока слово «РЕЗИСТ».
+	# Выкрики приводятся к ОДНОМУ экранному размеру. Кадры у них от 500 до 1016
+	# пикселей и с разными полями — общий множитель делал одни вдвое крупнее
+	# других, и набор переставал читаться как один набор.
+	var sizes : Array = []
+	var all : Array = []
+	all.append_array(Phrases.RESIST)
+	all.append_array(Phrases.HIT)
+	for t in all:
+		var r := ItemSizing.content_rect(t)
+		sizes.append(float(maxi(r.size.x, r.size.y)) * ItemSizing.content_scale(t, 132.0))
+	var lo : float = sizes.min()
+	var hi : float = sizes.max()
+	_check(hi - lo < 2.0, "и все одного экранного размера: от %.0f до %.0f px" % [lo, hi])
+
+	# И выкрик реально вылетает — вместе со служебной строкой, а не вместо неё:
+	# строка говорит ЧТО произошло, рисунок — как к этому относится Нормальдо.
 	var e : Dictionary = await _boot("dracula", 2)
 	var n : Node = e["n"]
-	var before : Array = []
-	_labels(e["game"], before)
-	n.call("_show_shout", "ТЕСТ-ВЫКРИК", Color.WHITE)
+	var before : int = _sprites_in(n, []).size()
+	n.call("_pop_sticker", Phrases.RESIST[0])
 	await _wait(0.2)
-	var after : Array = []
-	_labels(e["game"], after)
+	var during : Array = _sprites_in(n, [])
 	var found := false
-	for l in after:
-		if String((l as Label).text) == "ТЕСТ-ВЫКРИК":
+	for s in during:
+		if (s as Sprite2D).texture == Phrases.RESIST[0]:
 			found = true
-	_check(found, "выкрик появляется на экране (надписей %d → %d)"
-		% [before.size(), after.size()])
-	# И убирается за собой: надпись, оставшаяся висеть, к концу забега
-	# превращается в стену текста.
-	var t := 0.0
-	while t < 4.0:
+	_check(found, "выкрик появляется над головой (спрайтов %d → %d)"
+		% [before, during.size()])
+
+	# И убирается за собой: стикер, оставшийся висеть, к концу забега
+	# превращается в стопку картинок над головой.
+	var t2 := 0.0
+	while t2 < 4.0:
 		await process_frame
-		t += 1.0 / 60.0
-		var live : Array = []
-		_labels(e["game"], live)
+		t2 += 1.0 / 60.0
 		var still := false
-		for l in live:
-			if String((l as Label).text) == "ТЕСТ-ВЫКРИК":
+		for s in _sprites_in(n, []):
+			if (s as Sprite2D).texture == Phrases.RESIST[0]:
 				still = true
 		if not still:
 			break
-	_check(t < 4.0, "и сам исчезает через %.1f с" % t)
+	_check(t2 < 4.0, "и сам исчезает через %.1f с" % t2)
 	(e["game"] as Node).queue_free()
 	await process_frame
 
-func _labels(root: Node, out: Array) -> Array:
-	if root is Label:
+func _sprites_in(root: Node, out: Array) -> Array:
+	if root is Sprite2D:
 		out.append(root)
 	for c in root.get_children():
-		_labels(c, out)
+		_sprites_in(c, out)
 	return out
 
 func _all_sprites(root: Node, out: Array) -> Array:

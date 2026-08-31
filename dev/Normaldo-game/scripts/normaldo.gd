@@ -126,22 +126,16 @@ const REACTIONS : Dictionary = {
 	"oops":     preload("res://assets/ui/reactions/oops.png"),
 	"pow":      preload("res://assets/ui/reactions/pow.png"),
 }
-const _HIT_BUBBLE_TEXTURES : Array = [
-	preload("res://assets/normaldo/ahh.png"),
-	preload("res://assets/normaldo/dang.png"),
-	preload("res://assets/normaldo/slakebake.png"),
-	preload("res://assets/normaldo/slakebake2.png"),
-	preload("res://assets/ui/reactions/bam1.png"),
-	preload("res://assets/ui/reactions/bam2.png"),
-	preload("res://assets/ui/reactions/dangbang.png"),
-	preload("res://assets/ui/reactions/kek.png"),
-	preload("res://assets/ui/reactions/lol.png"),
-	preload("res://assets/ui/reactions/pow.png"),
-	preload("res://assets/ui/reactions/oops.png"),
-]
+# Пул выкриков переехал в scripts/phrases.gd и там же разделён по тону: победные
+# на резист, болезненные на удар. Общая куча выдавала на удар «POW!» и «LOL» —
+# то есть игра праздновала собственное попадание по игроку.
 const _HIT_BUBBLE_OFFSET    : Vector2 = Vector2(0.0, -52.0)
-const _HIT_BUBBLE_PEAK_SC   : float   = 0.22
-const _HIT_BUBBLE_START_SC  : float   = 0.06
+# Выкрик приводится к одному ЭКРАННОМУ размеру по содержимому рисунка. Раньше
+# стоял общий множитель 0.22 на кадр — а кадры у выкриков от 500 до 1016
+# пикселей и с разными полями, и один и тот же набор выпадал то вдвое крупнее,
+# то вдвое мельче соседнего.
+const _HIT_BUBBLE_PX        : float   = 132.0
+const _HIT_BUBBLE_START_SC  : float   = 0.30
 const _HIT_BUBBLE_IN_TIME   : float   = 0.14
 const _HIT_BUBBLE_HOLD_TIME : float   = 0.35
 const _HIT_BUBBLE_OUT_TIME  : float   = 0.20
@@ -1679,7 +1673,9 @@ func _trigger_resist(tag: String, area: Area2D) -> void:
 	_skill_audio.play()
 	_vfx_resist_break(area.global_position)
 	_show_floating_text("РЕЗИСТ!", Color(0.95, 0.32, 0.28))
-	_show_shout(Phrases.resist(), Color(0.60, 1.00, 0.55))
+	# Выкрик — не вместо строки, а вместе с ней: строка говорит, ЧТО произошло,
+	# рисунок — как к этому относится Нормальдо.
+	_pop_sticker(Phrases.resist())
 	_bum_feast(tag)
 	_kill_item(area)
 
@@ -2967,43 +2963,6 @@ func _vfx_unique_trigger() -> void:
 	tw2.tween_interval(p.lifetime + 0.1)
 	tw2.tween_callback(p.queue_free)
 
-# ── Выкрики ───────────────────────────────────────────────────────────────────
-# Реплика Нормальдо на резист или на удар. От служебной строки (`РЕЗИСТ!`,
-# `×2 XP!`) отличается ролью: та говорит ЧТО произошло, эта — как он к этому
-# относится, и потому уходит вбок и вверх, чтобы не спорить со служебной за одно
-# и то же место над головой. Наклон и разброс по горизонтали случайные: два
-# удара подряд иначе печатают одну надпись поверх другой.
-#
-# Сами списки лежат в scripts/phrases.gd — их правят не программируя.
-const _SHOUT_RISE : float = 62.0
-const _SHOUT_TIME : float = 0.95
-
-func _show_shout(text: String, col: Color) -> void:
-	if text == "" or get_parent() == null:
-		return
-	var lbl := Label.new()
-	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 15)
-	lbl.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.92))
-	lbl.add_theme_constant_override("outline_size", 5)
-	lbl.text          = text
-	lbl.modulate      = Color(col.r, col.g, col.b, 0.0)
-	lbl.z_index       = 7
-	lbl.rotation      = randf_range(-0.10, 0.10)
-	lbl.mouse_filter  = Control.MOUSE_FILTER_IGNORE
-	get_parent().add_child(lbl)
-	lbl.global_position = global_position \
-		+ Vector2(randf_range(14.0, 40.0), randf_range(-64.0, -46.0))
-
-	var tw := lbl.create_tween()
-	tw.tween_property(lbl, "modulate:a", 1.0, 0.12)
-	tw.parallel().tween_property(lbl, "global_position:y",
-		lbl.global_position.y - _SHOUT_RISE, _SHOUT_TIME) \
-		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	tw.tween_interval(_SHOUT_TIME * 0.45)
-	tw.tween_property(lbl, "modulate:a", 0.0, _SHOUT_TIME * 0.40)
-	tw.tween_callback(lbl.queue_free)
-
 func _show_floating_text(text: String, col: Color) -> void:
 	var lbl := Label.new()
 	lbl.add_theme_font_override("font", UI_FONT)
@@ -3200,7 +3159,6 @@ func _take_hit(damage: int = 1) -> void:
 	_audio.play()
 	_flash_hit()
 	_spawn_hit_bubble()
-	_show_shout(Phrases.hit(), Color(1.00, 0.62, 0.30))
 	stats_changed.emit(fat_state, _pizza_count, _total_pizza_count)
 	_invincible = true
 	await get_tree().create_timer(1.5).timeout
@@ -3230,9 +3188,7 @@ func _flash_hit() -> void:
 # fades out and self-frees. Slightly randomised X offset and tilt so back-to-
 # back hits don't stack into a single static sprite.
 func _spawn_hit_bubble() -> void:
-	if _HIT_BUBBLE_TEXTURES.is_empty():
-		return
-	_pop_sticker(_HIT_BUBBLE_TEXTURES[randi() % _HIT_BUBBLE_TEXTURES.size()])
+	_pop_sticker(Phrases.hit())
 
 # Show a named comic reaction (e.g. "oops", "pow") over Normaldo's head.
 func show_reaction(reaction: String) -> void:
@@ -3247,21 +3203,25 @@ func _pop_sticker(tex: Texture2D) -> void:
 	bubble.texture        = tex
 	bubble.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	bubble.position       = _HIT_BUBBLE_OFFSET + Vector2(randf_range(-12.0, 12.0), 0.0)
-	bubble.scale          = Vector2.ONE * _HIT_BUBBLE_START_SC
 	bubble.rotation       = randf_range(-0.15, 0.15)
 	bubble.modulate       = Color(1.0, 1.0, 1.0, 0.0)
 	bubble.z_index        = 6
+	# По СОДЕРЖИМОМУ рисунка, а не по кадру: поля у выкриков разные, и общий
+	# множитель делал одни вдвое крупнее других.
+	ItemSizing.fit_sprite_content(bubble, _HIT_BUBBLE_PX)
+	var peak : Vector2 = bubble.scale
+	bubble.scale = peak * _HIT_BUBBLE_START_SC
 	add_child(bubble)
 
 	var tw := create_tween()
 	tw.tween_property(bubble, "modulate:a", 1.0, _HIT_BUBBLE_IN_TIME)\
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	tw.parallel().tween_property(bubble, "scale", Vector2.ONE * _HIT_BUBBLE_PEAK_SC, _HIT_BUBBLE_IN_TIME)\
+	tw.parallel().tween_property(bubble, "scale", peak, _HIT_BUBBLE_IN_TIME)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tw.tween_interval(_HIT_BUBBLE_HOLD_TIME)
 	tw.tween_property(bubble, "modulate:a", 0.0, _HIT_BUBBLE_OUT_TIME)\
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
-	tw.parallel().tween_property(bubble, "scale", Vector2.ONE * _HIT_BUBBLE_START_SC, _HIT_BUBBLE_OUT_TIME)\
+	tw.parallel().tween_property(bubble, "scale", peak * _HIT_BUBBLE_START_SC, _HIT_BUBBLE_OUT_TIME)\
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 	tw.tween_callback(func():
 		if is_instance_valid(bubble):
