@@ -14,7 +14,7 @@ var _checks : int = 0
 
 # Нижняя граница числа проверок. Держать точной незачем — она ловит не «стало на
 # одну меньше», а «не отработало вообще ничего».
-const EXPECTED_CHECKS : int = 74
+const EXPECTED_CHECKS : int = 80
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -53,6 +53,8 @@ func _initialize() -> void:
 	await _test_web_color()
 	print("── Маг: предмет → мэджик бокс ──")
 	await _test_wizard_box()
+	print("── Выкрики на резист и на удар ──")
+	await _test_shouts()
 
 	print("")
 	# Зелёный прогон, в котором НИЧЕГО не проверялось, — худший из возможных
@@ -614,8 +616,83 @@ func _test_wizard_box() -> void:
 		var b : Node2D = boxes[boxes.size() - 1]
 		_check(b.global_position.distance_to(rock_pos) < 90.0,
 			"и стоит ТАМ, где был предмет: %.0f px" % b.global_position.distance_to(rock_pos))
+
+		# И ведёт себя как обычный. Пойманный ящик просит `build_random_item()` у
+		# СВОЕГО РОДИТЕЛЯ, то есть рассчитывает лежать в спавнере. Спелл клал его
+		# в сцену рядом с Нормальдо — метода у неё нет, и ящик молча ничего не
+		# выплёвывал: перелетал на голову, крутился и таял. «Ящик появился» тут
+		# проверять мало: он появлялся и был бесполезен.
+		_check(b.get_parent() == sp, "ящик лежит в спавнере, как всякий предмет")
+		var before : int = sp.get_child_count()
+		b.call("open", n)
+		await _wait(1.4)
+		_check(sp.get_child_count() > before,
+			"и, пойманный, действительно раздаёт: детей %d → %d"
+				% [before, sp.get_child_count()])
 	(e["game"] as Node).queue_free()
 	await process_frame
+
+# ── Выкрики ──────────────────────────────────────────────────────────────────
+# Реплика на резист и на удар. Проверяется не «надпись появилась» — проверяются
+# два свойства, без которых выкрики портят игру, а не украшают её.
+func _test_shouts() -> void:
+	_check(not Phrases.RESIST.is_empty() and not Phrases.HIT.is_empty(),
+		"списки не пустые: %d на резист, %d на удар"
+			% [Phrases.RESIST.size(), Phrases.HIT.size()])
+
+	# ПОДРЯД ОДНА И ТА ЖЕ не выпадает. На списке в десяток строк случайный выбор
+	# повторяется чаще, чем кажется — каждый десятый показ, — а повтор читается
+	# как «игра залипла», а не как реплика.
+	var repeats := 0
+	var prev := ""
+	for i in 300:
+		var s := Phrases.hit()
+		if s == prev:
+			repeats += 1
+		prev = s
+	_check(repeats == 0, "две одинаковые подряд не выпадают (%d повторов на 300)" % repeats)
+
+	# И реплика реально вылетает — отдельной надписью, не вместо служебной.
+	# Служебная говорит ЧТО произошло, выкрик — как Нормальдо к этому относится;
+	# подменять одно другим значило бы отобрать у игрока слово «РЕЗИСТ».
+	var e : Dictionary = await _boot("dracula", 2)
+	var n : Node = e["n"]
+	var before : Array = []
+	_labels(e["game"], before)
+	n.call("_show_shout", "ТЕСТ-ВЫКРИК", Color.WHITE)
+	await _wait(0.2)
+	var after : Array = []
+	_labels(e["game"], after)
+	var found := false
+	for l in after:
+		if String((l as Label).text) == "ТЕСТ-ВЫКРИК":
+			found = true
+	_check(found, "выкрик появляется на экране (надписей %d → %d)"
+		% [before.size(), after.size()])
+	# И убирается за собой: надпись, оставшаяся висеть, к концу забега
+	# превращается в стену текста.
+	var t := 0.0
+	while t < 4.0:
+		await process_frame
+		t += 1.0 / 60.0
+		var live : Array = []
+		_labels(e["game"], live)
+		var still := false
+		for l in live:
+			if String((l as Label).text) == "ТЕСТ-ВЫКРИК":
+				still = true
+		if not still:
+			break
+	_check(t < 4.0, "и сам исчезает через %.1f с" % t)
+	(e["game"] as Node).queue_free()
+	await process_frame
+
+func _labels(root: Node, out: Array) -> Array:
+	if root is Label:
+		out.append(root)
+	for c in root.get_children():
+		_labels(c, out)
+	return out
 
 func _all_sprites(root: Node, out: Array) -> Array:
 	if root is Sprite2D and (root as Sprite2D).texture != null:

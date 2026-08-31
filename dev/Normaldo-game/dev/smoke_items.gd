@@ -88,16 +88,46 @@ func _test_ninja_kinds() -> void:
 	sp.call("clear_items")
 	await process_frame
 
-	# Жёлтый: после броска на поле стоят облака дыма — они и есть его атака.
+	# Жёлтый: кидает шашки в ЛЕТЯЩИЕ ПРЕДМЕТЫ и завешивает их. Ставим ему мишени,
+	# иначе кидать не во что и проверять нечего.
+	var marks : Array = []
+	for i in 4:
+		var it : Node2D = sp.call("build_random_item", 120.0)
+		if it == null:
+			continue
+		it.position = Vector2(vp.x * (0.30 + 0.12 * float(i)), vp.y * (0.2 + 0.2 * float(i)))
+		sp.add_child(it)
+		marks.append(it)
 	var yellow : Node2D = _put_ninja(sp, "smoke", vp)
 	await _tick(2.6)
-	var clouds : int = get_root().get_tree().get_nodes_in_group("smoke").size()
-	_check(clouds >= 1, "жёлтый поставил дым: облаков %d" % clouds)
-	var solid := true
-	for c in get_root().get_tree().get_nodes_in_group("smoke"):
-		if not c.is_in_group("obstacle"):
-			solid = false
-	_check(solid, "и дым отнимает место, а не просто рисуется")
+	var smoke : Array = get_root().get_tree().get_nodes_in_group("smoke")
+	_check(smoke.size() >= 1, "жёлтый поставил дым: облаков %d" % smoke.size())
+
+	# ДЫМ НЕ БЬЁТ. Он закрывает обзор, и всё: ни группы препятствий, ни хитбокса,
+	# ни урона. Иначе жёлтый превращается в третий вид стены, а от стен в игре и
+	# так уворачиваются одинаково.
+	var harmless := true
+	var over_head := true
+	for c in smoke:
+		if c.is_in_group("obstacle") or c is CollisionObject2D:
+			harmless = false
+		# Нормальдо в сцене на z_index 3 — дым обязан быть выше: он пролетает ПОД
+		# ним, а не появляется поверх.
+		if int(c.get("z_index")) <= 3:
+			over_head = false
+	_check(harmless, "дым безвреден: ни группы препятствия, ни хитбокса")
+	_check(over_head, "и рисуется поверх Нормальдо — тот проходит под ним")
+
+	# И садится он НА ПРЕДМЕТ, а не в пустой лейн: смысл в том, что под ним не
+	# видно, что летит.
+	var covering := 0
+	for c in smoke:
+		for m in marks:
+			if is_instance_valid(m) \
+					and (c as Node2D).global_position.distance_to((m as Node2D).global_position) < 6.0:
+				covering += 1
+				break
+	_check(covering >= 1, "и завешивает предметы: накрыто %d из %d" % [covering, smoke.size()])
 
 	# И облако не висит вечно: иначе лейн превращается в стену до конца забега.
 	# Ждём СОБЫТИЯ, а не отсчитываем секунды: облако тает по таймеру реального

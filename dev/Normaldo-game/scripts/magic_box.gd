@@ -75,7 +75,16 @@ func open(normaldo: Node2D) -> void:
 	if is_instance_valid(_normaldo):
 		position = _normaldo.position + HEAD_OFFSET
 
+	# Ящик рассчитывает лежать в СПАВНЕРЕ: раздача идёт через его
+	# `build_random_item()`, и координаты выплюнутого считаются в его системе.
+	# Положенный не туда (спелл мага одно время клал его в сцену рядом с
+	# Нормальдо) ящик работал вхолостую и МОЛЧА: перелетал на голову, крутился и
+	# таял. Снаружи это выглядело как «мэджик бокс сломался», хотя сломано было
+	# место. Ошибка в консоли дешевле часа поисков.
 	var spawner := get_parent()
+	if spawner == null or not spawner.has_method("build_random_item"):
+		push_error("magic_box: родитель не спавнер (%s) — раздачи не будет"
+			% [spawner.name if spawner != null else "нет родителя"])
 	var lanes   := _lane_centers()
 	var last_lane : int = -1
 

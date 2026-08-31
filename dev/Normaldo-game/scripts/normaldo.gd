@@ -1679,6 +1679,7 @@ func _trigger_resist(tag: String, area: Area2D) -> void:
 	_skill_audio.play()
 	_vfx_resist_break(area.global_position)
 	_show_floating_text("РЕЗИСТ!", Color(0.95, 0.32, 0.28))
+	_show_shout(Phrases.resist(), Color(0.60, 1.00, 0.55))
 	_bum_feast(tag)
 	_kill_item(area)
 
@@ -2732,7 +2733,14 @@ func _to_magic_box_handler() -> Callable:
 			node.on_hit()
 		else:
 			node.queue_free()
-		var host := get_parent()
+		# Ящик кладём в СПАВНЕР, а не в сцену рядом с Нормальдо. Пойманный ящик
+		# берёт `get_parent()` и просит у него `build_random_item()` — то есть
+		# рассчитывает, что родитель и есть спавнер. Родителем оказывалась сцена,
+		# метода у неё нет, и ящик молча ничего не выплёвывал: перелетал на
+		# голову, крутился и таял. Снаружи это выглядело как «ящик от мага
+		# сломанный», хотя сломано было место, куда его положили.
+		var host : Node = get_parent().get_node_or_null("Spawner") if get_parent() != null \
+			else null
 		if host != null:
 			var box := Area2D.new()
 			box.set_script(_MAGIC_BOX_SCRIPT)
@@ -2959,6 +2967,43 @@ func _vfx_unique_trigger() -> void:
 	tw2.tween_interval(p.lifetime + 0.1)
 	tw2.tween_callback(p.queue_free)
 
+# ── Выкрики ───────────────────────────────────────────────────────────────────
+# Реплика Нормальдо на резист или на удар. От служебной строки (`РЕЗИСТ!`,
+# `×2 XP!`) отличается ролью: та говорит ЧТО произошло, эта — как он к этому
+# относится, и потому уходит вбок и вверх, чтобы не спорить со служебной за одно
+# и то же место над головой. Наклон и разброс по горизонтали случайные: два
+# удара подряд иначе печатают одну надпись поверх другой.
+#
+# Сами списки лежат в scripts/phrases.gd — их правят не программируя.
+const _SHOUT_RISE : float = 62.0
+const _SHOUT_TIME : float = 0.95
+
+func _show_shout(text: String, col: Color) -> void:
+	if text == "" or get_parent() == null:
+		return
+	var lbl := Label.new()
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", 15)
+	lbl.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.92))
+	lbl.add_theme_constant_override("outline_size", 5)
+	lbl.text          = text
+	lbl.modulate      = Color(col.r, col.g, col.b, 0.0)
+	lbl.z_index       = 7
+	lbl.rotation      = randf_range(-0.10, 0.10)
+	lbl.mouse_filter  = Control.MOUSE_FILTER_IGNORE
+	get_parent().add_child(lbl)
+	lbl.global_position = global_position \
+		+ Vector2(randf_range(14.0, 40.0), randf_range(-64.0, -46.0))
+
+	var tw := lbl.create_tween()
+	tw.tween_property(lbl, "modulate:a", 1.0, 0.12)
+	tw.parallel().tween_property(lbl, "global_position:y",
+		lbl.global_position.y - _SHOUT_RISE, _SHOUT_TIME) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(_SHOUT_TIME * 0.45)
+	tw.tween_property(lbl, "modulate:a", 0.0, _SHOUT_TIME * 0.40)
+	tw.tween_callback(lbl.queue_free)
+
 func _show_floating_text(text: String, col: Color) -> void:
 	var lbl := Label.new()
 	lbl.add_theme_font_override("font", UI_FONT)
@@ -3155,6 +3200,7 @@ func _take_hit(damage: int = 1) -> void:
 	_audio.play()
 	_flash_hit()
 	_spawn_hit_bubble()
+	_show_shout(Phrases.hit(), Color(1.00, 0.62, 0.30))
 	stats_changed.emit(fat_state, _pizza_count, _total_pizza_count)
 	_invincible = true
 	await get_tree().create_timer(1.5).timeout

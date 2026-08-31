@@ -24,12 +24,12 @@ extends Area2D
 #       через место, где стоял Нормальдо, с занесённым мечом. Тот же приём, что
 #       у босса (ninja_foot._predator_attack), но одним заходом. Уклоняться надо
 #       ДО рывка: после начала траектория уже не меняется.
-#   smoke (жёлтый) — кидает дымовые шашки, и на их месте встают облака дыма.
-#       Уклоняться не надо вообще — надо ПЕРЕСТАТЬ ТУДА ЛЕТАТЬ: дым не летит, он
-#       отнимает место.
+#       smoke (жёлтый) — кидает дымовые шашки В ЛЕТЯЩИЕ ПРЕДМЕТЫ. Облако садится
+#       на предмет и едет с ним, закрывая его. Урона у дыма нет вовсе, Нормальдо
+#       всегда проходит под ним — опасен не дым, а то, что под ним не видно.
 #
 # Три вида и отвечают на три разных вопроса: «куда он бросил», «где он пройдёт»
-# и «куда мне теперь нельзя».
+# и «а что там вообще летит».
 #
 # См. /Концепция/Паттерны препятствий.md → «Ниндзя»
 
@@ -41,7 +41,7 @@ const SWORD1_TEX     := preload("res://assets/bosses/ninja_foot/sword1.png")
 const SWORD2_TEX     := preload("res://assets/bosses/ninja_foot/sword2.png")
 const CLOUD_TEX      := preload("res://assets/bosses/ninja_foot/smoke.png")
 const BOMB_TEX       := preload("res://assets/bosses/ninja_foot/smoke_projectile.png")
-const SMOKE_SCRIPT   := preload("res://scripts/smoke_obstacle.gd")
+const SMOKE_SCREEN_SCRIPT := preload("res://scripts/smoke_screen.gd")
 const PREDATOR_SFX   := preload("res://assets/audio/shredder_predator.mp3")
 
 # Цвет — единственное, чем виды различаются на глаз, и различать их надо ДО
@@ -240,9 +240,10 @@ func _run_predator() -> void:
 		queue_free()
 
 # ── Жёлтый: дымовые шашки ────────────────────────────────────────────────────
-# Кидает шашки по случайным лейнам; там, куда шашка долетела, встаёт облако и
-# держится несколько секунд. Уклоняться от дыма не надо — надо перестать туда
-# летать: он не гонится, он отнимает место.
+# Кидает шашки В ЛЕТЯЩИЕ ПРЕДМЕТЫ: облако садится на предмет и едет вместе с
+# ним, закрывая его. Сам дым безвреден и проходим насквозь — вопрос он задаёт
+# не «куда мне нельзя», а «а что там под ним»: банан, от которого надо уйти, или
+# пицца, за которой надо лететь.
 func _run_smoke() -> void:
 	for i in SMOKE_BOMBS:
 		if not is_instance_valid(self):
@@ -266,8 +267,14 @@ func _throw_bomb() -> void:
 	if host == null:
 		return
 	var vp := get_viewport_rect().size
-	var lane : int = randi() % 5
-	var to := Vector2(vp.x * randf_range(0.18, 0.62), vp.y * (float(lane) + 0.5) / 5.0)
+	# Цель — ЛЕТЯЩИЙ ПРЕДМЕТ, а не пустой лейн: смысл дыма в том, что он что-то
+	# закрывает. Не нашлось ни одного (поле пустое) — шашка уходит в свободный
+	# лейн и просто рассеивается: пустое облако честнее, чем облако, повешенное
+	# на ниндзю или на самого себя.
+	var target : Node2D = _pick_cover_target(host, vp)
+	var to : Vector2 = target.position if target != null \
+		else Vector2(vp.x * randf_range(0.18, 0.62),
+			vp.y * (float(randi() % 5) + 0.5) / 5.0)
 
 	var proj := Sprite2D.new()
 	proj.texture        = BOMB_TEX
@@ -285,7 +292,9 @@ func _throw_bomb() -> void:
 	tw.parallel().tween_property(proj, "rotation", TAU * 1.5, dur)
 	tw.tween_callback(func() -> void:
 		if is_instance_valid(proj):
-			_spawn_cloud(proj.position)
+			# Цель за время полёта могла уехать или сломаться — тогда садимся
+			# туда, куда шашка долетела, а не гонимся за пустотой.
+			_spawn_cloud(proj.position, target if is_instance_valid(target) else null)
 			proj.queue_free())
 
 	var audio := AudioStreamPlayer.new()
@@ -294,43 +303,54 @@ func _throw_bomb() -> void:
 	audio.play()
 	audio.finished.connect(audio.queue_free)
 
-func _spawn_cloud(at: Vector2) -> void:
+# Предмет, который стоит завесить: летящий, ещё в кадре и левее ниндзя — за
+# спину себе он шашку не кидает. Сам ниндзя, чужой дым и снаряды в счёт не идут.
+func _pick_cover_target(host: Node, vp: Vector2) -> Node2D:
+	var found : Array = []
+	for c in host.get_children():
+		if c == self or not (c is Node2D) or not is_instance_valid(c):
+			continue
+		if c.is_in_group("ninja") or c.is_in_group("smoke") or c.is_in_group("bullet"):
+			continue
+		var covered := false
+		for g in ["obstacle", "pizza", "dollar", "slowing", "fire", "money_bag"]:
+			if c.is_in_group(g):
+				covered = true
+				break
+		if not covered:
+			continue
+		var p : Vector2 = (c as Node2D).position
+		if p.x < vp.x * 0.10 or p.x > position.x:
+			continue
+		found.append(c)
+	if found.is_empty():
+		return null
+	return found[randi() % found.size()]
+
+# Облако. Без хитбокса и без группы `obstacle` — оно ЗАКРЫВАЕТ, а не бьёт.
+func _spawn_cloud(at: Vector2, target: Node2D) -> void:
 	var host := get_parent()
 	if host == null:
 		return
-	var node := Area2D.new()
-	node.set_script(SMOKE_SCRIPT)
-	node.collision_layer = 2
-	node.collision_mask  = 0
-	node.position        = at
-	node.z_index         = 4
+	var node := Node2D.new()
+	node.set_script(SMOKE_SCREEN_SCRIPT)
+	node.position = at
+	# Выше Нормальдо (у него тройка): он пролетает ПОД дымом, а не появляется
+	# поверх него — иначе дым читается как фон за спиной, а не как завеса.
+	node.z_index  = 6
 
 	var spr := Sprite2D.new()
 	spr.texture        = CLOUD_TEX
 	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	spr.scale          = Vector2.ONE * ItemSizing.fit_scale(CLOUD_TEX, SMOKE_SZ)
 	spr.modulate       = Color(1.35, 1.20, 0.55, 0.0)
-	node.add_child(spr)
-
-	var cs     := CollisionShape2D.new()
-	var circle := CircleShape2D.new()
-	circle.radius = SMOKE_SZ * 0.36
-	cs.shape      = circle
-	node.add_child(cs)
 
 	host.add_child.call_deferred(node)
 	await get_tree().process_frame
 	if not is_instance_valid(node):
 		return
-	node.add_to_group("obstacle")
 	node.add_to_group("smoke")
-	# Проявляется и тает сам: облако, висящее до конца забега, превратило бы
-	# лейн в стену.
-	var tw := spr.create_tween()
-	tw.tween_property(spr, "modulate:a", 0.92, 0.22)
-	tw.tween_interval(SMOKE_LIFE)
-	tw.tween_property(spr, "modulate:a", 0.0, 0.45)
-	tw.tween_callback(node.queue_free)
+	node.call("setup", spr, target, SMOKE_LIFE)
 
 func _play_sfx(stream: AudioStream) -> void:
 	var host := get_parent()
