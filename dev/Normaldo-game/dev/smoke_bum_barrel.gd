@@ -12,7 +12,7 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 22
+const EXPECTED_CHECKS : int = 25
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -72,6 +72,11 @@ func _initialize() -> void:
 	for i in 5:
 		lanes.append(vp.y * (float(i) + 0.5) / 5.0)
 	(n as Node2D).position = Vector2(220.0, lanes[2])
+	# Нормальдо бессмертен НАМЕРЕННО: тест меряет хореографию, а не выживание. У
+	# бомжа и бочки теперь есть хитбоксы, лейн сет-пис выбирает случайно, и раз в
+	# несколько прогонов он приходил ровно на линию Нормальдо — тот умирал, экран
+	# смерти вставал поверх, и тест мерил уже не сцену.
+	n.set("_dev_immortal", true)
 	sp.call("_setpiece_bum_barrel", 250.0, lanes, vp.x)
 	await process_frame
 
@@ -102,12 +107,27 @@ func _initialize() -> void:
 		"бомж такой же, как рядовой из потока: %.0f против %.0f" % [bum_px, ref_px])
 	ref.queue_free()
 
-	# У бочки ТЕЛО обязано быть одинаковым в обоих кадрах. Нормируй её по рисунку —
-	# и на смене кадра тело ужмётся: у открытого сорванная крышка тянет контент
-	# вверх, 165 пикселей против 107.
+	# Бочка — размером с обычную бочку из потока, то есть НЕ НИЖЕ бомжа. Отзыв был
+	# буквально «бочка осталась такой же маленькой»: она нормировалась по длинной
+	# стороне рисунка, а у закрытого кадра длинная — это высота, и «52 по длинной»
+	# означало 52 в высоту при 63 у мусорки из потока.
 	var body_closed : float = _body_h(bar)
-	_check(body_closed < bum_px,
-		"бочка меньше бомжа, он её несёт: %.0f против %.0f" % [body_closed, bum_px])
+	_check(body_closed >= bum_px,
+		"бочка не ниже бомжа: %.0f против %.0f" % [body_closed, bum_px])
+
+	# ХИТБОКСЫ. Бомж и бочка бьют, как любой предмет: без них сквозь сет-пис можно
+	# было пролететь насквозь без урона, и угроза превращалась в декорацию,
+	# которую достаточно переждать.
+	var boxes : Array = []
+	for c in node.get_children():
+		if c is Area2D and c.is_in_group("obstacle"):
+			boxes.append(c)
+	_check(boxes.size() == 2, "у бомжа и у бочки есть хитбоксы: %d" % boxes.size())
+	var dmg_ok := true
+	for b in boxes:
+		if int(b.get("damage")) < 1:
+			dmg_ok = false
+	_check(dmg_ok, "и оба бьют на урон")
 
 	# Сначала — обычный предмет потока: летит с той же скоростью, ничего не
 	# отыгрывает. Именно на фоне этого читается последующее торможение.
@@ -157,6 +177,18 @@ func _initialize() -> void:
 	_check(absf(_body_h(bar) - body_closed) < 2.0,
 		"тело бочки на смене кадра не изменилось: %.0f и %.0f"
 			% [body_closed, _body_h(bar)])
+	# Хитбокс бочки завалился ВМЕСТЕ с ней: зона удара обязана ехать за рисунком,
+	# иначе бьёт пустое место, а нарисованное не бьёт.
+	var bar_box : Area2D = null
+	for c in node.get_children():
+		if c is Area2D and c.is_in_group("obstacle") \
+				and absf(c.rotation) > 0.5:
+			bar_box = c
+	_check(bar_box != null, "и хитбокс лёг вместе с бочкой")
+	if bar_box != null:
+		_check(bar_box.global_position.distance_to(bar.global_position) < 90.0,
+			"и стоит на ней, а не рядом: %.0f px"
+				% bar_box.global_position.distance_to(bar.global_position))
 	var dogs : Array = _dog_nodes(sp)
 	_check(dogs.size() >= 1, "собака вылетела: %d" % dogs.size())
 	if not dogs.is_empty():

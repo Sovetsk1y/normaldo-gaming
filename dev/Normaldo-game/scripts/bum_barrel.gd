@@ -2,9 +2,14 @@ extends Node2D
 
 # ── Бомж с бочкой ─────────────────────────────────────────────────────────────
 # Отдельный вид бомжа: ВЛЕТАЕТ как обычный предмет, а показавшись целиком —
-# тормозит, роняет бочку, бочку открывает сорванной крышкой, и оттуда вылетает
-# собака. Собака идёт по ЕГО линии и уходит за левый край: увернуться надо от
-# неё, а не от бомжа — бомж и бочка не бьют вовсе.
+# тормозит, толкает бочку, та падает набок и открывается, и оттуда вылетает
+# собака. Собака идёт по ЕГО линии и уходит за левый край.
+#
+# БЬЮТ ВСЕ ТРОЕ. Бомж и бочка — такие же препятствия, как любой предмет потока, и
+# хитбоксы у них живут отдельными Area2D, которые каждый кадр едут за своими
+# спрайтами. Иначе вышло бы то, что и вышло: игрок пролетает сквозь бомжа и бочку
+# насквозь без урона, а сет-пис из угрозы превращается в декорацию, которую
+# достаточно переждать.
 #
 # Почему это НЕ обычный предмет, а маленькая сцена-хореограф. Обычные предметы
 # едут с постоянной скоростью и ничего не решают; здесь же есть такты —
@@ -33,15 +38,22 @@ const BUM_TEX : Array = [
 	preload("res://assets/items/homeless2.png"),   # седой
 ]
 const DOG_SCENE := preload("res://scenes/dog.tscn")
+const HITBOX_SCRIPT := preload("res://scripts/setpiece_hitbox.gd")
 
 # Размеры. Бомж тут РОВНО ТАКОЙ ЖЕ, как рядовой бомж из потока (61 px), и это
 # принципиально: от обычного предмета он отличается не размером, а тем, что умеет
 # отыграть сцену и кинуть пса. Раздутый вдвое, он читался как босс — а он не босс.
 const BUM_PX : float = 61.0
+# Высота ТЕЛА бочки на экране — не ниже бомжа.
+const BARREL_BODY_H : float = 66.0
 
-# Бочка — РЯДОВОГО РАЗМЕРА ПРЕДМЕТА (`ItemSizing.BASE_PX`), как мусорка из
-# потока. Числом это не задаётся: масштаб считается по ЗАКРЫТОМУ кадру и потом
-# ставится обоим напрямую.
+# Бочка — размером с ОБЫЧНУЮ БОЧКУ ИЗ ПОТОКА: та рисуется мусоркой на 0.22 от
+# кадра и выходит около 63 пикселей в высоту, то есть с самого бомжа. Меряется
+# поэтому ВЫСОТА ТЕЛА, а не длинная сторона: по длинной стороне у закрытого кадра
+# считалась бы высота (107 против 89 ширины), и бочка выходила бы заметно ниже
+# заявленного.
+#
+# Масштаб считается по ЗАКРЫТОМУ кадру и потом ставится обоим напрямую.
 #
 # Почему не «нормировать каждый кадр по рисунку», как остальные предметы: у
 # открытого кадра сорванная крышка тянет контент вверх — 165 пикселей против
@@ -72,6 +84,8 @@ const DOG_SPEED_MIN : float = 430.0
 var _bum    : Sprite2D = null
 var _barrel : Sprite2D = null
 var _phase  : String = "enter"     # enter | act | leave
+var _bum_box    : Area2D = null
+var _barrel_box : Area2D = null
 var _sway_t : float = 0.0
 var _done   : bool = false
 
@@ -99,6 +113,14 @@ func _ready() -> void:
 	_barrel.position = Vector2(-_bum_half() - _barrel_body().x - 2.0, 14.0)
 	add_child(_barrel)
 
+	# Хитбоксы. Отдельными узлами, а не на спрайтах: спрайты масштабируются и
+	# вращаются, и форма удара ездила бы вместе с рисунком — у бочки, которая
+	# заваливается на бок, буквально переворачивалась бы.
+	var bum_r : Vector2 = _drawn_size(_bum)
+	_bum_box    = _make_box(bum_r * 0.72)
+	_barrel_box = _make_box(_barrel_body() * 0.80)
+	_sync_boxes()
+
 # Кадр бочки: размер по РАМКЕ, опора — нижний левый угол ЗАКРЫТОГО кадра.
 #
 # Опора одна на оба кадра и берётся именно у закрытого. Кадры зарегистрированы в
@@ -112,7 +134,8 @@ func _set_barrel_frame(tex: Texture2D) -> void:
 	_barrel.texture = tex
 	_barrel.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	# Масштаб — ОДИН на оба кадра и посчитан по закрытому: см. шапку.
-	_barrel.scale = Vector2.ONE * ItemSizing.content_scale(BARREL_CLOSED, ItemSizing.BASE_PX)
+	_barrel.scale = Vector2.ONE * ItemSizing.content_scale(
+		BARREL_CLOSED, BARREL_BODY_H, ItemSizing.AXIS_H)
 	var r := ItemSizing.content_rect(BARREL_CLOSED)
 	_barrel.offset = tex.get_size() * 0.5 \
 		- Vector2(float(r.position.x), float(r.position.y + r.size.y))
@@ -126,6 +149,7 @@ func _barrel_body() -> Vector2:
 # покачивание, что у бомжей из волны. Игрок узнаёт знакомую угрозу, и тем
 # сильнее читается момент, когда она вдруг ТОРМОЗИТ.
 func _process(delta: float) -> void:
+	_sync_boxes()
 	if _phase == "enter":
 		position.x -= speed * delta
 		_sway_t += delta * 6.0
@@ -138,6 +162,47 @@ func _process(delta: float) -> void:
 		position.x -= speed * delta
 		if position.x < -260.0:
 			queue_free()
+
+# Экранный размер нарисованного у спрайта.
+func _drawn_size(spr: Sprite2D) -> Vector2:
+	var r := ItemSizing.content_rect(spr.texture)
+	return Vector2(float(r.size.x), float(r.size.y)) * absf(spr.scale.x)
+
+# Ударяющая зона: обычное препятствие, такое же, как предметы потока.
+func _make_box(sz: Vector2) -> Area2D:
+	var a := Area2D.new()
+	a.set_script(HITBOX_SCRIPT)
+	a.collision_layer = 2
+	a.collision_mask  = 0
+	a.add_to_group("obstacle")
+	# Сломали любую из зон — сцена кончилась. Спелл, попавший в бомжа, обязан
+	# что-то сделать, а сломать одну зону из двух и оставить сцену доигрывать
+	# читалось бы как «спелл не сработал».
+	a.connect("broken", _on_box_broken)
+	var cs   := CollisionShape2D.new()
+	var rect := RectangleShape2D.new()
+	rect.size = sz
+	cs.shape  = rect
+	a.add_child(cs)
+	add_child(a)
+	return a
+
+func _on_box_broken() -> void:
+	queue_free()
+
+# Хитбоксы едут за своими спрайтами КАЖДЫЙ кадр: бомж качается и делает тычок,
+# бочка падает и заваливается набок — зона удара обязана ехать с рисунком, иначе
+# бьёт пустое место, а нарисованное не бьёт.
+func _sync_boxes() -> void:
+	if is_instance_valid(_bum_box) and is_instance_valid(_bum):
+		_bum_box.position = _bum.position
+	if is_instance_valid(_barrel_box) and is_instance_valid(_barrel):
+		# Спрайт бочки опирается на нижний левый угол рисунка, поэтому центр тела
+		# лежит от точки опоры вправо-вверх — и поворачивается вместе с ней.
+		var b : Vector2 = _barrel_body()
+		_barrel_box.position = _barrel.position \
+			+ Vector2(b.x * 0.5, -b.y * 0.5).rotated(_barrel.rotation)
+		_barrel_box.rotation = _barrel.rotation
 
 # Половина ширины РИСУНКА бомжа. По рамке кадра считать нельзя: кадры
 # кадрируются по видимой части, и рамка заметно шире нарисованного.
