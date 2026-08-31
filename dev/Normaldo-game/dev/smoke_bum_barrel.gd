@@ -12,7 +12,7 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 16
+const EXPECTED_CHECKS : int = 18
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -44,6 +44,25 @@ func _initialize() -> void:
 				seen_in_campaign = true
 				break
 	_check(seen_in_campaign, "в кампании выпадает")
+
+	print("── Дев-кнопка ──")
+	# Кнопка в ряду забега уже была, но найти её было нечем: шесть тёмных
+	# квадратов с иконками 36×36, и какая из них «бомж с бочкой», а какая «волна
+	# бомжей», решалось перебором. Проверяется поэтому не только то, что вызов
+	# поднимает сет-пис, но и то, что кнопка ПОДПИСАНА.
+	var hud : Node = game.get_node_or_null("HUD")
+	hud.call("_build_dev_bum_barrel_btn")
+	await process_frame
+	var caps : Array = []
+	_labels(hud, caps)
+	_check(caps.has("БОЧКА"), "кнопка подписана и её видно в ряду: %s" % [caps])
+
+	sp.call("dev_send_bum_barrel")
+	await process_frame
+	_check(_find_barrel(sp) != null, "и по нажатию сет-пис поднимается")
+	sp.call("clear_items")
+	sp.set_process(false)
+	await _wait(0.2)
 
 	print("── Приезд, бочка, собака ──")
 	var vp : Vector2 = get_root().get_visible_rect().size
@@ -124,6 +143,12 @@ func _initialize() -> void:
 			"ушёл, бочку бросил: бомж %.0f, бочка %.0f"
 				% [bum.global_position.x, bar.global_position.x])
 	_finish()
+
+func _labels(node: Node, out: Array) -> void:
+	if node is Label and String((node as Label).text) != "":
+		out.append(String((node as Label).text))
+	for c in node.get_children():
+		_labels(c, out)
 
 # Высота НАРИСОВАННОГО на экране, а не рамки кадра.
 func _drawn_h(spr: Sprite2D) -> float:

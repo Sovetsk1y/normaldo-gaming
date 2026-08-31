@@ -82,6 +82,7 @@ const DOLLAR_TEXTURE   := preload("res://assets/items/dollar.png")
 const STONE_TEXTURE    := preload("res://assets/items/stone.png")
 const TRASH_TEXTURE    := preload("res://assets/items/trash_bin.png")
 const HOMELESS_TEXTURE := preload("res://assets/items/homeless1.png")
+const BARREL_TEXTURE   := preload("res://assets/items/barrel_open1.png")
 const GLOVE_TEXTURE    := preload("res://assets/items/boxing_glove.png")
 const SNAKE_TEXTURE    := preload("res://assets/items/snake.png")
 const BANANA_TEXTURE   := preload("res://assets/items/banana_peel.png")
@@ -6098,13 +6099,25 @@ func _build_dev_pizza_btn() -> void:
 # смотреть глазами: у волны вопрос «пролетаю ли я», у бочки — читается ли
 # подготовка.
 func _build_dev_bum_wave_btn() -> void:
-	_dev_spawner_btn(4, HOMELESS_TEXTURE, "dev_send_bum_crowd")
+	_dev_spawner_btn(4, HOMELESS_TEXTURE, "dev_send_bum_crowd", "ВОЛНА")
 
+# Иконка — ЗАКРЫТАЯ БОЧКА, та самая, которую бомж вносит в кадр. Раньше стояла
+# `trash_bin.png`, лежачая мусорка из потока: к сет-пису она отношения не имеет
+# вовсе, а в ряду из шести одинаковых квадратиков это была единственная зацепка,
+# по которой кнопку можно было узнать.
 func _build_dev_bum_barrel_btn() -> void:
-	_dev_spawner_btn(5, TRASH_TEXTURE, "dev_send_bum_barrel")
+	_dev_spawner_btn(5, BARREL_TEXTURE, "dev_send_bum_barrel", "БОЧКА")
 
-# Общая сборка дев-кнопки в нижнем ряду: место в ряду, иконка, метод спавнера.
-func _dev_spawner_btn(slot: int, tex: Texture2D, method: String) -> void:
+# Общая сборка дев-кнопки в нижнем ряду: место в ряду, иконка, подпись, метод
+# спавнера.
+#
+# Подпись тут не украшение. Ряд состоит из шести тёмных квадратов с мелкими
+# иконками предметов, и какая из них «бомж с бочкой», а какая «волна бомжей», по
+# картинке 36×36 не различить — кнопку приходилось искать перебором. Слово решает
+# это одной строкой, и место под него берётся из самой кнопки: иконка ужимается,
+# footprint остаётся прежним.
+func _dev_spawner_btn(slot: int, tex: Texture2D, method: String,
+		caption: String = "") -> void:
 	var vp   := get_viewport().get_visible_rect().size
 	const SZ := 44.0
 	var root := Node2D.new()
@@ -6116,9 +6129,22 @@ func _dev_spawner_btn(slot: int, tex: Texture2D, method: String) -> void:
 	bg.size  = Vector2(SZ, SZ)
 	root.add_child(bg)
 
-	var icon     := _make_icon(tex, SZ - 8.0)
-	icon.position = Vector2(4.0, 4.0)
+	var icon_px : float = (SZ - 16.0) if caption != "" else (SZ - 8.0)
+	var icon     := _make_icon(tex, icon_px)
+	icon.position = Vector2((SZ - icon_px) * 0.5, 2.0)
 	root.add_child(icon)
+
+	if caption != "":
+		var lbl := Label.new()
+		lbl.add_theme_font_override("font", UI_FONT)
+		lbl.add_theme_font_size_override("font_size", 9)
+		lbl.text                 = caption
+		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		lbl.modulate             = Color(0.80, 0.86, 1.00)
+		lbl.size                 = Vector2(SZ, SZ - 30.0)
+		lbl.position             = Vector2(0.0, 30.0)
+		root.add_child(lbl)
 
 	var spawner := get_parent().get_node_or_null("Spawner")
 	var btn := Button.new()
