@@ -4,7 +4,7 @@ extends SceneTree
 #   xvfb-run -a godot --path . --display-driver x11 --rendering-driver opengl3 \
 #     --resolution 960x430 --script res://dev/shot_croc.gd -- <папка> <такт>
 #
-# такт: intro | banner | hunt | tail | buck | rage | jaw | finale
+# такт: intro | banner | hunt | bait | tail | buck | rage | jaw | finale
 #
 # Такты снимаются ПО СОБЫТИЮ, а не по секундомеру: нить прицела висит 0.45 с,
 # вспышка картечи — 0.1 с, и ловить их фиксированной задержкой значит гадать.
@@ -51,7 +51,7 @@ func _initialize() -> void:
 	if mode in ["buck", "rage"]:
 		(c as Node2D).position = Vector2(vp.x - CROC.W_FIGHT * 0.62, vp.y * 0.5)
 		c.call("_set_pose", CROC.F_SHOT_DOWN[0], CROC.W_FIGHT)
-	elif mode in ["hunt", "tail", "jaw", "finale"]:
+	elif mode in ["hunt", "tail", "bait", "jaw", "finale"]:
 		c.call("_set_pose", CROC.F_GUN, CROC.W_FIGHT)
 
 	match mode:
@@ -63,6 +63,15 @@ func _initialize() -> void:
 			c.call("_act_hunt")
 			await _until(func() -> bool: return _find_named(game, "AimLaser") != null, 8.0)
 			await _wait(0.2)
+		"bait":
+			# Момент приманки: дорожка уже легла, край уже горит, хвоста ещё нет.
+			c.call("_act_tail")
+			await _until(func() -> bool:
+				for ch in game.get_children():
+					if ch is ColorRect and (ch as ColorRect).size.y < 20.0 \
+							and (ch as ColorRect).color.a > 0.5:
+						return true
+				return false, 10.0)
 		"tail":
 			c.call("_act_tail")
 			await _until(func() -> bool:

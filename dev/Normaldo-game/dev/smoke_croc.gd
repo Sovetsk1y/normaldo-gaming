@@ -18,7 +18,7 @@ const CROC := preload("res://scripts/leatherhead.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 18
+const EXPECTED_CHECKS : int = 38
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -33,17 +33,23 @@ func _initialize() -> void:
 	_test_assets()
 	print("── Акт 1: охота ──")
 	await _test_hunt()
+	print("── Акт 1: разгон ──")
+	await _test_hunt_ramp()
 	print("── Акт 2: хвост ──")
 	await _test_tail()
 	print("── Акт 3: картечь и пасть ──")
 	await _test_shotgun()
+	print("── Акт 3: сквозь картечь можно пройти ──")
+	await _test_buckshot_gap()
+	print("── Смерть игрока обрывает битву ──")
+	await _test_death_stops()
 	print("── Битва доходит до конца ──")
 	await _test_full()
 	_finish()
 
 # ── Хелперы ──────────────────────────────────────────────────────────────────
 
-func _boot() -> Dictionary:
+func _boot(immortal: bool = true) -> Dictionary:
 	var game : Node = load("res://scenes/game.tscn").instantiate()
 	get_root().add_child(game)
 	await process_frame
@@ -58,7 +64,7 @@ func _boot() -> Dictionary:
 	# выживание. Смертный Нормальдо на первом же взмахе хвоста умирает, экран
 	# смерти ставит дерево на паузу — и битва замирает на середине, а тест
 	# показывает «босс завис», хотя завис он не сам.
-	n.set("_dev_immortal", true)
+	n.set("_dev_immortal", immortal)
 	await process_frame
 	return { "game": game, "n": n, "sp": sp, "vp": vp }
 
@@ -154,6 +160,51 @@ func _test_hunt() -> void:
 	e["game"].queue_free()
 	await process_frame
 
+# Акт разгоняется: шесть выстрелов с одинаковым шагом — это метроном, после
+# второго игрок знает всё, что будет дальше. Разгоняется при этом ПАУЗА, а не
+# телеграф: нить обязана висеть свои 0.45 с и на последнем выстреле, иначе
+# «сложнее» означает «отняли возможность увернуться».
+func _test_hunt_ramp() -> void:
+	var w : Array = CROC.HUNT_WAITS
+	var ramps := true
+	for i in range(1, w.size()):
+		if float(w[i]) >= float(w[i - 1]):
+			ramps = false
+	_check(ramps, "паузы между выстрелами убывают: %s" % [w])
+	_check(int(CROC.HUNT_SHOTS) == w.size(),
+		"число выстрелов совпадает со списком пауз: %d и %d" % [CROC.HUNT_SHOTS, w.size()])
+
+	# И это не только числа в шапке: гоняем акт целиком и меряем, через сколько
+	# на самом деле приходят выстрелы.
+	var e : Dictionary = await _boot()
+	var c : Node2D = _croc(e)
+	await process_frame
+	c.call("_act_hunt")
+	# Считаем НОВЫЕ пули по идентификаторам, а не по размеру группы: к концу акта
+	# выстрелы идут чаще, чем пуля успевает улететь за край, и по счётчику часть
+	# из них слилась бы в один.
+	var shots : Array = []
+	var seen  : Dictionary = {}
+	var t := 0.0
+	while t < 24.0 and shots.size() < int(CROC.HUNT_SHOTS):
+		get_root().get_tree().paused = false
+		await process_frame
+		t += 1.0 / 60.0
+		for b in get_root().get_tree().get_nodes_in_group("bullet"):
+			var id : int = b.get_instance_id()
+			if not seen.has(id):
+				seen[id] = true
+				shots.append(t)
+	_check(shots.size() == int(CROC.HUNT_SHOTS),
+		"все %d выстрелов состоялись (%d)" % [CROC.HUNT_SHOTS, shots.size()])
+	if shots.size() >= 4:
+		var first : float = shots[1] - shots[0]
+		var last  : float = shots[shots.size() - 1] - shots[shots.size() - 2]
+		_check(last < first * 0.75,
+			"и к концу акта они идут заметно чаще: %.2f с против %.2f с" % [last, first])
+	e["game"].queue_free()
+	await process_frame
+
 func _test_tail() -> void:
 	var e : Dictionary = await _boot()
 	var c : Node2D = _croc(e)
@@ -163,10 +214,13 @@ func _test_tail() -> void:
 	# Свечение края раньше хвоста — та же проверка, что и с нитью.
 	var glow_at := -1.0
 	var tail_at := -1.0
+	var bait_at := -1.0
 	var t := 0.0
-	while t < 4.0 and (glow_at < 0.0 or tail_at < 0.0):
+	while t < 6.0 and (glow_at < 0.0 or tail_at < 0.0):
 		await process_frame
 		t += 1.0 / 60.0
+		if bait_at < 0.0 and _count("pizza") + _count("dollar") > 0:
+			bait_at = t
 		if glow_at < 0.0:
 			for ch in e["game"].get_children():
 				if ch is ColorRect and (ch as ColorRect).size.y < 20.0:
@@ -177,6 +231,41 @@ func _test_tail() -> void:
 	_check(glow_at > 0.0, "край загорелся (%.2f с)" % glow_at)
 	_check(tail_at > 0.0 and tail_at > glow_at,
 		"хвост пошёл ПОСЛЕ свечения: %.2f против %.2f" % [tail_at, glow_at])
+
+	# ПРИМАНКА. Дорожка обязана лечь РАНЬШЕ свечения: позвать одновременно с
+	# предупреждением — значит не позвать вовсе. И лежать она обязана в той
+	# полосе, которую хвост перекроет, иначе это не байт, а просто еда.
+	_check(bait_at > 0.0 and bait_at < glow_at,
+		"дорожка легла до свечения: %.2f против %.2f" % [bait_at, glow_at])
+	var vp0 : Vector2 = e["vp"]
+	var loot : Array = []
+	for g in ["pizza", "dollar"]:
+		for it in get_root().get_tree().get_nodes_in_group(g):
+			loot.append(it)
+	_check(loot.size() >= 4, "дорожка из нескольких штук: %d" % loot.size())
+	# Первый проход всегда «снизу»: стена поднимается от нижнего края, а выходит
+	# хвост слева. Значит дорожка обязана начинаться в щели и вести ВНИЗ И ВЛЕВО.
+	# Проверяется именно наклон: «все штуки внизу» означало бы не приманку, а
+	# кучу еды в опасной зоне, из которой не видно, куда зовут.
+	var near_y := 0.0    # y ближнего к хвосту конца (минимальный x)
+	var far_y  := 0.0    # y дальнего конца
+	var min_x  := INF
+	var max_x  := -INF
+	for it in loot:
+		var p : Vector2 = (it as Node2D).global_position
+		if p.x < min_x:
+			min_x = p.x
+			near_y = p.y
+		if p.x > max_x:
+			max_x = p.x
+			far_y = p.y
+	_check(max_x - min_x > vp0.x * 0.35,
+		"дорожка тянется через экран: %.0f px" % (max_x - min_x))
+	_check(min_x < vp0.x * 0.30,
+		"и доводит до края, откуда выйдет хвост: x=%.0f" % min_x)
+	_check(near_y > vp0.y * 0.65 and far_y < vp0.y * 0.45,
+		"ведёт из щели вглубь полосы: с y=%.0f до y=%.0f при экране %.0f"
+			% [far_y, near_y, vp0.y])
 
 	# Щель. Хвост перекрывает не весь экран — иначе от него нельзя уйти в
 	# принципе, и акт превращается в отнятую жизнь.
@@ -254,6 +343,116 @@ func _test_shotgun() -> void:
 	e["game"].queue_free()
 	await process_frame
 
+# «Выбери сторону» обязано быть выполнимым. Разлёт дробин меряется НЕ между
+# центрами: у Нормальдо радиус 32, у дробины ~12, и проход для его центра — это
+# зазор минус две суммы радиусов. При разлёте 92 проход выходил в 4 пикселя, то
+# есть уворота не было вовсе, хотя на бумаге веер «оставлял линию».
+#
+# Меряем по живым узлам и на ЛИНИИ ИГРОКА: дробь разъезжается по дороге, и у
+# дула зазор всегда меньше, чем там, куда она прилетит.
+func _test_buckshot_gap() -> void:
+	var e : Dictionary = await _boot()
+	var c : Node2D = _croc(e)
+	await process_frame
+	var px : float = (e["n"] as Node2D).position.x
+	var pr : float = _shape_radius(e["n"])
+	_check(pr > 0.0, "радиус Нормальдо взят из сцены: %.0f" % pr)
+
+	c.call("_buckshot", 3, CROC.BUCK_SPREAD)
+	var gap : float = await _pellet_gap(e["n"], 3, px, pr)
+	_check(gap > pr, "обычная картечь: проход %.0f px при Нормальдо в %.0f" % [gap, pr * 2.0])
+
+	for b in get_root().get_tree().get_nodes_in_group("bullet"):
+		b.free()
+	await process_frame
+	# Злая картечь — самый плотный момент битвы, но и он обязан оставлять проход.
+	c.call("_rage_volley")
+	var gap_rage : float = await _pellet_gap(e["n"], 5, px, pr)
+	_check(gap_rage > 20.0, "злая картечь: проход %.0f px — теснее, но он есть" % gap_rage)
+	e["game"].queue_free()
+	await process_frame
+
+func _shape_radius(node: Node) -> float:
+	for ch in node.get_children():
+		if ch is CollisionShape2D and (ch as CollisionShape2D).shape is CircleShape2D:
+			return ((ch as CollisionShape2D).shape as CircleShape2D).radius
+	return 0.0
+
+# Ждём, пока дробь долетит до линии игрока, и возвращаем самый узкий проход
+# между соседними дробинами — с вычетом радиусов дробины и Нормальдо.
+#
+# Дробины залпа ЗАПОМИНАЮТСЯ: у злой картечи волна вторая, и вперемешку зазоры
+# считались бы между разными залпами — то есть между тем, что в игрока никогда
+# и не летит одновременно.
+func _pellet_gap(n: Node2D, want: int, player_x: float, player_r: float) -> float:
+	var shot : Array = []
+	var t := 0.0
+	while t < 6.0:
+		get_root().get_tree().paused = false
+		await process_frame
+		t += 1.0 / 60.0
+		var bs : Array = get_root().get_tree().get_nodes_in_group("bullet")
+		if bs.size() >= want:
+			shot = bs.slice(0, want)
+			break
+	if shot.size() < want:
+		return -1.0
+	# Нормальдо на линии огня СЪЕДАЕТ среднюю дробину, и мерить становится
+	# нечего. Он остаётся на месте (по нему целились), но перестаёт ловить.
+	n.set_deferred("monitoring", false)
+	var pellet_r : float = _shape_radius(shot[0])
+	while t < 12.0:
+		get_root().get_tree().paused = false
+		await process_frame
+		t += 1.0 / 60.0
+		var arrived := true
+		for b in shot:
+			if not is_instance_valid(b) or (b as Node2D).global_position.x > player_x:
+				arrived = false
+		if arrived:
+			break
+	var ys : Array = []
+	for b in shot:
+		if is_instance_valid(b):
+			ys.append((b as Node2D).global_position.y)
+	if ys.size() < want:
+		return -1.0
+	ys.sort()
+	var narrow := INF
+	for i in range(1, ys.size()):
+		narrow = minf(narrow, float(ys[i]) - float(ys[i - 1]))
+	# Проход для ЦЕНТРА Нормальдо: зазор минус по радиусу дробины с каждой
+	# стороны и минус его собственный радиус с каждой стороны.
+	return narrow - 2.0 * pellet_r - 2.0 * player_r
+
+# Забег окончен — босс обязан замолчать. Само по себе дерево на паузе его не
+# остановит: такты сшиты через get_tree().create_timer(), а тот тикает и на
+# паузе, и крокодил доигрывал акт поверх экрана смерти.
+func _test_death_stops() -> void:
+	var e : Dictionary = await _boot(false)      # Нормальдо СМЕРТНЫЙ
+	var c : Node2D = _croc(e)
+	await process_frame
+	c.call("_act_hunt")
+	await _tick(1.0)
+	_check(is_instance_valid(c), "босс поднялся и работает")
+
+	(e["n"] as Node).call("_die")
+	# Дальше НЕ снимаем паузу намеренно: экран смерти ставит дерево на паузу, и
+	# проверять надо именно это состояние.
+	var t := 0.0
+	while t < 3.0 and is_instance_valid(c):
+		await process_frame
+		t += 1.0 / 60.0
+	_check(not is_instance_valid(c), "смерть игрока убрала босса (%.2f с)" % t)
+	_check(_count("bullet") == 0 and _count("croc_tail") == 0 and _count("croc_fx") == 0,
+		"и на экране не осталось ни пуль, ни хвостов, ни вспышек")
+	for _i in 300:
+		await process_frame
+	_check(_count("bullet") == 0, "и новых выстрелов больше не прилетает")
+	get_root().get_tree().paused = false
+	e["game"].queue_free()
+	await process_frame
+
 # Битва из трёх актов, сшитых await'ами, ломается ТИХО: одна корутина не
 # дождалась — и босс навсегда завис, а забег не продолжится никогда. Поэтому
 # отдельная проверка: доходит ли всё до конца и убирает ли за собой.
@@ -270,6 +469,10 @@ func _test_full() -> void:
 		get_root().get_tree().paused = false
 		await process_frame
 		t += 1.0 / 60.0
+		# Босс убирается сам, и между проверкой в шапке цикла и этой строкой он
+		# успевает исчезнуть.
+		if not is_instance_valid(c):
+			break
 		var a : String = String(c.get("current_act"))
 		if not seen.has(a):
 			seen.append(a)

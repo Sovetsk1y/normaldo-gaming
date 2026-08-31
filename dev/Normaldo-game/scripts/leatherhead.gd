@@ -136,6 +136,19 @@ var _music     : AudioStreamPlayer = null
 # одному только экрану не понять, на чём именно: маркер отвечает на это сразу.
 var current_act : String = ""
 
+# Битва оборвана: игрок умер или сцену перезагружают.
+var _stopped : bool = false
+
+# Единственная проверка «продолжать ли», и все такты спрашивают только её.
+#
+# Проверять `is_instance_valid(self)` мало по двум причинам. Первая: экран смерти
+# ставит дерево на паузу, а `get_tree().create_timer()` по умолчанию тикает и на
+# паузе — на этих таймерах вся хореография, и крокодил продолжал стрелять уже
+# поверх экрана смерти. Вторая: перезагрузка сцены вынимает босса из дерева
+# сразу, а удаляет кадром позже, и `create_tween()` в этом окне возвращает null.
+func _alive() -> bool:
+	return is_instance_valid(self) and not _stopped and is_inside_tree()
+
 var _shell_lamps : Array = []
 var _shell_layer : CanvasLayer = null
 
@@ -162,8 +175,45 @@ func _ready() -> void:
 	_music.volume_db = -14.0
 	add_child(_music)
 
+	# Смерть игрока обрывает битву. Само по себе дерево на паузе её не остановит:
+	# такты сшиты через `get_tree().create_timer()`, а тот тикает и на паузе, —
+	# крокодил спокойно доигрывал акт поверх экрана смерти.
+	if is_instance_valid(_normaldo) and _normaldo.has_signal("died"):
+		_normaldo.connect("died", _on_player_died)
+
 	if autostart:
 		_run_boss.call_deferred()
+
+func _on_player_died(_pizzas: int = 0, _pos: Vector2 = Vector2.ZERO) -> void:
+	_abort()
+
+# Забег окончен — босса на экране быть не должно, как и его снарядов: пуля,
+# застывшая поверх экрана смерти, читается как «игра сломалась».
+func _abort() -> void:
+	if _stopped:
+		return
+	_stopped  = true
+	_tracking = false
+	_lunging  = false
+	if is_instance_valid(_music):
+		_music.stop()
+	# Всё, что крокодил разложил по сцене. Само оно не уберётся: дерево на паузе,
+	# а убирают это твины и они замирают вместе с ним — на экране смерти остались
+	# бы висеть красная вспышка, нить прицела и «ТАПАЙ!».
+	for grp in ["croc_tail", "bullet", "croc_fx"]:
+		for n in get_tree().get_nodes_in_group(grp):
+			if is_instance_valid(n):
+				n.queue_free()
+	# Тряска экрана двигает КОРЕНЬ СЦЕНЫ. Замерев на паузе, она оставила бы весь
+	# мир сдвинутым набок.
+	if is_instance_valid(_game_root):
+		_game_root.position = Vector2.ZERO
+	_drop_shells()
+	# В тестовом режиме на `tree_exited` висит возврат интерфейса забега. Сейчас
+	# возвращать нечего: сверху экран смерти, и стопка выехала бы под него.
+	for c in tree_exited.get_connections():
+		tree_exited.disconnect(c["callable"])
+	queue_free()
 
 # ── Позы ─────────────────────────────────────────────────────────────────────
 
@@ -213,21 +263,21 @@ func _run_boss() -> void:
 	_music.play()
 
 	await _intro()
-	if not is_instance_valid(self):
+	if not _alive():
 		return
 	_build_shells()
 
 	await _act_hunt()
-	if not is_instance_valid(self): return
+	if not _alive(): return
 	_burn_shell(0)
 	await _act_tail()
-	if not is_instance_valid(self): return
+	if not _alive(): return
 	_burn_shell(1)
 	await _act_shotgun()
-	if not is_instance_valid(self): return
+	if not _alive(): return
 	_burn_shell(2)
 	await _finale()
-	if not is_instance_valid(self): return
+	if not _alive(): return
 
 	current_act = "done"
 	_music.stop()
@@ -259,7 +309,7 @@ func _intro() -> void:
 	tw_in.tween_property(self, "position:x", vp.x - W_INTRO * 0.62, 0.85)\
 		.set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 	await tw_in.finished
-	if not is_instance_valid(self):
+	if not _alive():
 		return
 	_play_sfx(SFX_ROAR)
 	_screen_shake(12.0, 9)
@@ -270,16 +320,16 @@ func _intro() -> void:
 		shake.tween_property(_sprite, "rotation", -0.09, 0.07)
 	shake.tween_property(_sprite, "rotation", 0.0, 0.07)
 	await get_tree().create_timer(0.45).timeout
-	if not is_instance_valid(self):
+	if not _alive():
 		return
 
 	await _show_speech()
-	if not is_instance_valid(self):
+	if not _alive():
 		return
 	var tw_vol := create_tween()
 	tw_vol.tween_property(_music, "volume_db", -3.0, 2.4)
 	await _show_banner()
-	if not is_instance_valid(self):
+	if not _alive():
 		return
 	if is_instance_valid(_normaldo) and _normaldo.has_method("enable_input"):
 		_normaldo.enable_input()
@@ -385,8 +435,17 @@ func _show_banner() -> void:
 # Ствол ведёт за головой ПОСТОЯННО — по этому и читается «пока он целится, я
 # ещё жив». Опасен не доворот, а нить: она загорается, замирает, и вот по ней
 # уже прилетит.
-const HUNT_SHOTS  : int   = 6
-const HUNT_PERIOD : float = 2.2
+#
+# Акт РАЗГОНЯЕТСЯ. Раньше все шесть выстрелов шли с одним шагом 2.2 с, и это
+# читалось как метроном: после второго выстрела игрок уже знал ровно всё, что
+# будет дальше, а впереди было ещё четыре таких же. Одинаковый ритм — это не
+# сложность и не лёгкость, это скука.
+#
+# Разгоняется ПАУЗА МЕЖДУ выстрелами, а не сам выстрел: нить по-прежнему висит
+# свои 0.45 с, и последний выстрел так же честен, как первый. Ускорять телеграф
+# значило бы отбирать у игрока не время на раздумье, а возможность увернуться.
+const HUNT_WAITS : Array = [1.45, 1.15, 0.85, 0.62, 0.42, 0.26]
+const HUNT_SHOTS : int   = 6      # = HUNT_WAITS.size(), см. проверку в тесте
 const LASER_T     : float = 0.45   # столько нить висит, прежде чем выстрел
 const TRACK_LERP  : float = 0.055  # насколько лениво он едет за линией игрока
 
@@ -402,18 +461,18 @@ func _act_hunt() -> void:
 	await tw.finished
 	_tracking = true
 
-	for i in HUNT_SHOTS:
-		if not is_instance_valid(self):
+	for i in HUNT_WAITS.size():
+		if not _alive():
 			return
-		await get_tree().create_timer(HUNT_PERIOD - LASER_T - 0.3).timeout
-		if not is_instance_valid(self):
+		await get_tree().create_timer(float(HUNT_WAITS[i])).timeout
+		if not _alive():
 			return
 		# Передёрг — по нему слышно и видно, что сейчас будет выстрел.
 		_play_sfx(SFX_RELOAD)
 		for f in F_RELOAD_UP:
 			_set_pose(f)
 			await get_tree().create_timer(0.09).timeout
-			if not is_instance_valid(self):
+			if not _alive():
 				return
 		# Нить ФИКСИРУЕТ направление: дальше он уже не доводит.
 		_tracking = false
@@ -423,22 +482,22 @@ func _act_hunt() -> void:
 		var dir  := (to - from).normalized()
 		_laser(from, from + dir * vp.length(), LASER_T)
 		await get_tree().create_timer(LASER_T).timeout
-		if not is_instance_valid(self):
+		if not _alive():
 			return
 		_set_pose(F_SNIPE[0])
 		await get_tree().create_timer(0.06).timeout
-		if not is_instance_valid(self):
+		if not _alive():
 			return
 		_set_pose(F_SNIPE[1])
 		_play_sfx(SFX_SNIPER)
 		_fire(_muzzle(MUZZLE_AIM), dir, SNIPE_SPEED)
 		_recoil()
 		await get_tree().create_timer(0.10).timeout
-		if not is_instance_valid(self):
+		if not _alive():
 			return
 		_set_pose(F_SNIPE[2])
 		await get_tree().create_timer(0.16).timeout
-		if not is_instance_valid(self):
+		if not _alive():
 			return
 		_set_pose(F_RELOAD_UP[0])
 		_tracking = true
@@ -463,6 +522,7 @@ func _laser(from: Vector2, to: Vector2, dur: float) -> void:
 	l.default_color = Color(1.0, 0.16, 0.12, 0.0)
 	l.z_index       = 39
 	l.points        = PackedVector2Array([from, to])
+	l.add_to_group("croc_fx")
 	_game_root.add_child(l)
 	var tw := l.create_tween()
 	tw.tween_property(l, "default_color:a", 0.85, dur * 0.35)
@@ -514,14 +574,22 @@ func _act_tail() -> void:
 	await tw.finished
 
 	for i in TAIL_SWEEPS.size():
-		if not is_instance_valid(self):
+		if not _alive():
 			return
 		var s : Dictionary = TAIL_SWEEPS[i]
+		# Приманка ложится ПЕРВОЙ, до свечения: она должна успеть позвать, иначе
+		# это не выбор, а надпись «не ходи туда».
+		await _bait_trail(String(s["side"]))
+		if not _alive():
+			return
+		await get_tree().create_timer(0.30).timeout
+		if not _alive():
+			return
 		await _edge_glow(String(s["side"]), TAIL_GLOW_T)
-		if not is_instance_valid(self):
+		if not _alive():
 			return
 		await _tail_sweep(String(s["side"]), float(s["speed"]))
-		if not is_instance_valid(self):
+		if not _alive():
 			return
 		# Между проходами — пицца на свободной стороне. Акт не должен быть
 		# чистым уворотом: голый уворот читается как наказание, а не как бой.
@@ -530,6 +598,39 @@ func _act_tail() -> void:
 				vp.y * (-0.34 if String(s["side"]) == "bottom" else 0.34)))
 			await get_tree().create_timer(0.35).timeout
 
+# ── Приманка перед взмахом ───────────────────────────────────────────────────
+# Голый уворот — это «угадал / не угадал», и играется как наказание. Дорожка
+# делает из него ВЫБОР: еда лежит ровно там, откуда сейчас выйдет хвост, и идти
+# за ней можно ровно настолько, насколько успеваешь вернуться в щель.
+#
+# Появляются штуки ПО ОДНОЙ, от щели вглубь перекрываемой полосы и к тому краю,
+# из которого хвост стартует. Порядок появления и есть стрелка: глаз идёт за
+# последней появившейся, а она всегда ближе к хвосту.
+#
+# Дорожка кладётся ДО свечения края — если позвать одновременно с
+# предупреждением, звать уже поздно, и приманка превращается в декорацию.
+const BAIT_COUNT : int   = 6
+const BAIT_STEP  : float = 0.07   # с, между появлениями соседних
+const BAIT_SPEED : float = 90.0   # почти стоят: дорожка обязана читаться формой
+
+func _bait_trail(side: String) -> void:
+	var vp := get_viewport_rect().size
+	# Снизу хвост идёт СЛЕВА направо и перекрывает низ — значит зовём вниз-влево.
+	# Сверху всё зеркально.
+	var from_p : Vector2 = Vector2(vp.x * 0.72, vp.y * 0.30) if side == "bottom" \
+		else Vector2(vp.x * 0.28, vp.y * 0.70)
+	var to_p   : Vector2 = Vector2(vp.x * 0.12, vp.y * 0.84) if side == "bottom" \
+		else Vector2(vp.x * 0.88, vp.y * 0.16)
+	# Один вид на дорожку: смесь пицц и долларов читается как россыпь, а нужна
+	# именно линия.
+	var kind : String = "pizza" if randf() < 0.6 else "dollar"
+	for i in BAIT_COUNT:
+		if not _alive():
+			return
+		var t : float = float(i) / float(BAIT_COUNT - 1)
+		_drop_loot(from_p.lerp(to_p, t), BAIT_SPEED, kind)
+		await get_tree().create_timer(BAIT_STEP).timeout
+
 func _edge_glow(side: String, dur: float) -> void:
 	var vp := get_viewport_rect().size
 	var g := ColorRect.new()
@@ -537,6 +638,7 @@ func _edge_glow(side: String, dur: float) -> void:
 	g.size  = Vector2(vp.x, 14.0)
 	g.position = Vector2(0.0, vp.y - 14.0 if side == "bottom" else 0.0)
 	g.z_index  = 38
+	g.add_to_group("croc_fx")
 	_game_root.add_child(g)
 	var tw := g.create_tween()
 	tw.set_loops(2)
@@ -601,8 +703,19 @@ func _tail_sweep(side: String, speed: float) -> void:
 # ── Акт 3: КАРТЕЧЬ, ЗЛАЯ КАРТЕЧЬ И ПАСТЬ ─────────────────────────────────────
 const BUCK_SHOTS  : int   = 4
 const BUCK_PERIOD : float = 1.5
-const BUCK_SPREAD : float = 92.0    # разлёт крайних дробин по вертикали
-const RAGE_SPREAD : float = 58.0
+
+# Разлёт дробин. Считать его надо ПО ХИТБОКСАМ, а не по расстоянию между
+# центрами: у Нормальдо радиус 32, у дробины ~11.6, значит центр игрока обязан
+# быть дальше 44 px от каждой дробины, и проход между соседними — это
+# `разлёт − 88`.
+#
+# Стояло 92 и 58. То есть у обычной картечи проход был 4 пикселя, а у злой
+# дробины перекрывались с запасом: «выбери сторону» на бумаге, сплошная стена на
+# экране. Уворот, которого физически нет, — это не сложность, это отнятая жизнь.
+const PELLET_CLEAR : float = 88.0   # 2 × (32 Нормальдо + 11.6 дробина), с запасом
+const BUCK_SPREAD  : float = 152.0  # проход 64 px — ровно один Нормальдо
+const RAGE_SPREAD  : float = 130.0  # проход 42: злая картечь и должна быть теснее
+
 const LUNGE_TAPS  : int   = 12
 const LUNGE_TIME  : float = 4.0
 
@@ -620,31 +733,31 @@ func _act_shotgun() -> void:
 	# всегда остаётся свободной — веер читается как «выбери сторону», а не как
 	# стена, от которой не уйти.
 	for i in BUCK_SHOTS:
-		if not is_instance_valid(self):
+		if not _alive():
 			return
 		await _buckshot(3, BUCK_SPREAD)
-		if not is_instance_valid(self):
+		if not _alive():
 			return
 		await get_tree().create_timer(BUCK_PERIOD).timeout
 
 	# 3.2 Злая картечь — та самая анимация, которая в старом проекте ни разу не
 	# сыграла. Рёв и красная вспышка дают 0.8 с на то, чтобы уйти.
-	if not is_instance_valid(self):
+	if not _alive():
 		return
 	_play_sfx(SFX_ROAR)
 	_screen_flash(Color(1.0, 0.15, 0.10))
 	_screen_shake(9.0, 7)
 	await get_tree().create_timer(0.8).timeout
-	if not is_instance_valid(self):
+	if not _alive():
 		return
 	await _rage_volley()
 
 	# 3.3 ПАСТЬ — единственный такт, где игрок бьёт в ответ.
 	for i in 2:
-		if not is_instance_valid(self):
+		if not _alive():
 			return
 		await get_tree().create_timer(0.6).timeout
-		if not is_instance_valid(self):
+		if not _alive():
 			return
 		await _jaw_lunge()
 
@@ -652,7 +765,7 @@ func _buckshot(count: int, spread: float) -> void:
 	for f in [F_RELOAD_DOWN[1], F_SHOT_DOWN[0], F_SHOT_DOWN[1], F_SHOT_DOWN[2]]:
 		_set_pose(f)
 		await get_tree().create_timer(0.07).timeout
-		if not is_instance_valid(self):
+		if not _alive():
 			return
 	_set_pose(F_SHOT_DOWN[3])          # кадр со вспышкой — на нём и стреляем
 	_play_sfx(SFX_BUCKSHOT)
@@ -665,7 +778,7 @@ func _buckshot(count: int, spread: float) -> void:
 		_fire(from, (base + Vector2(0.0, off) - from).normalized(), SHOT_SPEED)
 	_recoil()
 	await get_tree().create_timer(0.10).timeout
-	if not is_instance_valid(self):
+	if not _alive():
 		return
 	_set_pose(F_SHOT_DOWN[4])
 
@@ -673,7 +786,7 @@ func _rage_volley() -> void:
 	# Два залпа по пять дробин: перекрывают четыре линии из пяти. Это самый
 	# плотный момент битвы, и он ровно один.
 	for idx in F_RAGE.size():
-		if not is_instance_valid(self):
+		if not _alive():
 			return
 		_set_pose(F_RAGE[idx])
 		if idx == 3 or idx == 5:       # кадры с раскрытой пастью и вспышкой
@@ -711,18 +824,18 @@ func _jaw_lunge() -> void:
 	var chomp := create_tween()
 	chomp.set_loops(int(LUNGE_TIME / 0.28) + 1)
 	chomp.tween_callback(func() -> void:
-		if is_instance_valid(self) and _lunging:
+		if _alive() and _lunging:
 			_set_pose(F_RAGE[3]))
 	chomp.tween_interval(0.14)
 	chomp.tween_callback(func() -> void:
-		if is_instance_valid(self) and _lunging:
+		if _alive() and _lunging:
 			_set_pose(F_RAGE[4]))
 	chomp.tween_interval(0.14)
 
 	var reach_x : float = (_normaldo.global_position.x + 60.0) if is_instance_valid(_normaldo) \
 		else vp.x * 0.25
 	var t := 0.0
-	while t < LUNGE_TIME and _lunge_hp > 0 and is_instance_valid(self):
+	while t < LUNGE_TIME and _lunge_hp > 0 and _alive():
 		await get_tree().process_frame
 		var dt := get_process_delta_time()
 		t += dt
@@ -734,7 +847,7 @@ func _jaw_lunge() -> void:
 		chomp.kill()
 	if is_instance_valid(hint):
 		hint.queue_free()
-	if not is_instance_valid(self):
+	if not _alive():
 		return
 	# Не отбился — удар. Отбился — уходит сам.
 	if _lunge_hp > 0 and position.x <= reach_x + 4.0:
@@ -778,6 +891,7 @@ func _tap_hint() -> Label:
 	l.size                 = Vector2(vp.x, 30.0)
 	l.position             = Vector2(0.0, vp.y * 0.12)
 	l.z_index              = 60
+	l.add_to_group("croc_fx")
 	_game_root.add_child(l)
 	UiKit.pulse(l, "scale", Vector2(1.14, 1.14), Vector2.ONE, 0.22)
 	return l
@@ -785,12 +899,12 @@ func _tap_hint() -> Label:
 func _spit_loot() -> void:
 	_drop_loot(_muzzle(MUZZLE_RAGE))
 
-func _drop_loot(at: Vector2) -> void:
+func _drop_loot(at: Vector2, speed: float = 240.0, kind: String = "") -> void:
 	if not is_instance_valid(_spawner):
 		return
-	var as_pizza := randf() < 0.62
+	var as_pizza : bool = randf() < 0.62 if kind == "" else kind == "pizza"
 	var item := ITEM_SCENE.instantiate()
-	item.speed      = 240.0
+	item.speed      = speed
 	item.is_eatable = as_pizza
 	item.damage     = 0
 	item.rotates    = true
@@ -815,7 +929,7 @@ func _finale() -> void:
 	tw.tween_property(self, "position", Vector2(vp.x * 0.72, vp.y * 0.5), 0.5)\
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	await tw.finished
-	if not is_instance_valid(self):
+	if not _alive():
 		return
 	_set_pose(F_IDLE, W_FIGHT)
 
@@ -831,7 +945,7 @@ func _finale() -> void:
 	fall.tween_property(pie, "position:y", vp.y * 0.5 - 6.0, 0.45)\
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	await fall.finished
-	if not is_instance_valid(self):
+	if not _alive():
 		return
 	_screen_shake(5.0, 4)
 
@@ -839,11 +953,11 @@ func _finale() -> void:
 	for i in 3:
 		_set_pose(F_SQUINT)
 		await get_tree().create_timer(0.22).timeout
-		if not is_instance_valid(self):
+		if not _alive():
 			return
 		_set_pose(F_IDLE)
 		await get_tree().create_timer(0.22).timeout
-		if not is_instance_valid(self):
+		if not _alive():
 			return
 	if is_instance_valid(pie):
 		pie.queue_free()
@@ -864,7 +978,7 @@ func _finale() -> void:
 	sweep.tween_property(big, "position:x", -big_len * 0.5, 0.55).set_trans(Tween.TRANS_LINEAR)
 
 	await get_tree().create_timer(0.26).timeout
-	if not is_instance_valid(self):
+	if not _alive():
 		return
 	_play_sfx(SFX_TAIL_HIT)
 	_screen_shake(16.0, 10)
@@ -953,6 +1067,7 @@ func _screen_flash(col: Color) -> void:
 		return
 	var cl := CanvasLayer.new()
 	cl.layer = 97
+	cl.add_to_group("croc_fx")
 	_game_root.add_child(cl)
 	var r := ColorRect.new()
 	r.color = Color(col.r, col.g, col.b, 0.0)
