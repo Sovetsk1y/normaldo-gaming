@@ -18,7 +18,7 @@ const CROC := preload("res://scripts/leatherhead.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 42
+const EXPECTED_CHECKS : int = 47
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -41,6 +41,10 @@ func _initialize() -> void:
 	await _test_shotgun()
 	print("── Акт 3: сквозь картечь можно пройти ──")
 	await _test_buckshot_gap()
+	print("── Акт 3: злая картечь бьёт трижды ──")
+	await _test_rage_volleys()
+	print("── Акт 3: пасть доходит до игрока ──")
+	await _test_jaw_reaches()
 	print("── Смерть игрока обрывает битву ──")
 	await _test_death_stops()
 	print("── Битва доходит до конца ──")
@@ -419,7 +423,7 @@ func _test_buckshot_gap() -> void:
 	await process_frame
 	# Злая картечь — самый плотный момент битвы, но и он обязан оставлять проход.
 	c.call("_rage_volley")
-	var gap_rage : float = await _pellet_gap(e["n"], 5, px, pr)
+	var gap_rage : float = await _pellet_gap(e["n"], int(CROC.RAGE_PELLETS), px, pr)
 	_check(gap_rage > 20.0, "злая картечь: проход %.0f px — теснее, но он есть" % gap_rage)
 	e["game"].queue_free()
 	await process_frame
@@ -476,6 +480,73 @@ func _pellet_gap(n: Node2D, want: int, player_x: float, player_r: float) -> floa
 	# Проход для ЦЕНТРА Нормальдо: зазор минус по радиусу дробины с каждой
 	# стороны и минус его собственный радиус с каждой стороны.
 	return narrow - 2.0 * pellet_r - 2.0 * player_r
+
+# Злая картечь — три ОТДЕЛЬНЫХ залпа, а не один длинный. Два залпа подряд
+# читались как один выстрел: уходить от него надо было ровно раз. Считаем именно
+# события — по новым пулям, а не по их числу на экране.
+func _test_rage_volleys() -> void:
+	var e : Dictionary = await _boot()
+	var c : Node2D = _croc(e)
+	await process_frame
+	c.call("_rage_volley")
+	var seen    : Dictionary = {}
+	var volleys : Array = []       # время появления каждой новой порции
+	var t := 0.0
+	while t < 8.0:
+		get_root().get_tree().paused = false
+		await process_frame
+		t += 1.0 / 60.0
+		var fresh : int = 0
+		for b in get_root().get_tree().get_nodes_in_group("bullet"):
+			var id : int = b.get_instance_id()
+			if not seen.has(id):
+				seen[id] = true
+				fresh += 1
+		if fresh > 0:
+			volleys.append(fresh)
+	_check(volleys.size() == int(CROC.RAGE_VOLLEYS),
+		"залпов ровно %d: %s" % [CROC.RAGE_VOLLEYS, volleys])
+	var by_three := true
+	for n in volleys:
+		if int(n) != int(CROC.RAGE_PELLETS):
+			by_three = false
+	_check(by_three, "и в каждом по %d дробины: %s" % [CROC.RAGE_PELLETS, volleys])
+	e["game"].queue_free()
+	await process_frame
+
+# Не тапать — значит получить. Пасть проходит ВЕСЬ экран: первая версия ехала в
+# точку, где игрок стоял в начале такта, и не доезжала до неё вовсе, так что
+# последний такт битвы не мог ударить в принципе.
+func _test_jaw_reaches() -> void:
+	var e : Dictionary = await _boot()
+	var n : Node2D = e["n"]
+	var c : Node2D = _croc(e)
+	await process_frame
+	c.call("_jaw_lunge")
+	# Игрок уходит в сторону: доехать до старой точки — не то же самое, что
+	# достать игрока.
+	await _tick(0.5)
+	n.position.x = 90.0
+	var nose_min := INF
+	var t := 0.0
+	while t < 14.0 and bool(c.get("_lunging")):
+		get_root().get_tree().paused = false
+		await process_frame
+		t += 1.0 / 60.0
+		nose_min = minf(nose_min, c.position.x - CROC.W_JAW * 0.5)
+	_check(not bool(c.get("_lunging")), "такт закончился (%.1f с)" % t)
+	_check(nose_min <= n.position.x,
+		"пасть дошла до игрока: нос на %.0f при игроке на %.0f" % [nose_min, n.position.x])
+	# Удар засчитан. Нормальдо бессмертен, и `_take_hit` у него сводится к
+	# вспышке и неуязвимости — по ней и видно, что удар был.
+	var struck := false
+	for _i in 30:
+		await process_frame
+		if bool(n.get("_invincible")):
+			struck = true
+	_check(struck, "и удар засчитан")
+	e["game"].queue_free()
+	await process_frame
 
 # Забег окончен — босс обязан замолчать. Само по себе дерево на паузе его не
 # остановит: такты сшиты через get_tree().create_timer(), а тот тикает и на

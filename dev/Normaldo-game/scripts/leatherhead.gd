@@ -727,6 +727,9 @@ const RAGE_SPREAD  : float = 130.0  # проход 42: злая картечь �
 
 const LUNGE_TAPS  : int   = 12
 const LUNGE_TIME  : float = 4.0
+# На сколько нос заходит за левый край, если пасть не остановили: она проходит
+# ВЕСЬ экран, а не доезжает до точки, где игрок стоял в начале.
+const LUNGE_OVERSHOOT : float = 30.0
 
 func _act_shotgun() -> void:
 	current_act = "shotgun"
@@ -778,37 +781,57 @@ func _buckshot(count: int, spread: float) -> void:
 			return
 	_set_pose(F_SHOT_DOWN[3])          # кадр со вспышкой — на нём и стреляем
 	_play_sfx(SFX_BUCKSHOT)
-	var from := _muzzle(MUZZLE_DOWN)
-	var base : Vector2 = _normaldo.global_position if is_instance_valid(_normaldo) \
-		else from + Vector2(-400.0, 0.0)
-	var half : int = count / 2
-	for i in count:
-		var off : float = float(i - half) * spread
-		_fire(from, (base + Vector2(0.0, off) - from).normalized(), SHOT_SPEED)
+	_fire_fan(_muzzle(MUZZLE_DOWN), count, spread)
 	_recoil()
 	await get_tree().create_timer(0.10).timeout
 	if not _alive():
 		return
 	_set_pose(F_SHOT_DOWN[4])
 
+# Три залпа по три дробины, и каждый наводится ЗАНОВО.
+#
+# Было два по пять: дробин больше, а СОБЫТИЙ меньше — два залпа подряд читаются
+# как один длинный выстрел, и уходить от него надо ровно один раз. Три залпа с
+# перенаводкой заставляют двигаться трижды, и каждый раз он стреляет туда, куда
+# игрок только что ушёл.
+const RAGE_VOLLEYS : int = 3
+const RAGE_PELLETS : int = 3
+
+# Веер: дробины расходятся от одной точки к линиям, разнесённым на `spread` в
+# ПЛОСКОСТИ ИГРОКА. Наводится на то, где он сейчас, — телеграфом тут служит сам
+# замах, а не нить: картечь бьёт по площади, и уходить надо не с линии, а вбок.
+func _fire_fan(from: Vector2, count: int, spread: float) -> void:
+	var base : Vector2 = _normaldo.global_position if is_instance_valid(_normaldo) \
+		else from + Vector2(-400.0, 0.0)
+	var half : int = count / 2
+	for i in count:
+		var off : float = float(i - half) * spread
+		_fire(from, (base + Vector2(0.0, off) - from).normalized(), SHOT_SPEED)
+
 func _rage_volley() -> void:
-	# Два залпа по пять дробин: перекрывают четыре линии из пяти. Это самый
-	# плотный момент битвы, и он ровно один.
-	for idx in F_RAGE.size():
+	# Заход: три кадра, на которых он только раскрывается.
+	for idx in 3:
 		if not _alive():
 			return
 		_set_pose(F_RAGE[idx])
-		if idx == 3 or idx == 5:       # кадры с раскрытой пастью и вспышкой
-			_play_sfx(SFX_BUCKSHOT)
-			var from := _muzzle(MUZZLE_RAGE)
-			var base : Vector2 = _normaldo.global_position if is_instance_valid(_normaldo) \
-				else from + Vector2(-400.0, 0.0)
-			for i in 5:
-				var off : float = float(i - 2) * RAGE_SPREAD
-				_fire(from, (base + Vector2(0.0, off) - from).normalized(), SHOT_SPEED)
-			_recoil()
-			_screen_shake(6.0, 5)
 		await get_tree().create_timer(0.14).timeout
+	for v in RAGE_VOLLEYS:
+		if not _alive():
+			return
+		_set_pose(F_RAGE[3])           # пасть раскрыта, вспышка
+		_play_sfx(SFX_BUCKSHOT)
+		_fire_fan(_muzzle(MUZZLE_RAGE), RAGE_PELLETS, RAGE_SPREAD)
+		_recoil()
+		_screen_shake(6.0, 5)
+		await get_tree().create_timer(0.16).timeout
+		if not _alive():
+			return
+		_set_pose(F_RAGE[4])           # пасть закрылась — вот тут и уходить
+		await get_tree().create_timer(0.34).timeout
+	if not _alive():
+		return
+	_set_pose(F_RAGE[6])
+	await get_tree().create_timer(0.16).timeout
 
 # Пасть: крокодил ВО ВЕСЬ ЭКРАН идёт на игрока, тапы его отталкивают. Это
 # возвращённый «РАЗДУВ» из старого замысла — единственная точка битвы, где игрок
@@ -849,19 +872,29 @@ func _jaw_lunge() -> void:
 			_set_pose(F_RAGE[4]))
 	chomp.tween_interval(0.14)
 
-	# Докуда он дойдёт, если не отбиться: пасть накрывает игрока целиком.
-	# Считается от НОСА (левого края пасти), а не от центра — иначе гигантский
-	# спрайт «доезжал» до игрока, уже давно его проглотив.
-	var reach_x : float = ((_normaldo.global_position.x if is_instance_valid(_normaldo) \
-		else vp.x * 0.22) + W_JAW * 0.5)
+	# Не отбился — пасть проходит ВЕСЬ экран, а не доезжает до точки, где игрок
+	# стоял в начале. Первая версия целилась именно в ту точку и промахивалась
+	# дважды: игрок за четыре секунды успевал отойти, а «доехал» проверялось
+	# сравнением с точностью до кадра и не срабатывало вовсе. Уйти от пасти
+	# нельзя ни вбок, ни назад — в этом весь такт.
 	var start_x : float = position.x
+	var end_x   : float = W_JAW * 0.5 - LUNGE_OVERSHOOT
+	var speed   : float = (start_x - end_x) / LUNGE_TIME
+	var hit     : bool  = false
 	var t := 0.0
-	while t < LUNGE_TIME and _lunge_hp > 0 and _alive():
+	# Верхняя граница — страховка, а не хронометраж: тапы отталкивают, и дорога
+	# у него от этого длиннее. Кончатся тапы — кончится и она.
+	while _lunge_hp > 0 and _alive() and t < LUNGE_TIME * 2.5:
 		await get_tree().process_frame
 		var dt := get_process_delta_time()
 		t += dt
-		position.x -= ((start_x - reach_x) / LUNGE_TIME) * dt
-		if position.x <= reach_x:
+		position.x -= speed * dt
+		# Нос дошёл до игрока — это и есть удар, где бы тот ни стоял.
+		if is_instance_valid(_normaldo) \
+				and position.x - W_JAW * 0.5 <= _normaldo.global_position.x:
+			hit = true
+			break
+		if position.x <= end_x:
 			break
 	_lunging    = false
 	_lunge_hint = null
@@ -872,7 +905,7 @@ func _jaw_lunge() -> void:
 	if not _alive():
 		return
 	# Не отбился — удар. Отбился — уходит сам.
-	if _lunge_hp > 0 and position.x <= reach_x + 4.0:
+	if hit:
 		if is_instance_valid(_normaldo) and _normaldo.has_method("_take_hit"):
 			_normaldo.call("_take_hit", 1)
 		_play_sfx(SFX_TAIL_HIT)
