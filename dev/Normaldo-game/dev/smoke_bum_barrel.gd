@@ -12,7 +12,7 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 18
+const EXPECTED_CHECKS : int = 20
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -89,13 +89,25 @@ func _initialize() -> void:
 		_finish()
 		return
 
-	# Размеры. Отзыв был буквально «бомж маленький, бочка ещё меньше»: обе
-	# картинки нормировались ПО КАДРУ, а у бочки рисунок занимает половину кадра.
-	# Меряем нарисованное, а не рамку.
+	# РАЗМЕР. Бомж обязан быть ровно таким же, как рядовой бомж из потока: от
+	# обычного предмета он отличается не размером, а тем, что умеет отыграть сцену
+	# и кинуть пса. Сравнивается с НАСТОЯЩИМ бомжом, а не с числом в комментарии —
+	# поменяется размер потока, поменяется и здесь.
+	var ref : Node2D = load("res://scenes/homeless.tscn").instantiate()
+	sp.add_child(ref)
+	await process_frame
+	var ref_px : float = _drawn_h(ref.get_node("Sprite2D"))
 	var bum_px : float = _drawn_h(bum)
-	var bar_px : float = _drawn_h(bar)
-	_check(bum_px > 100.0, "бомж крупный: %.0f px (рядовой в волне — 66)" % bum_px)
-	_check(bar_px > 90.0, "бочка не мельче собаки: %.0f px (собака — 96)" % bar_px)
+	_check(absf(bum_px - ref_px) < 6.0,
+		"бомж такой же, как рядовой из потока: %.0f против %.0f" % [bum_px, ref_px])
+	ref.queue_free()
+
+	# У бочки ТЕЛО обязано быть одинаковым в обоих кадрах. Нормируй её по рисунку —
+	# и на смене кадра тело ужмётся: у открытого сорванная крышка тянет контент
+	# вверх, 165 пикселей против 107.
+	var body_closed : float = _body_h(bar)
+	_check(body_closed < bum_px,
+		"бочка меньше бомжа, он её несёт: %.0f против %.0f" % [body_closed, bum_px])
 
 	# Сначала — обычный предмет потока: летит с той же скоростью, ничего не
 	# отыгрывает. Именно на фоне этого читается последующее торможение.
@@ -121,6 +133,13 @@ func _initialize() -> void:
 	# «этот бьёт». В сет-писе она врала: бьёт собака, а не бочка.
 	_check(bar.texture == load("res://assets/items/barrel_open2.png"),
 		"к выстрелу бочка ОТКРЫТА — вторым кадром, а не мусоркой из потока")
+	# И лежит НА БОКУ: только лёжа у неё горло смотрит влево, туда, куда полетит
+	# собака. Упавшая стоймя бочка читается как «поставил», а не «уронил».
+	_check(absf(bar.rotation + PI * 0.5) < 0.1,
+		"и лежит на боку: поворот %.2f при ожидаемом -1.57" % bar.rotation)
+	_check(absf(_body_h(bar) - body_closed) < 2.0,
+		"тело бочки на смене кадра не изменилось: %.0f и %.0f"
+			% [body_closed, _body_h(bar)])
 	var dogs : Array = _dog_nodes(sp)
 	_check(dogs.size() >= 1, "собака вылетела: %d" % dogs.size())
 	if not dogs.is_empty():
@@ -135,13 +154,18 @@ func _initialize() -> void:
 		_check(float(d.get("speed")) > 250.0 * 1.4,
 			"и заметно быстрее потока: %.0f против 250" % float(d.get("speed")))
 
-	# Бочку он БРОСАЕТ. Раньше уезжала вся сцена целиком, и бомж утаскивал
-	# только что поставленную бочку за собой.
-	await _wait(0.6)
+	# Дальше он ЕДЕТ С ПОТОКОМ, а не улетает рывком за край. Отличие сет-писа от
+	# обычного предмета — только в том, что по дороге он умеет отыграть сцену.
+	var gap0 : float = bum.global_position.x - bar.global_position.x
+	var sx0  : float = node.position.x
+	await _wait(0.5)
 	if is_instance_valid(node):
-		_check(bum.global_position.x < bar.global_position.x,
-			"ушёл, бочку бросил: бомж %.0f, бочка %.0f"
-				% [bum.global_position.x, bar.global_position.x])
+		var v_out : float = (sx0 - node.position.x) / 0.5
+		_check(absf(v_out - 250.0) < 60.0,
+			"дальше едет со скоростью потока: %.0f против 250" % v_out)
+		var gap1 : float = bum.global_position.x - bar.global_position.x
+		_check(absf(gap1 - gap0) < 4.0,
+			"и везёт бочку с собой, не убегая от неё: зазор %.0f → %.0f" % [gap0, gap1])
 	_finish()
 
 func _labels(node: Node, out: Array) -> void:
@@ -149,6 +173,12 @@ func _labels(node: Node, out: Array) -> void:
 		out.append(String((node as Label).text))
 	for c in node.get_children():
 		_labels(c, out)
+
+# Высота ТЕЛА бочки — рисунка ЗАКРЫТОГО кадра, без сорванной крышки. Именно оно
+# обязано совпадать между кадрами; общий контент у них разный по построению.
+func _body_h(spr: Sprite2D) -> float:
+	var r : Rect2i = ItemSizing.content_rect(load("res://assets/items/barrel_open1.png"))
+	return float(r.size.y) * absf(spr.scale.y)
 
 # Высота НАРИСОВАННОГО на экране, а не рамки кадра.
 func _drawn_h(spr: Sprite2D) -> float:
