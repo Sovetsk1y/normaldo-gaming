@@ -245,7 +245,7 @@ var _dev_immortal_lbl  : Label     = null
 # debug_collisions_hint so newly-spawned items inherit the state.
 var _dev_collisions_btn  : Node2D    = null
 var _dev_boss_btn        : Node2D    = null
-var _dev_croc_btn        : Node2D    = null
+var _croc_btn        : Node2D    = null
 var _dev_phase_btn       : Node2D    = null
 var _dev_phase_lbl       : Label     = null
 var _dev_collisions_bg   : ColorRect = null
@@ -1557,9 +1557,17 @@ func _apply_menu_caption_fx(lbl: Label) -> void:
 #
 # Размер задаётся в координатах полотна 430×192, как и у старых кнопок: так
 # кнопки не разъезжаются между устройствами и остаются там же, где стояли.
-const MENU_ICON_CANVAS  : float = 28.0   # сторона кадра иконки, канвас-px
+const MENU_ICON_CANVAS  : float = 34.0   # сторона кадра иконки, канвас-px
 const MENU_ICON_CAP_H   : float = 12.0   # полоса под подпись
-const MENU_ICON_CAP_W_K : float = 2.6    # подпись шире шайбы: «НАСТРОЙКИ» длинная
+const MENU_ICON_CAP_W_K : float = 2.2    # подпись шире шайбы: «НАСТРОЙКИ» длинная
+# Какую долю кадра занимает сама шайба по высоте. Замер: плотный круг лежит в
+# (10,10)–(44,44) кадра 55×55, то есть 35 из 55, и низ круга приходится на 0.82
+# высоты кадра. Остальное — нарисованное свечение, оно прозрачное.
+#
+# Подпись сажается ровно на эту границу, а не под весь кадр. По кадру она уезжала
+# на восемнадцать процентов высоты вниз — то есть на пустоту, — и читалась как
+# подпись к чему-то ниже, а не к шайбе.
+const MENU_ICON_DISC_BOTTOM : float = 0.82
 
 func _build_menu_icon_btn(
 		vp: Vector2,
@@ -1574,11 +1582,12 @@ func _build_menu_icon_btn(
 	var icon_w : float = MENU_ICON_CANVAS * scale_x
 	var icon_h : float = MENU_ICON_CANVAS * scale_y
 	var cap_h  : float = MENU_ICON_CAP_H * scale_y
+	var cap_y  : float = icon_h * MENU_ICON_DISC_BOTTOM   # низ шайбы, не кадра
 
 	# Контейнер накрывает шайбу И подпись: усадка при нажатии обязана двигать их
 	# вместе, иначе подпись «отклеивается» от иконки на каждое касание.
 	var visual_root := Control.new()
-	visual_root.size         = Vector2(icon_w, icon_h + cap_h)
+	visual_root.size         = Vector2(icon_w, cap_y + cap_h)
 	visual_root.position     = Vector2(top_left.x * scale_x, top_left.y * scale_y)
 	visual_root.pivot_offset = visual_root.size * 0.5
 	visual_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1607,7 +1616,7 @@ func _build_menu_icon_btn(
 		lbl.size                 = Vector2(cap_w, cap_h)
 		# Подпись шире шайбы и центрируется по ней, поэтому уезжает влево на
 		# половину разницы.
-		lbl.position             = Vector2(-(cap_w - icon_w) * 0.5, icon_h - 2.0)
+		lbl.position             = Vector2(-(cap_w - icon_w) * 0.5, cap_y)
 		lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 		visual_root.add_child(lbl)
 
@@ -1619,6 +1628,10 @@ func _build_menu_icon_btn(
 	hit.pressed.connect(_play_btn_sfx)
 	hit.pressed.connect(callback)
 	hit.set_meta("visual_root", visual_root)
+	# Метку «есть что забрать» вешают на УГОЛ ШАЙБЫ, а не кадра: кадр шире круга
+	# на нарисованное свечение, и по кадру точка отъезжала в прозрачное поле —
+	# читалась как оторвавшаяся от кнопки.
+	hit.set_meta("icon_size", Vector2(icon_w, icon_h))
 	hit.button_down.connect(_menu_btn_press_anim.bind(visual_root, true))
 	hit.button_up.connect(_menu_btn_press_anim.bind(visual_root, false))
 	hit.mouse_exited.connect(_menu_btn_press_anim.bind(visual_root, false))
@@ -1650,9 +1663,14 @@ func _attach_canvas_badge(parent: Button, visible_on_start: bool) -> TextureRect
 	# overlay with absolute positioning if not.
 	var visual_root : Control = parent.get_meta("visual_root", null)
 	if visual_root != null:
-		# Offsets are relative to visual_root (icon's bounding box).
-		# x: 10 px in from the right edge of the icon, y: 4 px above the top.
-		badge.position = Vector2(visual_root.size.x - 10.0, -4.0)
+		# Верхний правый угол ШАЙБЫ. Кадр иконки шире круга на нарисованное
+		# свечение (круг — 0.64 кадра), и точка, посаженная по кадру, отъезжала в
+		# прозрачное поле: со стороны читалась как оторвавшаяся от кнопки, а у
+		# нижних кнопок — как метка соседней сверху.
+		var icon_sz : Vector2 = parent.get_meta("icon_size", visual_root.size)
+		badge.position = Vector2(
+			icon_sz.x * MENU_ICON_DISC_BOTTOM - badge.size.x * 0.5,
+			icon_sz.y * (1.0 - MENU_ICON_DISC_BOTTOM) - badge.size.y * 0.5)
 		visual_root.add_child(badge)
 	else:
 		badge.position = Vector2(parent.position.x + parent.size.x - 20.0, parent.position.y - 4.0)
@@ -1689,7 +1707,7 @@ func _build_menu_logo(vp: Vector2) -> void:
 func _build_menu_settings_btn(vp: Vector2) -> void:
 	# Шайба стоит там же, где стояла старая иконка: центр прежний, поэтому
 	# раскладка меню не поехала. Кегль 11 — «НАСТРОЙКИ» самая длинная подпись.
-	_build_menu_icon_btn(vp, MENU_ICON_SETTINGS, Vector2(6, 12),
+	_build_menu_icon_btn(vp, MENU_ICON_SETTINGS, Vector2(3, 10),
 		"НАСТРОЙКИ", _show_settings_modal, 11)
 
 # ── Book of teacher (top-center) ─────────────────────────────────────────────
@@ -1698,7 +1716,7 @@ func _build_menu_book_btn(vp: Vector2) -> void:
 	# btn_book.png bbox=(218,6)+(35,26); plate y=20..31 → within-bbox y=14..25.
 	# Caption is two-line «КНИГА\nУЧИТЕЛЯ». Story badge visibility is driven by
 	# QuestManager.has_story_badge() via _refresh_quest_badges.
-	var book_btn := _build_menu_icon_btn(vp, MENU_ICON_BOOK, Vector2(220, 8),
+	var book_btn := _build_menu_icon_btn(vp, MENU_ICON_BOOK, Vector2(217, 0),
 		"КНИГА\nУЧИТЕЛЯ", _show_achievements, 11)
 	_achieve_badge = _attach_canvas_badge(book_btn, QuestManager.has_story_badge())
 
@@ -1799,18 +1817,18 @@ func _build_menu_right_column(vp: Vector2) -> void:
 	# (27 / 45 / 34 канвас-px) — плашки с подписями были разной высоты, и ряд
 	# выравнивали по ним. Плашек больше нет, кнопки одинаковые, и шаг обязан
 	# быть одинаковым тоже.
-	var skins_btn := _build_menu_icon_btn(vp, MENU_ICON_SHOP, Vector2(353, 16),
+	var skins_btn := _build_menu_icon_btn(vp, MENU_ICON_SHOP, Vector2(350, 8),
 		"СКИНЫ", _on_shop_tapped)
 	_skins_badge = _attach_canvas_badge(skins_btn, SaveData.has_ready_mastery_chest())
 
-	_build_menu_icon_btn(vp, MENU_ICON_SLOTS, Vector2(353, 54),
+	_build_menu_icon_btn(vp, MENU_ICON_SLOTS, Vector2(350, 48),
 		"СЛОТЫ", _show_slots)
 
-	var quests_btn := _build_menu_icon_btn(vp, MENU_ICON_QUESTS, Vector2(353, 92),
+	var quests_btn := _build_menu_icon_btn(vp, MENU_ICON_QUESTS, Vector2(350, 88),
 		"ЗАДАНИЯ", _show_quests)
 	_quest_badge = _attach_canvas_badge(quests_btn, QuestManager.has_daily_badge())
 
-	_build_menu_icon_btn(vp, MENU_ICON_LEADERS, Vector2(353, 130),
+	_build_menu_icon_btn(vp, MENU_ICON_LEADERS, Vector2(350, 128),
 		"ЛИДЕРЫ", _show_leaderboard.bind(0))
 
 	# _achieve_badge is wired up directly on the book button now (see
@@ -5845,6 +5863,11 @@ func _start_game() -> void:
 	})
 	if is_endless:
 		call_deferred("_on_phase_entered", 0)
+	# КРОКОДИЛ — не дев-кнопка, а единственный вход в битву: в кампанию он пока
+	# не встроен, и без неё босса не увидит никто, включая тестеров. Поэтому
+	# стоит ВНЕ рубильника и уезжает вместе с ним только тогда, когда крокодил
+	# займёт своё место в кампании.
+	_build_croc_btn()
 	if DevFlags.ENABLED:
 		_build_dev_btn()
 		_build_dev_pizza_btn()
@@ -5852,7 +5875,6 @@ func _start_game() -> void:
 		_build_dev_thief_btn()
 		_build_dev_bum_wave_btn()
 		_build_dev_bum_barrel_btn()
-		_build_dev_croc_btn()
 		_build_dev_immortal_btn()
 		_build_dev_boss_btn()
 		_build_dev_phase_btn()
@@ -6300,29 +6322,35 @@ func _dev_summon_boss() -> void:
 		_dev_boss_btn = null
 	_on_boss_time()
 
-# Шестой дев-чип — КРОКОДИЛ. Отдельной кнопкой, а не заменой боссу: пока он не
-# встроен в кампанию, вызывать его надо когда угодно и не проходя эпизод.
-func _build_dev_croc_btn() -> void:
+# КРОКОДИЛ — отдельной кнопкой, а не заменой боссу: пока он не встроен в
+# кампанию, вызывать его надо когда угодно и не проходя эпизод.
+#
+# Место зависит от рубильника, и это не украшательство. При включённом он шестой
+# в левом столбце дев-чипов; при выключенном столбца нет вовсе, и кнопка,
+# оставшись на шестом месте, висела бы посреди пустого края экрана. Поэтому без
+# дев-чипов она садится в самый низ — туда, где столбец начинался.
+func _build_croc_btn() -> void:
 	var vp     := get_viewport().get_visible_rect().size
 	const SZ   := 44.0
 	const GAP  := 6.0
-	_dev_croc_btn          = Node2D.new()
-	_dev_croc_btn.position = Vector2(8.0, vp.y - SZ * 6.0 - 8.0 - GAP * 5.0)
-	add_child(_dev_croc_btn)
+	var slot : float = 5.0 if DevFlags.ENABLED else 0.0
+	_croc_btn          = Node2D.new()
+	_croc_btn.position = Vector2(8.0, vp.y - SZ - 8.0 - slot * (SZ + GAP))
+	add_child(_croc_btn)
 
 	var bg := ColorRect.new()
 	bg.color = Color(0.06, 0.20, 0.08, 0.92)
 	bg.size  = Vector2(SZ, SZ)
-	_dev_croc_btn.add_child(bg)
+	_croc_btn.add_child(bg)
 
 	var stripe := ColorRect.new()
 	stripe.color = Color(0.45, 1.0, 0.35, 0.85)
 	stripe.size  = Vector2(SZ, 2.0)
-	_dev_croc_btn.add_child(stripe)
+	_croc_btn.add_child(stripe)
 
 	var icon := _make_icon(LEATHERHEAD_SCRIPT.F_IDLE, SZ - 16.0)
 	icon.position = Vector2(8.0, 1.0)
-	_dev_croc_btn.add_child(icon)
+	_croc_btn.add_child(icon)
 
 	var lbl := Label.new()
 	lbl.add_theme_font_override("font", UI_FONT)
@@ -6333,20 +6361,20 @@ func _build_dev_croc_btn() -> void:
 	lbl.modulate             = Color(0.60, 1.0, 0.50)
 	lbl.size                 = Vector2(SZ, SZ - 30.0)
 	lbl.position             = Vector2(0.0, 30.0)
-	_dev_croc_btn.add_child(lbl)
+	_croc_btn.add_child(lbl)
 
 	var btn := Button.new()
 	btn.flat       = true
 	btn.focus_mode = Control.FOCUS_NONE
 	btn.size       = Vector2(SZ, SZ)
-	btn.pressed.connect(_dev_summon_croc)
-	_dev_croc_btn.add_child(btn)
+	btn.pressed.connect(_on_croc_tapped)
+	_croc_btn.add_child(btn)
 
-func _dev_summon_croc() -> void:
+func _on_croc_tapped() -> void:
 	_play_btn_sfx()
-	if is_instance_valid(_dev_croc_btn):
-		_dev_croc_btn.queue_free()
-		_dev_croc_btn = null
+	if is_instance_valid(_croc_btn):
+		_croc_btn.queue_free()
+		_croc_btn = null
 	summon_leatherhead(true)
 
 # Крокодил поднимается тем же путём, что и Нога Ниндзя: интерфейс забега
