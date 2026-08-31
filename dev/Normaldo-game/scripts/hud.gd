@@ -15,9 +15,17 @@ const MENU_LOGO_TEX          := preload("res://assets/ui/menu/logo.png")
 # Иконки меню — самостоятельные спрайты 55×55 со свечением ВНУТРИ кадра.
 # Полотна 430×192 с вырезанием по bbox и пекомые halo-подложки им больше не
 # нужны, см. _build_menu_icon_btn().
+#
+# Пять из шести собраны из голых рисунков автора (`dev/art/menu_icons/`) скриптом
+# `dev/tools/bake_menu_icon.py`: он сажает рисунок на ТУ ЖЕ шайбу, что у пришедшей
+# готовой иконки слотов, — круг, кольцо и ореол сняты с неё замером. Ряд из шести
+# кнопок не прощает шайбы, разъехавшейся хоть на пиксель.
+#
+# Имя файла — это НАЗНАЧЕНИЕ кнопки, а не что нарисовано: скины сегодня череп, а
+# завтра что угодно, и менять из-за этого константу не придётся.
 const MENU_ICON_SETTINGS := preload("res://assets/ui/menu/icons/settings.png")
 const MENU_ICON_BOOK     := preload("res://assets/ui/menu/icons/book.png")
-const MENU_ICON_SHOP     := preload("res://assets/ui/menu/icons/shop.png")
+const MENU_ICON_SKINS    := preload("res://assets/ui/menu/icons/skins.png")
 const MENU_ICON_SLOTS    := preload("res://assets/ui/menu/icons/slots.png")
 const MENU_ICON_QUESTS   := preload("res://assets/ui/menu/icons/quests.png")
 const MENU_ICON_LEADERS  := preload("res://assets/ui/menu/icons/leaderboard.png")
@@ -1818,7 +1826,7 @@ func _build_menu_right_column(vp: Vector2) -> void:
 	# (27 / 45 / 34 канвас-px) — плашки с подписями были разной высоты, и ряд
 	# выравнивали по ним. Плашек больше нет, кнопки одинаковые, и шаг обязан
 	# быть одинаковым тоже.
-	var skins_btn := _build_menu_icon_btn(vp, MENU_ICON_SHOP, Vector2(350, 8),
+	var skins_btn := _build_menu_icon_btn(vp, MENU_ICON_SKINS, Vector2(350, 8),
 		"СКИНЫ", _on_shop_tapped)
 	_skins_badge = _attach_canvas_badge(skins_btn, SaveData.has_ready_mastery_chest())
 
