@@ -4298,6 +4298,10 @@ const SKC_GAP     : float = 14.0
 const SKC_W_FRAC  : float = 0.34   # доля ширины экрана на карточку
 const SKC_W_MIN   : float = 230.0
 const SKC_W_MAX   : float = 320.0
+# Ячейка индикатора 💀 F A T под портретом. В забеге она 28 — там это рабочий
+# прибор, за которым следят на ходу; в витрине главное портрет, и прибор под ним
+# идёт подписью, а не вторым героем кадра.
+const SKC_FAT_CELL : float = 20.0
 
 func _build_skins_cards(overlay: Control, vp: Vector2, top: float, height: float,
 		from_slots: bool) -> void:
@@ -4390,19 +4394,27 @@ func _build_skin_card(parent: Control, pos: Vector2, w: float, h: float,
 	lock.visible              = false
 	UiKit.place(card, lock, Vector2(0.0, y + box * 0.5 - 8.0), Vector2(w, 16.0))
 
-	# Точки-состояния под портретом: сколько их и какое сейчас.
-	var dots : Array = []
+	# Состояния под портретом — ТОТ ЖЕ индикатор, что в забеге: 💀 F A T.
+	#
+	# Стояли тут четыре одинаковых квадратика, и горел ровно один — тот, который
+	# сейчас на портрете. Это врало дважды. Во-первых, квадратики нигде больше в
+	# игре не встречаются: игрок учил их отдельно, а в забеге всё равно видел
+	# череп с буквами. Во-вторых, «горит один» — это не то, как жир устроен:
+	# третье состояние не отменяет первых двух, оно на них стоит. Индикатор
+	# забега говорит это сам — лампы копятся слева направо, — а витрина говорила
+	# обратное.
+	#
+	# Замки достаются из него же: состояния, до которых скин не прокачан,
+	# показываются замком, а не тусклой ячейкой.
+	var gauge := FatGauge.new()
+	# Пульс черепа — предупреждение «следующий удар убивает». Здесь ничего не
+	# убивает: нулевой жир в витрине это просто первая картинка из четырёх.
+	gauge.warn_on_empty = false
+	gauge.setup(SKC_FAT_CELL)
+	var gauge_sz : Vector2 = gauge.gauge_size()
 	var dot_y : float = y + box + 6.0
-	var dot_sz : float = 8.0
-	var dot_gap : float = 8.0
-	var dots_w : float = 4.0 * dot_sz + 3.0 * dot_gap
-	for i in 4:
-		var d := ColorRect.new()
-		d.size         = Vector2(dot_sz, dot_sz)
-		d.position     = Vector2((w - dots_w) * 0.5 + i * (dot_sz + dot_gap), dot_y)
-		d.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		card.add_child(d)
-		dots.append(d)
+	gauge.position = Vector2((w - gauge_sz.x) * 0.5, dot_y)
+	card.add_child(gauge)
 
 	var repaint := func() -> void:
 		var f : int = int(state["fat"])
@@ -4411,11 +4423,10 @@ func _build_skin_card(parent: Control, pos: Vector2, w: float, h: float,
 			_fit_head_rect(r, _avatar_texture(skin_id, f), skin_id, f, box)
 		holder.modulate = Color(1, 1, 1, 0.35) if f > max_fat else Color.WHITE
 		lock.visible    = f > max_fat
-		for i in dots.size():
-			var lit : bool = i == f
-			var open_i : bool = i <= max_fat
-			(dots[i] as ColorRect).color = Color(1.00, 0.62, 0.12) if lit \
-				else (Color(0.45, 0.45, 0.52) if open_i else Color(0.26, 0.22, 0.22))
+		# Без анимации: пролистывание витрины — это не набор и не потеря жира.
+		# Загорание с подскоком, а тем более падение ламп с тряской на свайпе
+		# назад читались бы как «мне что-то сбили».
+		gauge.set_state(f, max_fat, false)
 	repaint.call()
 
 	var step := func(dir: int) -> void:
@@ -4460,7 +4471,7 @@ func _build_skin_card(parent: Control, pos: Vector2, w: float, h: float,
 	_skin_card_arrow(card, Vector2(4.0, arr_y), "<", func() -> void: step.call(-1))
 	_skin_card_arrow(card, Vector2(w - 28.0, arr_y), ">", func() -> void: step.call(1))
 
-	y = dot_y + dot_sz + 8.0
+	y = dot_y + gauge_sz.y + 8.0
 
 	var name_lbl := _strong_label(skin_data.get("name_ru", skin_id), 13, Color(1, 1, 1, 0.97), 3)
 	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

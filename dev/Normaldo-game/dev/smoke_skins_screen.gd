@@ -98,7 +98,79 @@ func _test_cards(hud: Node, save: Node) -> void:
 			_check(rect.texture != hud.call("_avatar_texture", "viking", fat0),
 				"и портрет действительно другой")
 
+			# Под портретом — ТОТ ЖЕ индикатор, что в забеге, и лампы в нём
+			# КОПЯТСЯ. Стояли тут четыре одинаковых квадратика, и горел ровно
+			# один: витрина сообщала, что состояния сменяют друг друга, — тогда
+			# как третье не отменяет первых двух, оно на них стоит.
+			var gauge : Control = _fat_gauge(card)
+			_check(gauge != null, "под портретом индикатор жира из забега")
+			if gauge != null:
+				# Пульс черепа — предупреждение «следующий удар убивает». В
+				# витрине убивать нечему, и мигающий красным череп читался бы
+				# как поломка экрана.
+				_check(not bool(gauge.get("warn_on_empty")),
+					"и череп в витрине не пульсирует тревогой")
+				# Отматываем в начало и проходим все четыре состояния подряд.
+				for _r in 4:
+					_swipe(swipe, 40.0)
+					await process_frame
+				var seen : Array = []
+				var cum_ok := true
+				for f in 4:
+					var got : int = _lit(gauge)
+					seen.append(got)
+					if got != f + 1:
+						cum_ok = false
+					_swipe(swipe, -40.0)
+					await process_frame
+				_check(cum_ok, "лампы копятся слева направо: %s при ожидаемом [1, 2, 3, 4]"
+					% [seen])
+
+		# Закрытые уровнем состояния — под замком, а не пустой ячейкой: пустая
+		# читается как «я ещё не дорос», замок — как «сюда не пускают», и это
+		# разные сообщения. Проверяется по ВСЕЙ ленте: у прокачанного викинга
+		# открыто всё, и одна его карточка пропустила бы замки совсем.
+		var sp : Node = get_root().get_node_or_null("SkinProgression")
+		var lock_ok := true
+		var with_locks := 0
+		for c in cards:
+			var g : Control = _fat_gauge(c)
+			if g == null:
+				continue
+			var sid : String = String(c.name).trim_prefix("Card_")
+			var owned : bool = bool(save.call("owns_skin", sid))
+			var mx : int = int(sp.call("max_fat_state", sid,
+				save.call("get_skin_level_for", sid) if owned else 1))
+			if _locked(g) != 3 - mx:
+				lock_ok = false
+			if _locked(g) > 0:
+				with_locks += 1
+		_check(lock_ok and with_locks > 0,
+			"закрытые состояния под замком, замки есть на %d карточках" % with_locks)
+
 	await _close(overlay)
+
+# Индикатор 💀 F A T карточки. Ищется по классу, а не по имени узла: имя можно
+# переставить, а класс — это ровно тот же прибор, что стоит в забеге.
+func _fat_gauge(card: Node) -> Control:
+	for c in card.get_children():
+		if c is FatGauge:
+			return c
+	return null
+
+func _lit(gauge: Control) -> int:
+	var n := 0
+	for l in gauge.get_children():
+		if bool(l.get("lit")):
+			n += 1
+	return n
+
+func _locked(gauge: Control) -> int:
+	var n := 0
+	for l in gauge.get_children():
+		if bool(l.get("locked")):
+			n += 1
+	return n
 
 func _collect_cards(root: Node, out: Array) -> void:
 	if root is Control and String(root.name).begins_with("Card_"):

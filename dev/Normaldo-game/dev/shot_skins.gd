@@ -38,7 +38,7 @@ func _initialize() -> void:
 	save.active_skin = "harry_potter"
 	save.skin_level  = 4
 
-	if detail == "cards":
+	if detail == "cards" or detail == "cards_fat":
 		# Карточный вид: тот же экран, другой режим показа.
 		hud.set("_skins_card_view", true)
 		hud.call("_show_shop")
@@ -49,11 +49,44 @@ func _initialize() -> void:
 		hud.call("_show_shop")
 	for _i in 90:
 		await process_frame
+
+	# cards_fat: пролистываем каждую карточку на СВОЁ состояние жира, чтобы в
+	# одном кадре стояли все четыре — 💀 / 💀F / 💀FA / 💀FAT. Одна карточка на
+	# нулевом жире не показывает главного: лампы КОПЯТСЯ, а не переключаются.
+	if detail == "cards_fat":
+		var n : int = 0
+		for sw in _swipes(get_root()):
+			for _s in n:
+				_swipe_left(sw)
+			n += 1
+		for _i in 20:
+			await process_frame
+
 	await RenderingServer.frame_post_draw
 	var img := get_root().get_texture().get_image()
 	img.save_png("%s/%s.png" % [out, name])
 	print("saved ", name)
 	quit(0)
+
+# Все зоны свайпа жира на экране, слева направо — в порядке карточек в ленте.
+func _swipes(node: Node, out: Array = []) -> Array:
+	if node is Control and node.name == "FatSwipe":
+		out.append(node)
+	for c in node.get_children():
+		_swipes(c, out)
+	return out
+
+# Свайп ВЛЕВО — «следующее состояние». Порог в карточке 22 px, берём с запасом.
+func _swipe_left(sw: Control) -> void:
+	var down := InputEventMouseButton.new()
+	down.pressed = true
+	sw.gui_input.emit(down)
+	var mv := InputEventMouseMotion.new()
+	mv.relative = Vector2(-30.0, 0.0)
+	sw.gui_input.emit(mv)
+	var up := InputEventMouseButton.new()
+	up.pressed = false
+	sw.gui_input.emit(up)
 
 func _bail_out() -> void:
 	for _i in 1200:
