@@ -19,6 +19,10 @@ extends SceneTree
 #      дев-ского нет. При включённом рубильнике эта часть пропускается: во
 #      время разработки он включён, и падать на этом тест не должен.
 #
+#   3. ИНСТРУМЕНТАРИЙ — второй рубильник, `DevFlags.TOOLBOX`. Он про рабочую
+#      сборку, а не про релизную: с ним на экране остаются только выпадашка
+#      боссов и начисление опыта, а весь остальной инструмент сворачивается.
+#
 # См. scripts/dev_flags.gd
 
 const DevFlags = preload("res://scripts/dev_flags.gd")
@@ -48,7 +52,7 @@ const DEV_TEXTS : Array = [
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 11
+const EXPECTED_CHECKS : int = 15
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -63,7 +67,44 @@ func _initialize() -> void:
 	_test_sources()
 	print("── Состояние сборки ──")
 	await _test_screens()
+	print("── Инструментарий свёрнут ──")
+	await _test_toolbox()
 	_finish()
+
+# Второй рубильник — `DevFlags.TOOLBOX`. Он снимает с экрана ВЕСЬ дев-инструмент,
+# кроме двух вещей, которыми пользуются каждый день: выпадашки боссов в забеге и
+# начисления опыта в меню. Двенадцать чипов по краям закрывают лейны и лезут в
+# кадр на любом скриншоте — а выкидывать их насовсем не за что.
+#
+# Проверяется работающая сборка (`ENABLED` включён): при `TOOLBOX = false` на
+# экране ровно эти двое и больше ничего. Ветка «TOOLBOX включён» проверяет
+# обратное — что инструмент действительно возвращается одним переключателем.
+func _test_toolbox() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	await process_frame
+	var hud : Node = game.get_node_or_null("HUD")
+
+	# Меню: опыт на месте, сбросы и доллары — по положению рубильника.
+	var menu_texts : Array = []
+	_all_texts(game, menu_texts)
+	_check(menu_texts.has("ОПЫТ"), "в меню остался чип опыта")
+	var resets := menu_texts.has("СБРОС\nСКИНОВ") or _dev_texts_in(game).any(
+		func(t): return String(t).contains("СБРОС") or String(t).contains("+10000"))
+	_check(resets == DevFlags.TOOLBOX,
+		"сбросы и доллары в меню: %s при TOOLBOX=%s" % [resets, DevFlags.TOOLBOX])
+
+	hud.call("_start_game")
+	for _i in 200:
+		await process_frame
+	_check(hud.get("_boss_menu_btn") != null, "в забеге осталась выпадашка боссов")
+	var toolbox_up := hud.get("_dev_btn") != null or hud.get("_dev_immortal_btn") != null \
+		or hud.get("_dev_phase_btn") != null or hud.get("_dev_collisions_btn") != null
+	_check(toolbox_up == DevFlags.TOOLBOX,
+		"остальные кнопки забега: %s при TOOLBOX=%s" % [toolbox_up, DevFlags.TOOLBOX])
+	game.queue_free()
+	await process_frame
 
 # ── 1. Контракт ──────────────────────────────────────────────────────────────
 # Вызов сборщика дев-кнопки обязан стоять ВНУТРИ блока `if DevFlags.ENABLED`.

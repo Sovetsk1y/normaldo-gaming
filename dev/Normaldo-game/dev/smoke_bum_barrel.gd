@@ -12,7 +12,28 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 28
+const EXPECTED_CHECKS : int = 31
+
+# ── Слух теста ───────────────────────────────────────────────────────────────
+# Звук проверяется НАБЛЮДЕНИЕМ, а не чтением констант: сцена расставляет плееры
+# по ходу хореографии и сама их убирает, когда те доиграли. Поэтому каждый кадр
+# ожидания тест смотрит, какие плееры появились в дереве, и запоминает МОМЕНТ
+# первого появления каждого звука — по нему потом видно и что звук был, и в
+# каком порядке они шли.
+var _heard : Dictionary = {}    # путь к потоку → момент, с начала теста
+var _clock : float = 0.0
+
+func _listen() -> void:
+	_clock += 1.0 / 60.0
+	_scan_players(get_root())
+
+func _scan_players(node: Node) -> void:
+	if node is AudioStreamPlayer:
+		var st : AudioStream = (node as AudioStreamPlayer).stream
+		if st != null and st.resource_path != "" and not _heard.has(st.resource_path):
+			_heard[st.resource_path] = _clock
+	for c in node.get_children():
+		_scan_players(c)
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -190,6 +211,7 @@ func _initialize() -> void:
 	var t_s := 0.0
 	while t_s < 1.6:
 		await process_frame
+		_listen()
 		t_s += 1.0 / 60.0
 		var bx : float = bum.position.x
 		bx_home = maxf(bx_home, bx)
@@ -244,6 +266,26 @@ func _initialize() -> void:
 		_check(float(d.get("speed")) > 250.0 * 1.4,
 			"и заметно быстрее потока: %.0f против 250" % float(d.get("speed")))
 
+	# ЗВУК. Все три такта сцены шли молча: бомж толкал бочку, бочка заваливалась,
+	# из неё вылетала собака — и ни один из этих ударов не был слышен. Сцена,
+	# которую видно, но не слышно, читается декорацией, а не угрозой.
+	#
+	# Проверяется НАБЛЮДЕНИЕ, а не константы в шапке: плееры сцена расставляет по
+	# ходу дела, и «константа объявлена» не значит «звук сыграл» — ровно так
+	# звук и теряется, когда такт переписывают.
+	var push_at : float = float(_heard.get("res://assets/audio/barrel_push.mp3", -1.0))
+	var drop_at : float = float(_heard.get("res://assets/audio/barrel_drop.mp3", -1.0))
+	var bark_at : float = float(_heard.get("res://assets/audio/dog.mp3", -1.0))
+	_check(push_at >= 0.0 and drop_at >= 0.0 and bark_at >= 0.0,
+		"сцену слышно на всех трёх тактах: тычок %.2f, падение %.2f, лай %.2f"
+			% [push_at, drop_at, bark_at])
+	# И в правильном ПОРЯДКЕ: сначала толкнул, потом упало, потом залаяло. Лай
+	# раньше падения означал бы, что собака вылетела из ещё стоящей бочки.
+	_check(push_at >= 0.0 and drop_at > push_at,
+		"падение слышно ПОСЛЕ тычка: %.2f против %.2f" % [drop_at, push_at])
+	_check(drop_at >= 0.0 and bark_at >= drop_at,
+		"а лай — после падения: %.2f против %.2f" % [bark_at, drop_at])
+
 	# Дальше он ЕДЕТ С ПОТОКОМ, а не улетает рывком за край. Отличие сет-писа от
 	# обычного предмета — только в том, что по дороге он умеет отыграть сцену.
 	var gap0 : float = bum.global_position.x - bar.global_position.x
@@ -291,6 +333,7 @@ func _wait(sec: float) -> void:
 	var t := 0.0
 	while t < sec:
 		await process_frame
+		_listen()
 		t += 1.0 / 60.0
 
 func _find_barrel(sp: Node) -> Node2D:

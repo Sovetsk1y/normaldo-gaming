@@ -40,6 +40,24 @@ const BUM_TEX : Array = [
 const DOG_SCENE := preload("res://scenes/dog.tscn")
 const HITBOX_SCRIPT := preload("res://scripts/setpiece_hitbox.gd")
 
+# ── Звук ─────────────────────────────────────────────────────────────────────
+# Сет-пис — три такта, и до сих пор все три шли МОЛЧА: бомж толкал бочку, бочка
+# заваливалась, из неё вылетала собака, и ни один из этих ударов не был слышен.
+# Сцена, которую видно, но не слышно, читается как декорация, а не как угроза, —
+# особенно на телефоне, где половину экрана закрывает палец.
+#
+# Звуков ровно три, по одному на такт, и все три взяты из старого проекта:
+#   тычок      — `gantelya1` (глухой металлический стук по бочке),
+#   падение    — `roll_dropped` (что-то тяжёлое уронили),
+#   собака     — тот же лай `dog.mp3`, что и у собаки из потока.
+#
+# Лай СОБСТВЕННЫЙ, а не одолженный у сцены собаки: та подаёт голос только когда
+# её сбили, а здесь голос — это и есть появление. Вылет из бочки без звука ничем
+# не отличался от «в кадре появился ещё один предмет».
+const SFX_PUSH := preload("res://assets/audio/barrel_push.mp3")
+const SFX_DROP := preload("res://assets/audio/barrel_drop.mp3")
+const SFX_DOG  := preload("res://assets/audio/dog.mp3")
+
 # Размеры. Этот бомж КРУПНЕЕ рядового из потока (61 px) — примерно в полтора
 # раза. Он не босс и раздувать его вдвое по-прежнему нельзя, но и одного роста
 # с проходным предметом ему мало: он единственный, кто ТОРМОЗИТ и отыгрывает
@@ -204,6 +222,20 @@ func _make_box(sz: Vector2) -> Area2D:
 func _on_box_broken() -> void:
 	queue_free()
 
+# Одноразовый плеер У РОДИТЕЛЯ, а не у себя: сет-пис уходит с экрана и
+# освобождается, а звук обязан доиграть. Плеер на самом сет-писе обрывал бы лай
+# ровно в тот момент, когда бомж уезжает за край.
+func _play_sfx(stream: AudioStream, db: float = 0.0) -> void:
+	var host := get_parent()
+	if stream == null or host == null or not is_instance_valid(host):
+		return
+	var a := AudioStreamPlayer.new()
+	a.stream    = stream
+	a.volume_db = db
+	host.add_child(a)
+	a.play()
+	a.finished.connect(a.queue_free)
+
 # Хитбоксы едут за своими спрайтами КАЖДЫЙ кадр: бомж качается и делает тычок,
 # бочка падает и заваливается набок — зона удара обязана ехать с рисунком, иначе
 # бьёт пустое место, а нарисованное не бьёт.
@@ -260,6 +292,9 @@ func _run() -> void:
 	await get_tree().create_timer(PUSH_T * 0.40).timeout
 	if not is_inside_tree():
 		return
+	# Стук — ровно в касание, вместе с началом падения. Раньше или позже, и связь
+	# «толкнул — упало» распадается на два независимых события.
+	_play_sfx(SFX_PUSH, -3.0)
 
 	# 3. БОЧКА ПАДАЕТ НА БОК — поворотом на −90° вокруг своего нижнего угла, и
 	#    ТОЛЬКО поворотом. Опрокинуться через нижнее ребро — это и есть падение:
@@ -272,7 +307,8 @@ func _run() -> void:
 	await tw2.finished
 	if not is_inside_tree():
 		return
-	# Удар о землю: короткий отскок по вертикали.
+	# Удар о землю: короткий отскок по вертикали и звук упавшего тяжёлого.
+	_play_sfx(SFX_DROP)
 	var tw3 := create_tween()
 	tw3.tween_property(_barrel, "position:y", _barrel.position.y - 5.0, LAND_T * 0.4)
 	tw3.tween_property(_barrel, "position:y", _barrel.position.y, LAND_T * 0.6)\
@@ -304,6 +340,10 @@ func _launch_dog() -> void:
 	var host := get_parent()
 	if host == null:
 		return
+	# Лай — В МОМЕНТ ВЫЛЕТА, до того как игрок разглядел, что именно вылетело:
+	# собака идёт быстрее потока, и полсекунды на «это ко мне» ей дают уши, а не
+	# глаза.
+	_play_sfx(SFX_DOG)
 	var dog := DOG_SCENE.instantiate()
 	if dog.get("speed") != null:
 		dog.speed = maxf(DOG_SPEED_MIN, speed * DOG_SPEED_K)

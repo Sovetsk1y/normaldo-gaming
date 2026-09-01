@@ -433,7 +433,7 @@ func _page_notif(w: float) -> float:
 
 	# Dev-строки проверки пушей жили в старой модалке уведомлений — переезжают
 	# сюда как есть, чтобы не потерять сквозную проверку доставки.
-	if DevFlags.ENABLED and _hud != null:
+	if DevFlags.ENABLED and DevFlags.TOOLBOX and _hud != null:
 		_hud.call("_build_notif_test_row",   _page_body, 0.0, y, w, self)
 		y += 36.0
 		_hud.call("_build_notif_fire_row",   _page_body, 0.0, y, w, self)

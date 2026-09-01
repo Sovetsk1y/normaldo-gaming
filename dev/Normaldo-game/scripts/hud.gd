@@ -1299,11 +1299,15 @@ func _show_menu() -> void:
 	_build_menu_mode_btn(vp)
 	_build_menu_tap_prompt(vp)
 	if DevFlags.ENABLED:
+		# Опыт остаётся всегда: лестница скинов — десять уровней, и проверить её
+		# иначе можно только забегами. Сбросы и доллары — под общим рубильником
+		# инструментария.
+		_build_menu_dev_xp_btn(vp)
+	if DevFlags.ENABLED and DevFlags.TOOLBOX:
 		_build_menu_dev_reset_skins_btn(vp)
 		_build_menu_dev_reset_quests_btn(vp)
 		_build_menu_dev_reset_endless_btn(vp)
 		_build_menu_dev_add_dollars_btn(vp)
-		_build_menu_dev_xp_btn(vp)
 
 	# Bob + occasional pizza behind Normaldo while we're sitting on the menu.
 	var normaldo := get_parent().get_node_or_null("Normaldo")
@@ -6039,12 +6043,13 @@ func _start_game() -> void:
 	# стоит ВНЕ рубильника и уезжает вместе с ним только тогда, когда крокодил
 	# займёт своё место в кампании.
 	if DevFlags.ENABLED:
-		# КРОК и КЛУБ стояли СНАРУЖИ рубильника, пока боссы не были встроены в
-		# кампанию: без кнопок посмотреть на них было нельзя ничем. Теперь
-		# крокодил ждёт в конце второго уровня, хозяин клуба — в конце пятого,
-		# и до обоих можно дойти игрой. Причина держать их снаружи отпала, а
-		# дев-кнопка без причины в релизной сборке — это ровно то, от чего
-		# заведён рубильник.
+		# ВЫПАДАШКА БОССОВ остаётся всегда, а остальной инструментарий — под
+		# своим рубильником: двенадцать чипов по краям экрана закрывают лейны и
+		# лезут в кадр на любом скриншоте. Боссы — исключение: до крокодила и
+		# хозяина клуба игрой идти два и пять уровней, и без кнопки посмотреть на
+		# них нельзя ничем.
+		_build_dev_boss_btn()
+	if DevFlags.ENABLED and DevFlags.TOOLBOX:
 		_build_dev_btn()
 		_build_dev_pizza_btn()
 		_build_dev_slots_btn()
@@ -6052,11 +6057,10 @@ func _start_game() -> void:
 		_build_dev_bum_wave_btn()
 		_build_dev_bum_barrel_btn()
 		_build_dev_immortal_btn()
-		_build_dev_boss_btn()
 		_build_dev_phase_btn()
 	# Cue the run-start daily quest reminders (skips finished/claimed slots).
 	_show_run_intro_quests()
-	if DevFlags.ENABLED:
+	if DevFlags.ENABLED and DevFlags.TOOLBOX:
 		_build_dev_collisions_btn()
 
 # Throw-and-jump intro:
@@ -7428,8 +7432,9 @@ func _show_game_over(total_pizzas: int, level_rewards: Array, xp_before: int, le
 	_run_xp_animation(xp_before, level_before, total_pizzas)
 	_spawn_dollar_fly_to_balance(_dollars_this_run)
 
-	# Дев-кнопки экрана смерти под общим рубильником.
-	if DevFlags.ENABLED:
+	# Дев-кнопки экрана смерти — под рубильником инструментария: опыт живёт в
+	# главном меню, и второй его набор поверх итогов забега только лезет в кадр.
+	if DevFlags.ENABLED and DevFlags.TOOLBOX:
 		_build_go_dev_xp_btns(vp, left.position.y, _pm)
 
 # ── Левая колонка: итог забега и действия ────────────────────────────────────

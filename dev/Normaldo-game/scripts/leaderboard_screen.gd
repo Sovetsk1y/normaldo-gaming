@@ -272,7 +272,7 @@ func _build(vp: Vector2) -> void:
 	# Своя строка закреплена внизу и видна всегда: раньше на вопрос «где я»
 	# экран отвечал только после нажатия и прокрутки.
 	_build_my_strip(vp)
-	if DevFlags.ENABLED:
+	if DevFlags.ENABLED and DevFlags.TOOLBOX:
 		_build_dev_prize_btn(vp)
 
 # Раскладка экрана в одном месте — её спрашивают и сборка, и перестройка списка.
