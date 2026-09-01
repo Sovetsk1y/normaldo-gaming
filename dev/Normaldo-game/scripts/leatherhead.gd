@@ -457,7 +457,11 @@ func _show_banner() -> void:
 # Разгоняется ПАУЗА МЕЖДУ выстрелами, а не сам выстрел: нить по-прежнему висит
 # свои 0.45 с, и последний выстрел так же честен, как первый. Ускорять телеграф
 # значило бы отбирать у игрока не время на раздумье, а возможность увернуться.
-const HUNT_WAITS : Array = [1.45, 1.15, 0.85, 0.62, 0.42, 0.26]
+# Разгон общий: цифры ниже — прежние, умноженные на 0.62. Бой честно телеграфит
+# каждый выстрел, и от этого он читался медленным: между «нить погасла» и
+# «следующий передёрг» игрок полторы секунды просто ехал. Паузы сжаты, ТЕЛЕГРАФ
+# не тронут — см. ниже.
+const HUNT_WAITS : Array = [0.90, 0.71, 0.53, 0.38, 0.26, 0.16]
 const HUNT_SHOTS : int   = 6      # = HUNT_WAITS.size(), см. проверку в тесте
 const LASER_T     : float = 0.45   # столько нить висит, прежде чем выстрел
 const TRACK_LERP  : float = 0.055  # насколько лениво он едет за линией игрока
@@ -619,7 +623,7 @@ func _act_tail() -> void:
 # Дорожка кладётся ДО свечения края — если позвать одновременно с
 # предупреждением, звать уже поздно, и приманка превращается в декорацию.
 const BAIT_COUNT : int   = 6
-const BAIT_STEP  : float = 0.07   # с, между появлениями соседних
+const BAIT_STEP  : float = 0.05   # с, между появлениями соседних
 const BAIT_SPEED : float = 90.0   # почти стоят: дорожка обязана читаться формой
 
 func _bait_trail(side: String) -> void:
@@ -711,7 +715,7 @@ func _tail_sweep(side: String, speed: float) -> void:
 
 # ── Акт 3: КАРТЕЧЬ, ЗЛАЯ КАРТЕЧЬ И ПАСТЬ ─────────────────────────────────────
 const BUCK_SHOTS  : int   = 4
-const BUCK_PERIOD : float = 1.5
+const BUCK_PERIOD : float = 1.00   # было 1.5 — пауза между веерами
 
 # Разлёт дробин. Считать его надо ПО ХИТБОКСАМ, а не по расстоянию между
 # центрами: у Нормальдо радиус 32, у дробины ~11.6, значит центр игрока обязан
@@ -759,7 +763,7 @@ func _act_shotgun() -> void:
 	_play_sfx(SFX_ROAR)
 	_screen_flash(Color(1.0, 0.15, 0.10))
 	_screen_shake(9.0, 7)
-	await get_tree().create_timer(0.8).timeout
+	await get_tree().create_timer(0.62).timeout
 	if not _alive():
 		return
 	await _rage_volley()
@@ -768,7 +772,7 @@ func _act_shotgun() -> void:
 	for i in 2:
 		if not _alive():
 			return
-		await get_tree().create_timer(0.6).timeout
+		await get_tree().create_timer(0.40).timeout
 		if not _alive():
 			return
 		await _jaw_lunge()
@@ -801,8 +805,8 @@ func _buckshot(count: int, spread: float) -> void:
 const RAGE_WAVES    : int   = 3
 const RAGE_SHOTS    : int   = 3     # выстрелов в волне, подряд
 const RAGE_PELLETS  : int   = 5     # дробин в выстреле
-const RAGE_SHOT_GAP : float = 0.20
-const RAGE_WAVE_GAP : float = 1.40
+const RAGE_SHOT_GAP : float = 0.15   # было 0.20
+const RAGE_WAVE_GAP : float = 0.95   # было 1.40
 
 # Веер: дробины расходятся от одной точки к линиям, разнесённым на `spread` в
 # ПЛОСКОСТИ ИГРОКА. Наводится на то, где он сейчас, — телеграфом тут служит сам

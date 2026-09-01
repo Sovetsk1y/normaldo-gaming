@@ -254,9 +254,6 @@ var _dev_immortal_lbl  : Label     = null
 # in the scene tree and flips its visibility, also toggles the SceneTree's
 # debug_collisions_hint so newly-spawned items inherit the state.
 var _dev_collisions_btn  : Node2D    = null
-var _dev_boss_btn        : Node2D    = null
-var _croc_btn        : Node2D    = null
-var _club_btn        : Node2D    = null
 var _dev_phase_btn       : Node2D    = null
 var _dev_phase_lbl       : Label     = null
 var _dev_collisions_bg   : ColorRect = null
@@ -1306,6 +1303,7 @@ func _show_menu() -> void:
 		_build_menu_dev_reset_quests_btn(vp)
 		_build_menu_dev_reset_endless_btn(vp)
 		_build_menu_dev_add_dollars_btn(vp)
+		_build_menu_dev_xp_btn(vp)
 
 	# Bob + occasional pizza behind Normaldo while we're sitting on the menu.
 	var normaldo := get_parent().get_node_or_null("Normaldo")
@@ -1376,6 +1374,108 @@ func _route_deep_link_if_ready() -> void:
 			# Unknown payload — log once so it can be added to the route map
 			# without falling silently.
 			push_warning("[Notifications] Unknown deep_link: %s" % link)
+
+# ── Дев-чип «ОПЫТ» с выпадашкой ──────────────────────────────────────────────
+# Кнопки выдачи опыта были только на ЭКРАНЕ СМЕРТИ: чтобы прокачать скин, надо
+# было отыграть забег и умереть. Для проверки лестницы уровней, наград и
+# попапов повышения это неудобно ровно настолько, что проверять переставали.
+#
+# Теперь чип стоит в меню и раскрывается ВВЕРХ столбиком: +1 · +10 · +100 ·
+# +1000 · +10000 и крестик. Вверх, а не вбок: вбок идёт ряд остальных дев-чипов
+# и выпадашка накрыла бы их.
+#
+# Опыт выдаётся тому скину, который сейчас активен, — тем же SaveData.add_xp,
+# что и настоящий забег: свой путь начисления разошёлся бы с настоящим на
+# первой же правке лестницы.
+const MENU_XP_STEPS : Array = [1, 10, 100, 1000, 10000]
+
+var _menu_xp_row : Control = null
+
+func _build_menu_dev_xp_btn(vp: Vector2) -> void:
+	const SZ : float = 44.0
+	const GAP : float = 6.0
+	var chip := _menu_dev_chip(Vector2(8.0 + (SZ + GAP) * 4.0, vp.y - SZ - 8.0),
+		"ОПЫТ", Color(0.55, 1.00, 0.55), _toggle_menu_xp_row)
+	_menu_overlay.add_child(chip)
+
+func _toggle_menu_xp_row() -> void:
+	_play_btn_sfx()
+	if is_instance_valid(_menu_xp_row):
+		_close_menu_xp_row()
+		return
+	var vp := get_viewport().get_visible_rect().size
+	const SZ : float = 44.0
+	const GAP : float = 6.0
+	_menu_xp_row = Control.new()
+	_menu_xp_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_menu_overlay.add_child(_menu_xp_row)
+	var x : float = 8.0 + (SZ + GAP) * 4.0
+	var i := 0
+	for step in MENU_XP_STEPS:
+		var amt : int = int(step)
+		var chip := _menu_dev_chip(
+			Vector2(x, vp.y - SZ - 8.0 - (SZ + GAP) * float(i + 1)),
+			"+%d" % amt, Color(0.55, 1.00, 0.55), func(): _grant_dev_xp(amt))
+		_menu_xp_row.add_child(chip)
+		i += 1
+	var close_chip := _menu_dev_chip(
+		Vector2(x, vp.y - SZ - 8.0 - (SZ + GAP) * float(i + 1)),
+		"✕", Color(0.78, 0.78, 0.82), _close_menu_xp_row)
+	_menu_xp_row.add_child(close_chip)
+
+func _close_menu_xp_row() -> void:
+	if is_instance_valid(_menu_xp_row):
+		_menu_xp_row.queue_free()
+	_menu_xp_row = null
+
+func _grant_dev_xp(amount: int) -> void:
+	_play_btn_sfx()
+	SaveData.add_xp(amount, "dev_menu_chip")
+	_close_menu_xp_row()
+	# Меню собирается заново: полоса опыта, уровень и значок скина читают
+	# сейв при сборке, и без пересборки чип «сработал вникуда».
+	_show_menu()
+
+# Чип дев-панели МЕНЮ: тот же вид, что у чипов забега, но на Control — меню
+# собрано из Control, и Node2D в нём не попадает под общий модулирующий слой.
+func _menu_dev_chip(pos: Vector2, text: String, tint: Color, on_press: Callable) -> Control:
+	const SZ : float = 44.0
+	var visual := Control.new()
+	visual.size         = Vector2(SZ, SZ)
+	visual.position     = pos
+	visual.pivot_offset = Vector2(SZ, SZ) * 0.5
+	visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var bg := ColorRect.new()
+	bg.color = Color(tint.r * 0.22, tint.g * 0.18, tint.b * 0.22, 0.90)
+	bg.size  = Vector2(SZ, SZ)
+	visual.add_child(bg)
+
+	var stripe := ColorRect.new()
+	stripe.color = Color(tint.r, tint.g, tint.b, 0.85)
+	stripe.size  = Vector2(SZ, 2.0)
+	visual.add_child(stripe)
+
+	var lbl := Label.new()
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", 11)
+	lbl.text                 = text
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	lbl.modulate             = tint
+	lbl.size                 = Vector2(SZ, SZ)
+	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	visual.add_child(lbl)
+
+	var btn := Button.new()
+	btn.flat       = true
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.size       = Vector2(SZ, SZ)
+	btn.pressed.connect(on_press)
+	btn.pressed.connect(_menu_btn_press_anim.bind(visual, false))
+	btn.button_down.connect(_menu_btn_press_anim.bind(visual, true))
+	visual.add_child(btn)
+	return visual
 
 # Dev-only chip in the bottom-left corner of the main menu — wipes every
 # owned skin (keeps classic) so we can replay the buy flow. Lives in the
@@ -5945,8 +6045,6 @@ func _start_game() -> void:
 		# и до обоих можно дойти игрой. Причина держать их снаружи отпала, а
 		# дев-кнопка без причины в релизной сборке — это ровно то, от чего
 		# заведён рубильник.
-		_build_croc_btn()
-		_build_club_btn()
 		_build_dev_btn()
 		_build_dev_pizza_btn()
 		_build_dev_slots_btn()
@@ -6458,173 +6556,127 @@ func _build_dev_collisions_btn() -> void:
 
 	_refresh_dev_collisions_visual()
 
-# Fourth dev chip — instant boss summon for testing the fight without
-# waiting through the campaign pacing.
-func _build_dev_boss_btn() -> void:
-	var vp     := get_viewport().get_visible_rect().size
-	const SZ   := 44.0
-	const GAP  := 6.0
-	_dev_boss_btn          = Node2D.new()
-	_dev_boss_btn.position = Vector2(8.0, vp.y - SZ * 4.0 - 8.0 - GAP * 3.0)
-	add_child(_dev_boss_btn)
+# ── Дев-чипы: выпадашка «БОССЫ» ──────────────────────────────────────────────
+# Боссов трое, и звали их три отдельных чипа в левом столбце. Столбец от этого
+# дорос до семи кнопок и занял край экрана целиком — а дев-панель не должна
+# соревноваться с забегом за место.
+#
+# Теперь чип один, «БОССЫ», и по нажатию он раскрывается ВПРАВО в ряд:
+# НИНДЗЯ · КРОК · КЛУБ и крестик, чтобы закрыть, ничего не вызвав. Вызвал
+# босса — ряд сворачивается сам и чип уезжает: второго босса за забег звать
+# некуда, и оставленная кнопка означала бы «можно ещё раз».
+#
+# Раскрывается вправо, а не вниз: вниз — это ряд чипов спавна, и выпадашка
+# накрыла бы их.
+const DEV_SZ  : float = 44.0
+const DEV_GAP : float = 6.0
+
+var _boss_menu_btn : Node2D = null
+var _boss_menu_row : Node2D = null
+
+# Один дев-чип: подложка, полоска сверху, иконка, подпись и невидимая кнопка
+# поверх. Двадцать строк, которые были скопированы у каждой кнопки по
+# отдельности, — и правка вида означала правку в семи местах.
+func _dev_chip(text: String, tint: Color, on_press: Callable,
+		icon_tex: Texture2D = null) -> Node2D:
+	var root := Node2D.new()
 
 	var bg := ColorRect.new()
-	bg.color = Color(0.22, 0.06, 0.10, 0.92)
-	bg.size  = Vector2(SZ, SZ)
-	_dev_boss_btn.add_child(bg)
+	bg.color = Color(tint.r * 0.22, tint.g * 0.18, tint.b * 0.22, 0.92)
+	bg.size  = Vector2(DEV_SZ, DEV_SZ)
+	root.add_child(bg)
 
 	var stripe := ColorRect.new()
-	stripe.color = Color(1.0, 0.45, 0.45, 0.85)
-	stripe.size  = Vector2(SZ, 2.0)
-	_dev_boss_btn.add_child(stripe)
+	stripe.color = Color(tint.r, tint.g, tint.b, 0.85)
+	stripe.size  = Vector2(DEV_SZ, 2.0)
+	root.add_child(stripe)
 
-	# Simple "ninja foot" icon — black mask shape over the chip face.
-	var mask := ColorRect.new()
-	mask.color    = Color(0.04, 0.04, 0.05, 0.95)
-	mask.size     = Vector2(SZ - 12.0, 6.0)
-	mask.position = Vector2(6.0, 12.0)
-	_dev_boss_btn.add_child(mask)
+	if icon_tex != null:
+		var icon := _make_icon(icon_tex, DEV_SZ - 16.0)
+		icon.position = Vector2(8.0, 1.0)
+		root.add_child(icon)
 
 	var lbl := Label.new()
 	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 9)
-	lbl.text                 = "БОСС"
+	# Кегль по длине подписи: «НИНДЗЯ» девяткой не влезает в 44 пикселя и
+	# обрезается на последней букве, а одиночный крестик девяткой теряется.
+	var fs : int = 16 if text.length() == 1 else (9 if text.length() <= 5 else 7)
+	lbl.add_theme_font_size_override("font_size", fs)
+	lbl.text                 = text
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.modulate             = Color(1.0, 0.55, 0.55)
-	lbl.size                 = Vector2(SZ, SZ - 18.0)
-	lbl.position             = Vector2(0.0, 18.0)
-	_dev_boss_btn.add_child(lbl)
+	lbl.modulate             = tint
+	if text.length() == 1:
+		lbl.size     = Vector2(DEV_SZ, DEV_SZ)
+		lbl.position = Vector2.ZERO
+	else:
+		lbl.size     = Vector2(DEV_SZ, DEV_SZ - 30.0)
+		lbl.position = Vector2(0.0, 30.0)
+	root.add_child(lbl)
 
 	var btn := Button.new()
 	btn.flat       = true
 	btn.focus_mode = Control.FOCUS_NONE
-	btn.size       = Vector2(SZ, SZ)
-	btn.pressed.connect(_dev_summon_boss)
-	_dev_boss_btn.add_child(btn)
+	btn.size       = Vector2(DEV_SZ, DEV_SZ)
+	btn.pressed.connect(on_press)
+	root.add_child(btn)
+	return root
+
+func _build_dev_boss_btn() -> void:
+	var vp := get_viewport().get_visible_rect().size
+	_boss_menu_btn = _dev_chip("БОССЫ", Color(1.0, 0.55, 0.55), _toggle_boss_menu)
+	_boss_menu_btn.position = Vector2(8.0, vp.y - DEV_SZ * 4.0 - 8.0 - DEV_GAP * 3.0)
+	add_child(_boss_menu_btn)
+
+func _toggle_boss_menu() -> void:
+	_play_btn_sfx()
+	if is_instance_valid(_boss_menu_row):
+		_close_boss_menu()
+		return
+	if not is_instance_valid(_boss_menu_btn):
+		return
+	_boss_menu_row = Node2D.new()
+	_boss_menu_row.position = _boss_menu_btn.position
+	add_child(_boss_menu_row)
+
+	var items : Array = [
+		["НИНДЗЯ", Color(1.0, 0.55, 0.55), _dev_summon_boss, null],
+		["КРОК",   Color(0.60, 1.0, 0.50), _on_croc_tapped, LEATHERHEAD_SCRIPT.F_IDLE],
+		["КЛУБ",   Color(1.0, 0.65, 1.0),  _on_club_tapped, CLUB_BOSS_SCRIPT.F_IDLE[0]],
+		["✕",      Color(0.75, 0.75, 0.80), _close_boss_menu, null],
+	]
+	for i in items.size():
+		var it : Array = items[i]
+		var chip : Node2D = _dev_chip(String(it[0]), it[1], it[2], it[3])
+		chip.position = Vector2((DEV_SZ + DEV_GAP) * float(i + 1), 0.0)
+		_boss_menu_row.add_child(chip)
+
+func _close_boss_menu() -> void:
+	if is_instance_valid(_boss_menu_row):
+		_boss_menu_row.queue_free()
+	_boss_menu_row = null
+
+# Босс вызван — и чип, и раскрытый ряд уезжают: второго босса за забег звать
+# некуда, а оставленная кнопка обещала бы обратное.
+func _drop_boss_menu() -> void:
+	_close_boss_menu()
+	if is_instance_valid(_boss_menu_btn):
+		_boss_menu_btn.queue_free()
+	_boss_menu_btn = null
 
 func _dev_summon_boss() -> void:
 	_play_btn_sfx()
-	# Avoid double-spawning if the player taps the chip twice.
-	if is_instance_valid(_dev_boss_btn):
-		_dev_boss_btn.queue_free()
-		_dev_boss_btn = null
+	_drop_boss_menu()
 	_on_boss_time()
-
-# КРОКОДИЛ — отдельной кнопкой, а не заменой боссу: пока он не встроен в
-# кампанию, вызывать его надо когда угодно и не проходя эпизод.
-#
-# Место зависит от рубильника, и это не украшательство. При включённом он шестой
-# в левом столбце дев-чипов; при выключенном столбца нет вовсе, и кнопка,
-# оставшись на шестом месте, висела бы посреди пустого края экрана. Поэтому без
-# дев-чипов она садится в самый низ — туда, где столбец начинался.
-func _build_croc_btn() -> void:
-	var vp     := get_viewport().get_visible_rect().size
-	const SZ   := 44.0
-	const GAP  := 6.0
-	var slot : float = 5.0 if DevFlags.ENABLED else 0.0
-	_croc_btn          = Node2D.new()
-	_croc_btn.position = Vector2(8.0, vp.y - SZ - 8.0 - slot * (SZ + GAP))
-	add_child(_croc_btn)
-
-	var bg := ColorRect.new()
-	bg.color = Color(0.06, 0.20, 0.08, 0.92)
-	bg.size  = Vector2(SZ, SZ)
-	_croc_btn.add_child(bg)
-
-	var stripe := ColorRect.new()
-	stripe.color = Color(0.45, 1.0, 0.35, 0.85)
-	stripe.size  = Vector2(SZ, 2.0)
-	_croc_btn.add_child(stripe)
-
-	var icon := _make_icon(LEATHERHEAD_SCRIPT.F_IDLE, SZ - 16.0)
-	icon.position = Vector2(8.0, 1.0)
-	_croc_btn.add_child(icon)
-
-	var lbl := Label.new()
-	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 9)
-	lbl.text                 = "КРОК"
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.modulate             = Color(0.60, 1.0, 0.50)
-	lbl.size                 = Vector2(SZ, SZ - 30.0)
-	lbl.position             = Vector2(0.0, 30.0)
-	_croc_btn.add_child(lbl)
-
-	var btn := Button.new()
-	btn.flat       = true
-	btn.focus_mode = Control.FOCUS_NONE
-	btn.size       = Vector2(SZ, SZ)
-	btn.pressed.connect(_on_croc_tapped)
-	_croc_btn.add_child(btn)
 
 func _on_croc_tapped() -> void:
 	_play_btn_sfx()
-	if is_instance_valid(_croc_btn):
-		_croc_btn.queue_free()
-		_croc_btn = null
-	if is_instance_valid(_club_btn):
-		_club_btn.queue_free()
-		_club_btn = null
+	_drop_boss_menu()
 	summon_leatherhead(true)
-
-# ХОЗЯИН КЛУБА — вторая кнопка вызова, рядом с крокодилом и по той же причине:
-# в кампанию он не встроен, и без кнопки посмотреть на него нельзя ничем.
-# Обе стоят СНАРУЖИ рубильника дев-кнопок и уедут отсюда тогда, когда у боссов
-# появится своё место в игре.
-#
-# Вторая кнопка садится ровно над первой — они одного рода, и разносить их по
-# разным углам значило бы делать вид, что это разные вещи.
-func _build_club_btn() -> void:
-	var vp     := get_viewport().get_visible_rect().size
-	const SZ   := 44.0
-	const GAP  := 6.0
-	var slot : float = 6.0 if DevFlags.ENABLED else 1.0
-	_club_btn          = Node2D.new()
-	_club_btn.position = Vector2(8.0, vp.y - SZ - 8.0 - slot * (SZ + GAP))
-	add_child(_club_btn)
-
-	var bg := ColorRect.new()
-	bg.color = Color(0.16, 0.05, 0.20, 0.92)
-	bg.size  = Vector2(SZ, SZ)
-	_club_btn.add_child(bg)
-
-	var stripe := ColorRect.new()
-	stripe.color = Color(0.95, 0.45, 1.00, 0.85)
-	stripe.size  = Vector2(SZ, 2.0)
-	_club_btn.add_child(stripe)
-
-	var icon := _make_icon(CLUB_BOSS_SCRIPT.F_IDLE[0], SZ - 16.0)
-	icon.position = Vector2(8.0, 1.0)
-	_club_btn.add_child(icon)
-
-	var lbl := Label.new()
-	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 9)
-	lbl.text                 = "КЛУБ"
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.modulate             = Color(1.0, 0.65, 1.0)
-	lbl.size                 = Vector2(SZ, SZ - 30.0)
-	lbl.position             = Vector2(0.0, 30.0)
-	_club_btn.add_child(lbl)
-
-	var btn := Button.new()
-	btn.flat       = true
-	btn.focus_mode = Control.FOCUS_NONE
-	btn.size       = Vector2(SZ, SZ)
-	btn.pressed.connect(_on_club_tapped)
-	_club_btn.add_child(btn)
 
 func _on_club_tapped() -> void:
 	_play_btn_sfx()
-	if is_instance_valid(_club_btn):
-		_club_btn.queue_free()
-		_club_btn = null
-	if is_instance_valid(_croc_btn):
-		_croc_btn.queue_free()
-		_croc_btn = null
+	_drop_boss_menu()
 	summon_club_boss(true)
 
 # Хозяин клуба поднимается тем же путём, что крокодил и Нога Ниндзя.
@@ -7129,9 +7181,7 @@ func _on_normaldo_died(total_pizzas: int, death_pos: Vector2) -> void:
 	if is_instance_valid(_dev_collisions_btn):
 		_dev_collisions_btn.queue_free()
 		_dev_collisions_btn = null
-	if is_instance_valid(_dev_boss_btn):
-		_dev_boss_btn.queue_free()
-		_dev_boss_btn = null
+	_drop_boss_menu()
 	if is_instance_valid(_dev_phase_btn):
 		_dev_phase_btn.queue_free()
 		_dev_phase_btn = null

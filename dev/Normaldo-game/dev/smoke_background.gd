@@ -81,10 +81,12 @@ func _test_slices() -> void:
 # соседский шов по всем пяти полосам — 41 (уровень 4, куски 23→24), и это шов
 # самого рисунка, а не нарезки.
 #
-# Стык ПОСЛЕДНЕГО куска с ПЕРВЫМ не проверяется намеренно: полоса не зациклена,
-# её хвост при нарезке отбрасывается, и сходиться там нечему. Поэтому куски и
-# идут пинг-понгом, а не по кругу (см. background.gd).
+# Стык ПОСЛЕДНЕГО куска с ПЕРВЫМ проверяется отдельным, более мягким порогом:
+# полоса не зациклена, её хвост при нарезке отбрасывается, и сходиться там
+# нечему. Один такой стык на круг — цена цикла, и она измерена (29–87 по
+# уровням). Альтернатива — пинг-понг — обходится дороже: см. background.gd.
 const SEAM_LIMIT : float = 48.0
+const WRAP_LIMIT : float = 95.0
 
 func _test_seams() -> void:
 	var worst : float = 0.0
@@ -103,6 +105,21 @@ func _test_seams() -> void:
 				broken.append("ур.%d %02d→%02d %.0f" % [level, i + 1, i + 2, d])
 	_check(broken.is_empty(), "все швы сходятся, худший %s (%.0f из 255): %s"
 		% [worst_at, worst, broken])
+
+	# Замыкание круга. Порог свой и мягкий — это единственный стык, которого
+	# художник не рисовал. Смысл проверки в том, чтобы он не уехал ЕЩЁ дальше
+	# при перенарезке полос.
+	var wrap_worst : float = 0.0
+	var wrap_bad : Array = []
+	for level in range(1, BG.LEVEL_COUNT + 1):
+		var arr : Array = _slices(level)
+		var d : float = _edge_diff((arr[arr.size() - 1] as Texture2D).get_image(),
+			(arr[0] as Texture2D).get_image())
+		wrap_worst = maxf(wrap_worst, d)
+		if d > WRAP_LIMIT:
+			wrap_bad.append("ур.%d %.0f" % [level, d])
+	_check(wrap_bad.is_empty(), "замыкание круга в пределах %.0f, худшее %.0f: %s"
+		% [WRAP_LIMIT, wrap_worst, wrap_bad])
 
 func _edge_diff(a: Image, b: Image) -> float:
 	var h : int = mini(a.get_height(), b.get_height())
@@ -150,27 +167,43 @@ func _test_scene() -> void:
 		extra.append("%s (%s)" % [c.name, c.get_class()])
 	_check(extra.is_empty(), "у фона нет декора: %s" % [extra])
 
-	# Куски идут ПОДРЯД. Иначе полоса рассыпается на случайные картинки, и все
-	# замеры швов выше становятся бессмысленными.
+	# Куски идут ПОДРЯД И ПО КРУГУ. Проверяется РЕАЛЬНАЯ выданная
+	# последовательность, а не «соседние индексы соседи»: ровно на этом
+	# проскочил пинг-понг. Он выдавал 1,2,…,N,N−1,…, и «соседние индексы
+	# соседи» на такой цепочке ПРАВДА — а на экране при этом сходились правый
+	# край куска i и левый край куска i−1, то есть НЕ те края, что рисовал
+	# художник. Каждый стык обратного хода был порван, и это выглядело как
+	# «уровень нарезан случайно».
 	#
-	# Проверяется не «по кругу», а «соседние индексы всегда соседи»: полоса
-	# отматывается пинг-понгом, дойдя до конца, и после последнего куска идёт
-	# предпоследний, а не первый.
-	var order_ok := true
-	var turned   := false
-	var seen : Array = []
-	bg.call("set_level", 5)          # самая короткая полоса: разворот успеет случиться
-	for i in 40:
-		seen.append(int(bg.get("_next_idx")))
+	# Поэтому теперь берётся сама цепочка и по ней МЕРЯЮТСЯ ШВЫ — тем же
+	# _edge_diff, что и выше. Так проверка ловит любой порядок, который на
+	# бумаге выглядит связным, а на экране рвёт картинку.
+	bg.call("set_level", 5)          # самая короткая полоса: круг успеет замкнуться
+	var n5 : int = int(BG.LEVEL_SLICES[5])
+	var arr5 : Array = _slices(5)
+	var chain : Array = []
+	for i in n5 * 2 + 3:
+		chain.append(int(bg.get("_next_idx")))
 		bg.call("_take_next_slice")
-	for i in range(1, seen.size()):
-		var step : int = int(seen[i]) - int(seen[i - 1])
-		if absi(step) != 1:
-			order_ok = false
-		if step < 0:
-			turned = true
-	_check(order_ok, "куски выдаются подряд: %s…" % [seen.slice(0, 8)])
-	_check(turned, "и на конце полоса отматывается назад, а не рвётся")
+
+	var cycled := true
+	for i in range(1, chain.size()):
+		if int(chain[i]) != (int(chain[i - 1]) + 1) % n5:
+			cycled = false
+	_check(cycled, "куски идут по кругу: %s…" % [chain.slice(0, 12)])
+
+	var chain_worst : float = 0.0
+	var chain_bad : Array = []
+	for i in range(1, chain.size()):
+		var a : Image = (arr5[int(chain[i - 1])] as Texture2D).get_image()
+		var b : Image = (arr5[int(chain[i])] as Texture2D).get_image()
+		var d : float = _edge_diff(a, b)
+		chain_worst = maxf(chain_worst, d)
+		if d > WRAP_LIMIT:
+			chain_bad.append("%02d→%02d %.0f" % [int(chain[i - 1]) + 1, int(chain[i]) + 1, d])
+	_check(chain_bad.is_empty(),
+		"в выданной цепочке нет порванных швов, худший %.0f: %s" % [chain_worst, chain_bad])
+
 	game.queue_free()
 	await process_frame
 

@@ -169,6 +169,17 @@ func _initialize() -> void:
 			await process_frame
 			tn += 1.0 / 60.0
 
+	# Раскрытая выпадашка «БОССЫ»: чип и ряд НИНДЗЯ · КРОК · КЛУБ · ✕.
+	if argv.size() > 5 and String(argv[5]) == "bossmenu":
+		hud.call("_toggle_boss_menu")
+		for _i in 10:
+			await process_frame
+		await RenderingServer.frame_post_draw
+		get_root().get_texture().get_image().save_png("%s/%s.png" % [out, name])
+		print("saved ", name)
+		quit(0)
+		return
+
 	# Пицца-пати: пачка паркуется справа, над ней висит подсказка TAP!.
 	if argv.size() > 5 and String(argv[5]) == "party":
 		var party : Node = game.get_node_or_null("PizzaParty")
