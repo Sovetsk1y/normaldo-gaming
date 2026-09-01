@@ -17,6 +17,14 @@ extends Area2D
 var speed  : float = 250.0
 var damage : int   = 1
 
+# Бьёт или ЗАМЕДЛЯЕТ. Охрана и полиция бьют; девочки — нет: об них не умирают, об
+# них ВЯЗНУТ. Это и делает третий акт другим по типу опасности: стена девочек не
+# убивает, а отнимает скорость, и уже потому увернуться от рывка хозяина
+# становится нечем.
+var slows : bool = false
+var slow_duration : float = 1.6
+var slow_sound : AudioStream = null
+
 var _dir  : Vector2 = Vector2.LEFT
 var _spr  : Sprite2D = null
 var _bob  : float = 0.0
@@ -40,7 +48,15 @@ var _px  : float = 74.0
 func _ready() -> void:
 	collision_layer = 2
 	collision_mask  = 0
-	add_to_group("obstacle")
+	if slows:
+		# Замедляющие проходят по общему пути предметов вроде банана: игроку
+		# нужен тот же отклик, что он уже знает, а не отдельный вид вязкости.
+		add_to_group("slowing")
+		set_meta("slow_duration", slow_duration)
+		set_meta("slow_sound", slow_sound)
+		set_meta("item_tag", "club_girl")
+	else:
+		add_to_group("obstacle")
 	add_to_group("club_minion")
 	_base_y = position.y
 	_bob    = randf() * TAU
@@ -73,3 +89,20 @@ func _process(delta: float) -> void:
 # Сбивается спеллом, как обычный предмет потока.
 func on_hit() -> void:
 	queue_free()
+
+# Перейти на другую линию НА ХОДУ. Так полиция закрывает свободную линию собой:
+# один из копов рядом с дырой уходит в неё, открывая свою (см. club_boss.gd →
+# «Акт 2»). Едет он туда за время, за которое его видно, — телепорт читался бы
+# как подмена кадра, а не как манёвр.
+const SWAP_T : float = 0.30
+
+func slide_to_y(y: float) -> void:
+	if not is_inside_tree():
+		_base_y = y
+		return
+	var tw := create_tween()
+	if tw == null:
+		_base_y = y
+		return
+	tw.tween_property(self, "_base_y", y, SWAP_T)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)

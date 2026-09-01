@@ -4,7 +4,7 @@ extends SceneTree
 #   xvfb-run -a godot --path . --script res://dev/shot_club.gd -- <папка> <такт>
 #
 # такт: intro | banner | call | tele | security | siren | police | girls |
-#       track | finale | leave
+#       track | charge | dash | swap | finale | leave
 #
 # Такты снимаются ПО СОБЫТИЮ, а не по секундомеру: полоса вызова висит 0.55 с,
 # вспышка мигалки — 0.18 с, и ловить их фиксированной задержкой значит гадать.
@@ -93,6 +93,30 @@ func _initialize() -> void:
 			b.call("_act_floor")
 			await _until(func() -> bool: return bool(b.get("_tracking")), 14.0)
 			await _wait(1.4)
+		"charge":
+			# Заряд: он встал, ударил кастетами оземь, на полу метка.
+			b.call("_act_floor")
+			await _until(func() -> bool:
+				return String(b.get("_chase")) == "charge", 24.0)
+			await _wait(0.22)
+		"dash":
+			b.call("_act_floor")
+			await _until(func() -> bool:
+				return String(b.get("_chase")) == "dash", 24.0)
+			await _wait(0.05)
+		"swap":
+			# Момент подмены дыры во втором акте: коп уже сошёл со своей линии и
+			# закрывает свободную.
+			b.call("_act_police")
+			await _until(func() -> bool:
+				for m in get_root().get_tree().get_nodes_in_group("club_minion"):
+					var lane : int = int(m.get_meta("lane", -1))
+					if int(m.get_meta("lane0", -9)) == -9:
+						m.set_meta("lane0", lane)
+					elif int(m.get_meta("lane0")) != lane:
+						return true
+				return false, 30.0)
+			await _wait(0.10)
 		"finale":
 			# Момент, ради которого финал и переделан: машина уже встала, все
 			# садятся.

@@ -23,7 +23,7 @@ const CLUB := preload("res://scripts/club_boss.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 37
+const EXPECTED_CHECKS : int = 42
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -42,6 +42,8 @@ func _initialize() -> void:
 	await _test_police()
 	print("── Акт 3: танцпол ──")
 	await _test_floor()
+	print("── Акт 3: рывок бьёт в точку ──")
+	await _test_dash_is_fixed()
 	print("── Кулаки бьют по-настоящему ──")
 	await _test_fist_hurts()
 	print("── Финал: его увозят ──")
@@ -137,6 +139,12 @@ func _test_assets() -> void:
 	e["game"].queue_free()
 	await process_frame
 
+# Зона босса включена ПРЯМО СЕЙЧАС: она существует весь такт погони, но
+# `monitorable` у неё поднимается только на рывке.
+func _fist_live(b: Node) -> bool:
+	var f : Area2D = _fist_of(b)
+	return f != null and f.monitorable
+
 # Ударная зона самого босса, если она сейчас есть.
 func _fist_of(b: Node) -> Area2D:
 	for c in b.get_children():
@@ -230,14 +238,21 @@ func _test_police() -> void:
 
 	var seen_left  := false
 	var seen_right := false
+	var swapped    := false
 	var lanes_hit : Dictionary = {}
 	var t := 0.0
-	while t < 9.0:
+	while t < 14.0:
 		await _tick(1.0 / 60.0)
 		t += 1.0 / 60.0
 		for m in get_root().get_tree().get_nodes_in_group("club_minion"):
 			if not is_instance_valid(m):
 				continue
+			var lane_now : int = int(m.get_meta("lane", -1))
+			if int(m.get_meta("lane_seen", -2)) == -2:
+				m.set_meta("lane_seen", lane_now)
+			elif int(m.get_meta("lane_seen")) != lane_now:
+				swapped = true
+				m.set_meta("lane_seen", lane_now)
 			if m.get_meta("side", "") == "":
 				# Сторона определяется по направлению: у пришедшего слева оно в +X.
 				var d : Vector2 = m.get("_dir")
@@ -249,11 +264,15 @@ func _test_police() -> void:
 		"полиция приезжает с ОБЕИХ сторон: слева=%s, справа=%s" % [seen_left, seen_right])
 	_check(lanes_hit.size() >= 4,
 		"залп накрывает почти все линии: %d из 5" % lanes_hit.size())
-	_check(CLUB.POL_SPEED > CLUB.SEC_SPEED * 1.3,
-		"и она заметно быстрее охраны: %.0f против %.0f" % [CLUB.POL_SPEED, CLUB.SEC_SPEED])
+	_check(CLUB.POL_SPEED > CLUB.SEC_SPEED,
+		"и она быстрее охраны: %.0f против %.0f" % [CLUB.POL_SPEED, CLUB.SEC_SPEED])
 	# Залпов должно быть много: акт из трёх залпов кончался раньше, чем игрок
 	# успевал понять правило мигалки.
 	_check(CLUB.POL_VOLLEYS >= 6, "залпов шесть: %d" % CLUB.POL_VOLLEYS)
+	# ПОДМЕНА ДЫРЫ: кто-то из копов уже в полёте сходит со своей линии и
+	# закрывает свободную. Ловится по смене `lane` — по одной высоте линии это
+	# было бы не отличить от покачивания на ходу.
+	_check(swapped, "и кто-то из копов на лету закрыл свободную линию собой")
 
 	b.call("_abort")
 	e["game"].queue_free()
@@ -266,83 +285,121 @@ func _test_floor() -> void:
 	var e : Dictionary = await _boot()
 	var b : Node2D = _boss(e)
 	await process_frame
-	# Игрок стоит в углу — так видно, что босс действительно ЕДЕТ к нему.
+	# Игрок стоит в углу — так видно, что босс действительно ИДЁТ к нему.
 	(e["n"] as Node2D).position = Vector2(120.0, e["vp"].y * 0.15)
 	b.call("_act_floor")
 
-	# Первая стена: пять линий минус одна.
+	# Стена СПЛОШНАЯ: дыры в ней нет. Дыра была нужна, пока стена убивала;
+	# теперь она не убивает, и проход в ней не нужен.
 	var wall : int = 0
 	var t := 0.0
-	while t < 5.0 and wall == 0:
+	while t < 6.0 and wall == 0:
 		await _tick(1.0 / 60.0)
 		t += 1.0 / 60.0
-		var cnt : int = _count("club_minion")
-		if cnt > 0:
-			await _tick(0.1)
+		if _count("club_minion") > 0:
+			await _tick(0.15)
 			wall = _count("club_minion")
-	_check(wall == CLUB.LANES - 1,
-		"стена девочек оставляет ровно одну дыру: %d из %d" % [wall, CLUB.LANES])
+	_check(wall == CLUB.LANES,
+		"стена девочек сплошная: %d из %d линий" % [wall, CLUB.LANES])
 
-	# Кастеты и погоня.
+	# И она НЕ БЬЁТ, а ЗАМЕДЛЯЕТ. Об девочку не умирают — об неё вязнут, и
+	# именно этим третий акт отличается по типу опасности от первых двух.
+	var all_slow := true
+	var any_hits := false
+	for m in get_root().get_tree().get_nodes_in_group("club_minion"):
+		if not m.is_in_group("slowing"):
+			all_slow = false
+		if m.is_in_group("obstacle"):
+			any_hits = true
+	_check(all_slow and not any_hits,
+		"и не бьёт, а замедляет: %.1f с вязкости" % CLUB.GIRL_SLOW_T)
+
+	# ── Подход → заряд → рывок ──────────────────────────────────────────────
 	var chased := false
-	var x_before : float = b.position.x
 	t = 0.0
-	while t < 8.0 and not chased:
+	while t < 9.0 and not chased:
 		await _tick(1.0 / 60.0)
 		t += 1.0 / 60.0
-		if bool(b.get("_tracking")):
-			chased = true
-	_check(chased, "хозяин надевает кастеты и начинает гнаться")
-	if chased:
-		# У него есть УДАРНАЯ ЗОНА — и ровно на этом такте. Раньше её не было
-		# вовсе: он доезжал до головы и проходил сквозь неё без всякого урона,
-		# то есть последний акт был пустым.
-		var fist : Area2D = _fist_of(b)
-		_check(fist != null and int(fist.get("damage")) >= 1,
-			"и наконец БЬЁТ: у него появилась ударная зона")
+		chased = bool(b.get("_tracking"))
+	_check(chased, "хозяин надевает кастеты и идёт сам")
+	if not chased:
+		b.call("_abort")
+		e["game"].queue_free()
+		await process_frame
+		for _i in 7:
+			_check(false, "—")
+		return
 
-		# И он НЕ ВСТАЁТ В ДЫРУ. Стена девочек оставляет ровно один проход, и
-		# хозяин, гонящийся за головой, вставал ровно в него: игрок шёл к
-		# проходу, а проход был занят, и пройти было физически нельзя.
-		# Замер идёт ПО КАДРАМ, а стена живёт по РЕАЛЬНОМУ времени: под нагрузкой
-		# кадры длиннее, и фиксированное окно успевало закончиться уже после
-		# стены — проб не набиралось, и проверка падала на ровном месте. Поэтому
-		# окно с запасом, а выход — по числу набранных проб.
-		var in_gap := 0
-		var samples := 0
-		var tg := 0.0
-		while tg < 6.0 and samples < 90:
-			await _tick(1.0 / 60.0)
-			tg += 1.0 / 60.0
-			if not is_instance_valid(b):
-				break
-			var gap : int = int(b.get("_gap_lane"))
-			if gap < 0:
-				continue
-			samples += 1
-			if int(floor(b.position.y / (e["vp"].y / CLUB.LANES))) == gap:
-				in_gap += 1
-		_check(samples > 20 and in_gap == 0,
-			"и не встаёт в дыру стены: %d кадров из %d" % [in_gap, samples])
-		var knuck : Node = null
-		for c in b.get_children():
-			if c is Node2D and c.get_child_count() == 2 and c.get_child(0) is Sprite2D:
-				knuck = c
-		_check(knuck != null, "и кастеты на нём — два кулака")
-		var y_before : float = b.position.y
-		await _tick(1.2)
-		_check(b.position.y < y_before - 20.0 or b.position.x < x_before - 20.0,
-			"и он действительно едет к игроку: (%.0f, %.0f) → (%.0f, %.0f)"
-				% [x_before, y_before, b.position.x, b.position.y])
-		# Но не мгновенно: уйти от него должно быть можно.
-		_check(CLUB.TRACK_SPEED < 200.0,
-			"но медленнее рывка игрока: %.0f" % CLUB.TRACK_SPEED)
+	var knuck : Node = null
+	for c in b.get_children():
+		if c is Node2D and c.get_child_count() == 2 and c.get_child(0) is Sprite2D:
+			knuck = c
+	_check(knuck != null, "и кастеты на нём — два кулака")
+
+	# Фазы идут по порядку. Проверяется именно ПОРЯДОК: рывок без заряда — это
+	# удар без телеграфа, а он тут запрещён так же, как у всех остальных боссов.
+	var seen : Array = []
+	var mark_at_charge := false
+	var fist_on_approach := false
+	t = 0.0
+	while t < 14.0 and not seen.has("recover"):
+		await _tick(1.0 / 60.0)
+		t += 1.0 / 60.0
+		if not is_instance_valid(b):
+			break
+		var ph : String = String(b.get("_chase"))
+		if ph != "" and (seen.is_empty() or seen[seen.size() - 1] != ph):
+			seen.append(ph)
+		if ph == "charge" and _count("club_mark") > 0:
+			mark_at_charge = true
+		if ph in ["approach", "recover"] and _fist_live(b):
+			fist_on_approach = true
+	_check(seen.has("charge") and seen.has("dash")
+			and seen.find("charge") < seen.find("dash"),
+		"СНАЧАЛА заряд, ПОТОМ рывок: %s" % [seen])
+	_check(mark_at_charge, "и на полу метка — куда прилетит")
+	_check(not fist_on_approach, "а бьёт он ТОЛЬКО в рывке, не на подходе")
 
 	b.call("_abort")
 	e["game"].queue_free()
 	await process_frame
 
-# ── Кулаки ───────────────────────────────────────────────────────────────────
+# ── Рывок бьёт В ТОЧКУ, а не в игрока ────────────────────────────────────────
+# Точка запоминается в начале заряда. Рывок, доводящийся до головы, отменил бы и
+# заряд, и уворот: уходить было бы некуда, и такт свёлся бы к «не подпускай его».
+func _test_dash_is_fixed() -> void:
+	var e : Dictionary = await _boot()
+	var b : Node2D = _boss(e)
+	await process_frame
+	(e["n"] as Node2D).position = Vector2(e["vp"].x * 0.35, e["vp"].y * 0.5)
+	b.position = Vector2(e["vp"].x * 0.35 + 300.0, e["vp"].y * 0.5)
+	b.call("_start_track")
+
+	var t := 0.0
+	while t < 8.0 and String(b.get("_chase")) != "charge":
+		await _tick(1.0 / 60.0)
+		t += 1.0 / 60.0
+	_check(String(b.get("_chase")) == "charge", "подошёл и начал заряд")
+	var target : Vector2 = b.get("_dash_to")
+
+	# УХОДИМ во время заряда — ровно то, ради чего заряд и нужен.
+	(e["n"] as Node2D).position = Vector2(e["vp"].x * 0.35, e["vp"].y * 0.88)
+	t = 0.0
+	while t < 8.0 and String(b.get("_chase")) != "recover":
+		await _tick(1.0 / 60.0)
+		t += 1.0 / 60.0
+	_check(String(b.get("_chase")) == "recover", "рывок отработал и кончился")
+	_check(b.position.distance_to(target) < 70.0,
+		"и пришёл в ЗАПОМНЕННУЮ точку: %.0f px от неё" % b.position.distance_to(target))
+	_check(b.position.distance_to((e["n"] as Node2D).position) > 120.0,
+		"а не за игроком: %.0f px до него"
+			% b.position.distance_to((e["n"] as Node2D).position))
+
+	b.call("_abort")
+	e["game"].queue_free()
+	await process_frame
+
+# ── Кулаки ─# ── Кулаки ───────────────────────────────────────────────────────────────────
 # «Зона есть» и «зона бьёт» — разные утверждения, и второе важнее. Проверяется
 # оно на СМЕРТНОМ Нормальдо: его ставят вплотную к боссу на такте погони и
 # смотрят, дошёл ли урон до игрока. До этой правки босс проходил сквозь голову
@@ -351,14 +408,19 @@ func _test_fist_hurts() -> void:
 	var e : Dictionary = await _boot(false)
 	var b : Node2D = _boss(e)
 	await process_frame
-	b.position = Vector2(e["vp"].x * 0.5, e["vp"].y * 0.5)
+	(e["n"] as Node2D).position = Vector2(e["vp"].x * 0.4, e["vp"].y * 0.5)
+	b.position = Vector2(e["vp"].x * 0.4 + 260.0, e["vp"].y * 0.5)
 	b.call("_start_track")
 	await _tick(0.3)
 	_check(_fist_of(b) != null, "на такте погони у босса есть зона")
-	(e["n"] as Node2D).position = b.position
-	await _tick(2.0)
+	# Игрок НЕ УХОДИТ — рывок обязан его достать. Ждём столько, сколько нужно
+	# на подход, заряд и сам рывок.
+	var t := 0.0
+	while t < 8.0 and not bool(e["n"].get("_dead")):
+		await _tick(1.0 / 60.0)
+		t += 1.0 / 60.0
 	_check(bool(e["n"].get("_dead")),
-		"и она ДОХОДИТ до игрока: удар засчитан")
+		"и рывок ДОХОДИТ до стоящего на месте: удар засчитан")
 	if is_instance_valid(b):
 		b.call("_abort")
 	e["game"].queue_free()

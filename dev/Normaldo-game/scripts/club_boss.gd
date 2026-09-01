@@ -125,9 +125,6 @@ var _stopped  : bool = false
 var _tracking : bool = false
 var _knuckles : Node2D = null
 var _fist     : Area2D = null
-# Линия, на которой сейчас дыра в стене девочек, или −1, когда стены нет.
-# Хозяин в неё не заходит — см. `_keep_off_gap`.
-var _gap_lane : int = -1
 var _bar_lamps : Array = []
 var _bar_layer : CanvasLayer = null
 var _anim_t   : float = 0.0
@@ -180,7 +177,7 @@ func _abort() -> void:
 		return
 	_stopped  = true
 	_tracking = false
-	_gap_lane = -1
+	_chase    = ""
 	if is_instance_valid(_music):
 		_music.stop()
 	for grp in ["club_minion", "club_fx"]:
@@ -516,15 +513,22 @@ func _lane_y(lane: int) -> float:
 
 # Вызванный выходит из-за края и идёт по своей линии. Сторона задаётся знаком
 # направления: −1 справа налево, +1 слева направо.
-func _send(tex: Texture2D, lane: int, dir_x: float, spd: float, px: float = MINION_PX) -> void:
+func _send(tex: Texture2D, lane: int, dir_x: float, spd: float,
+		px: float = MINION_PX, slows: bool = false) -> Area2D:
 	if not is_instance_valid(_game_root):
-		return
+		return null
 	var vp := get_viewport_rect().size
 	var m := Area2D.new()
 	m.set_script(MINION_SCRIPT)
 	m.call("init", tex, px, Vector2(dir_x, 0.0), spd)
+	if slows:
+		m.set("slows", true)
+		m.set("slow_duration", GIRL_SLOW_T)
+		m.set("slow_sound", SFX_KISS)
 	m.position = Vector2(vp.x + 90.0 if dir_x < 0.0 else -90.0, _lane_y(lane))
+	m.set_meta("lane", lane)
 	_game_root.add_child(m)
+	return m
 
 # ── Акт 1: ОХРАНА ────────────────────────────────────────────────────────────
 # «Выбери линию». Хозяин звонит, загораются полосы, и по ним бегут охранники.
@@ -539,7 +543,7 @@ func _send(tex: Texture2D, lane: int, dir_x: float, spd: float, px: float = MINI
 # 0.55 с, и последняя волна так же честна, как первая.
 const SEC_WAVES : Array = [2, 2, 3, 3, 4, 4]   # сколько линий занимает волна
 const SEC_WAITS : Array = [1.50, 1.30, 1.10, 0.95, 0.82, 0.70]
-const SEC_SPEED : float = 300.0
+const SEC_SPEED : float = 395.0
 const COL_SEC : Color = Color(0.40, 1.00, 0.45)
 
 func _act_security() -> void:
@@ -612,10 +616,18 @@ func _act_police() -> void:
 			return
 		_screen_flash(col)
 		_screen_shake(7.0, 5)
+		var squad : Array = []
 		for l in LANES:
 			if l == free_lane:
 				continue
-			_send(T_COP, l, 1.0 if from_left else -1.0, POL_SPEED)
+			var cop : Area2D = _send(T_COP, l, 1.0 if from_left else -1.0, POL_SPEED)
+			if cop != null:
+				squad.append(cop)
+		# ПОДМЕНА ДЫРЫ — на лету, уже в полёте. Со второго залпа: первый обязан
+		# отработать по прежним правилам, иначе правило «встань на свободную» не
+		# успевает даже сложиться, а ломать нужно именно его.
+		if v >= 1:
+			_swap_gap(squad, free_lane)
 		await get_tree().create_timer(POL_GAP).timeout
 		if not _alive():
 			return
@@ -654,24 +666,76 @@ func _siren(col: Color, from_left: bool) -> void:
 	if is_instance_valid(cl):
 		cl.queue_free()
 
+# ПОДМЕНА ДЫРЫ. Залп идёт, игрок уже встал на свободную линию — и тут ближайший
+# к ней коп СХОДИТ СО СВОЕЙ И ЗАКРЫВАЕТ ЕЁ СОБОЙ, открывая ту, с которой ушёл.
+#
+# Это единственное усложнение боя, которое отменяет уже принятое решение, и
+# поэтому оно обязано быть ЧЕСТНЫМ вдвойне:
+#
+#   • свободной становится СОСЕДНЯЯ линия, а не любая: уйти нужно на шаг, а не
+#     через полэкрана;
+#   • перебегающий коп едет туда 0.3 с и всё это время виден — телепорт читался
+#     бы как подмена кадра, а не как манёвр;
+#   • обе линии перекрашиваются: прежняя дыра гаснет красным, новая загорается
+#     жёлтым — тем же цветом, которым свободную показывали с самого начала.
+#
+# И включается это со второго залпа. Первый обязан отработать по прежним
+# правилам: правило «встань на свободную» надо сперва дать выучить, ломать
+# невыученное нечего.
+const SWAP_DELAY : float = 0.42   # сколько залп летит до подмены
+
+func _swap_gap(squad: Array, free_lane: int) -> void:
+	await get_tree().create_timer(SWAP_DELAY).timeout
+	if not _alive() or squad.is_empty():
+		return
+	# Ближайший к дыре — тот, кто может закрыть её одним шагом.
+	var mover : Area2D = null
+	var best : int = 99
+	for c in squad:
+		if not is_instance_valid(c):
+			continue
+		var d : int = absi(int(c.get_meta("lane", -9)) - free_lane)
+		if d < best:
+			best  = d
+			mover = c
+	if mover == null or best != 1:
+		return
+	var opened : int = int(mover.get_meta("lane"))
+	mover.set_meta("lane", free_lane)
+	mover.call("slide_to_y", _lane_y(free_lane))
+	# Прежняя дыра закрывается — гасим её красным; открытая загорается жёлтым.
+	_call_lane(free_lane, COL_RED, 0.45)
+	_call_lane(opened, Color(0.95, 0.95, 0.35), 0.75)
+	_play_sfx(SFX_SECURITY)
+
 # ── Акт 3: ТАНЦПОЛ ───────────────────────────────────────────────────────────
-# «Он идёт сам». Единственный такт боя, где опасен сам хозяин.
+# «Он идёт сам». Единственный такт боя, где опасен сам хозяин, и единственный, где
+# опасность ДВУХ РАЗНЫХ РОДОВ.
 #
-# Сначала он зовёт девочек, и пол заливает стеной: пять линий минус ОДНА ДЫРА, и
-# дыра ползёт от волны к волне. Идут они медленно — стена не про реакцию, а про
-# то, чтобы всё время двигаться в нужную сторону.
+# Девочки заливают пол СПЛОШНОЙ стеной, без дыры, — и не бьют вовсе. Об них
+# ВЯЗНУТ: касание замедляет. Стена без дыры не была бы честной, если бы убивала;
+# а раз она не убивает, дыра ей и не нужна — она не про «пройди», она про «во
+# что ты придёшь к рывку».
 #
-# А поверх этого он надевает кастеты и НАЧИНАЕТ ГНАТЬСЯ. В старом проекте «трек»
-# шёл в пустоте и был лучшим тактом боя; здесь он идёт поверх стены, и место,
-# куда уходить от кулаков, каждый раз занято девочками.
+# Потому что рывок и есть настоящая угроза акта. Хозяин подходит, и как только
+# оказывается близко — ВСТАЁТ, бьёт кастетами оземь и запоминает точку, где
+# игрок стоял. Удар оземь и есть телеграф: пока он бьёт, уходить можно и нужно.
+# Потом он стремительно бросается в ЗАПОМНЕННУЮ точку — не в игрока: летящий за
+# головой рывок отменил бы уворот.
+#
+# Связка между стеной и рывком прямая, и в ней весь акт: врезался в девочку —
+# замедлился — уходить от рывка стало нечем. Раньше стена была смертельной и с
+# дырой, а хозяин просто ехал следом и упирался в игрока; теперь стена берёт
+# ресурс, а бьёт удар, от которого этот ресурс и нужен.
 #
 # Стробоскоп бьёт под клубный бас — это и декорация места, и честная помеха:
 # вспышки короткие и не гасят силуэты, но заставляют смотреть, а не считать.
-const GIRL_WAVES  : int   = 3
+const GIRL_WAVES  : int   = 4
 const GIRL_SPEED  : float = 165.0
-# Пауза между стенами держит между ними КОРИДОР шире двух голов: стена, идущая
-# сплошняком, перестаёт быть стеной с дырой и становится просто смертью.
-const GIRL_GAP    : float = 1.55
+# Пауза между стенами держит между ними КОРИДОР шире двух голов: сплошная стена
+# без просветов не оставляла бы места даже на то, чтобы разогнаться.
+const GIRL_GAP    : float = 1.35
+const GIRL_SLOW_T : float = 1.6    # насколько вязнут об девочку
 const TRACK_T     : float = 9.0
 const TRACK_SPEED : float = 96.0
 const COL_PINK : Color = Color(1.00, 0.40, 0.85)
@@ -686,49 +750,55 @@ func _act_floor() -> void:
 	_play_sfx(SFX_KISS)
 	_strobe(TRACK_T + GIRL_WAVES * GIRL_GAP + 1.0)
 
-	# Дыра ползёт: игрок обязан ДВИГАТЬСЯ, а не занять одну линию и стоять.
-	var gap : int = randi() % LANES
-	_gap_lane = gap
-	var step : int = 1 if randf() < 0.5 else -1
 	for w in GIRL_WAVES:
 		for l in LANES:
-			if l != gap:
-				_call_lane(l, COL_PINK, LANE_TELE_T)
+			_call_lane(l, COL_PINK, LANE_TELE_T)
 		await get_tree().create_timer(LANE_TELE_T).timeout
 		if not _alive():
 			return
+		# Стена СПЛОШНАЯ и не бьёт: об неё вязнут. Дыры в ней нет намеренно —
+		# см. шапку акта.
 		for l in LANES:
-			if l == gap:
-				continue
-			_send(T_GIRL[randi() % T_GIRL.size()], l, -1.0, GIRL_SPEED, MINION_PX + 8.0)
-		# Дыра уходит на соседнюю линию и отражается от краёв — так она всегда
-		# рядом с прежней, и уйти к ней успевают.
-		if gap + step < 0 or gap + step >= LANES:
-			step = -step
-		gap += step
-		_gap_lane = gap
-		# Выталкиваем ЕГО СРАЗУ, а не со следующим кадром погони: дыра переехала
-		# на соседнюю линию, и один кадр он стоял бы ровно в ней.
-		if _tracking:
-			position.y = _keep_off_gap(position.y)
-		# Со второй волны он уже гонится — ждать конца стены незачем.
+			_send(T_GIRL[randi() % T_GIRL.size()], l, -1.0, GIRL_SPEED,
+				MINION_PX + 8.0, true)
+		# Со второй волны он уже идёт — ждать конца стены незачем.
 		if w == 1:
 			_start_track()
 		await get_tree().create_timer(GIRL_GAP).timeout
 		if not _alive():
 			return
 
-	# Стена кончилась — запрет на линию дыры снимается, и последние секунды
-	# погони хозяин ходит где угодно.
-	_gap_lane = -1
 	await get_tree().create_timer(TRACK_T).timeout
 	if not _alive():
 		return
 	_stop_track()
 	await get_tree().create_timer(0.8).timeout
 
-# Погоня. Он ЕДЕТ на голову, а не телепортируется: скорость заметно ниже
-# рывка Нормальдо, и уйти можно всегда — вопрос в том, есть ли куда.
+# ── Погоня: подход → удар оземь → РЫВОК ──────────────────────────────────────
+# Раньше он просто ехал за головой и упирался в неё: контакт был постоянным, а
+# уворота не было вовсе — только «оторвись и держись подальше». Теперь опасность
+# дискретная, и у неё есть телеграф.
+#
+#   ПОДХОД  — идёт к игроку на TRACK_SPEED. Медленно; уйти можно всегда.
+#   ЗАРЯД   — подойдя ближе CHARGE_D, ВСТАЁТ, бьёт кастетами оземь и ЗАПОМИНАЕТ
+#             точку, где игрок стоял. Точку тут же рисует сжимающееся кольцо —
+#             прилетит именно туда.
+#   РЫВОК   — бросается в запомненную точку на DASH_SPEED. Бьёт только в рывке.
+#   ОТКАТ   — стоит, отдыхает, зона снята.
+#
+# Бьёт он в ТОЧКУ, а не в игрока. Рывок, доводящийся до головы, отменил бы и
+# заряд, и уворот: уходить было бы некуда, и весь такт свёлся бы к тому, чтобы
+# не подпускать его — то есть к прежней погоне.
+const CHARGE_D     : float = 190.0   # с какого расстояния начинает заряжать
+const CHARGE_T     : float = 0.62    # длина заряда: столько есть на уход
+const DASH_SPEED   : float = 980.0
+const DASH_MAX_T   : float = 0.55    # страховка: рывок не длится вечно
+const RECOVER_T    : float = 0.75
+
+var _phase_t   : float = 0.0
+var _dash_to   : Vector2 = Vector2.ZERO
+var _chase     : String = ""   # "" | approach | charge | dash | recover
+
 func _start_track() -> void:
 	if _tracking:
 		return
@@ -742,19 +812,17 @@ func _start_track() -> void:
 	_fist.set_script(FIST_SCRIPT)
 	_fist.call("setup", W_FIGHT * 0.30)
 	_fist.connect("punched", _on_punched)
+	_fist.set_deferred("monitorable", false)   # включается только на рывке
 	add_child(_fist)
+	_chase    = "approach"
+	_phase_t  = 0.0
 	_tracking = true
 
 # Достал — отскакивает назад. Без отскока зона просто ехала бы дальше вместе с
 # ним и на откате читалась как «он промахнулся», а не «он попал».
 func _on_punched() -> void:
 	_screen_shake(9.0, 6)
-	if not is_instance_valid(_normaldo):
-		return
-	var away : Vector2 = (position - _normaldo.global_position).normalized()
-	var tw := create_tween()
-	tw.tween_property(self, "position", position + away * PUNCH_RECOIL, 0.18)\
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_enter_recover()
 
 const PUNCH_RECOIL : float = 130.0
 
@@ -762,6 +830,7 @@ func _stop_track() -> void:
 	if not _tracking:
 		return
 	_tracking = false
+	_chase    = ""
 	if is_instance_valid(_fist):
 		_fist.queue_free()
 	_fist = null
@@ -775,45 +844,103 @@ func _stop_track() -> void:
 
 func _track_step(delta: float) -> void:
 	var vp := get_viewport_rect().size
-	var target : Vector2 = _normaldo.global_position
-	var d : Vector2 = target - position
-	if d.length() > 1.0:
-		position += d.normalized() * TRACK_SPEED * delta
+	_phase_t += delta
+	match _chase:
+		"approach":
+			var d : Vector2 = _normaldo.global_position - position
+			if d.length() > 1.0:
+				position += d.normalized() * TRACK_SPEED * delta
+			if is_instance_valid(_sprite):
+				_sprite.flip_h = d.x > 0.0
+			if d.length() <= CHARGE_D:
+				_enter_charge()
+		"charge":
+			if _phase_t >= CHARGE_T:
+				_enter_dash()
+		"dash":
+			var d2 : Vector2 = _dash_to - position
+			position += d2.normalized() * DASH_SPEED * delta
+			# Долетел или проскочил — оба случая кончают рывок. Проверка по
+			# ПРОЙДЕННОМУ, а не по «стал ближе N»: на такой скорости кадр
+			# перепрыгивает цель, и по расстоянию рывок не кончался бы никогда.
+			if d2.length() <= DASH_SPEED * delta or _phase_t >= DASH_MAX_T:
+				_enter_recover()
+		"recover":
+			if _phase_t >= RECOVER_T:
+				_chase   = "approach"
+				_phase_t = 0.0
 	position.x = clampf(position.x, W_FIGHT * 0.4, vp.x - W_FIGHT * 0.2)
 	position.y = clampf(position.y, vp.y * 0.12, vp.y * 0.88)
-	position.y = _keep_off_gap(position.y)
-	# Смотрит туда, куда идёт. Нарисован он лицом влево.
+
+# ЗАРЯД. Встал, кастеты пошли вниз, удар оземь — тряска, пыль и метка на полу.
+func _enter_charge() -> void:
+	_chase   = "charge"
+	_phase_t = 0.0
+	if not is_instance_valid(_normaldo):
+		return
+	# Точка запоминается В НАЧАЛЕ заряда, а не в конце: иначе стоять на месте до
+	# последнего было бы выгоднее, чем уходить сразу, — а телеграф обязан
+	# поощрять именно уход.
+	_dash_to = _normaldo.global_position
+	_slam()
+	_mark(_dash_to, CHARGE_T)
+
+func _enter_dash() -> void:
+	_chase   = "dash"
+	_phase_t = 0.0
+	if is_instance_valid(_fist):
+		_fist.set_deferred("monitorable", true)
 	if is_instance_valid(_sprite):
-		_sprite.flip_h = d.x > 0.0
+		_sprite.flip_h = (_dash_to.x - position.x) > 0.0
+	_play_sfx(SFX_BRACERS)
 
-# ── Коридор неприкосновенен ──────────────────────────────────────────────────
-# Пока стоит стена девочек, у неё есть ровно ОДНА дыра, и это единственный
-# честный путь. Хозяин, гонящийся за головой, вставал ровно в эту дыру: игрок
-# шёл к проходу, а проход был уже занят, и пройти было физически нельзя.
-#
-# Поэтому на время стены линия дыры для него ЗАКРЫТА — он ходит рядом с ней, но
-# не внутрь. Кончилась стена (`_gap_lane = -1`) — запрет снимается, и последние
-# секунды погони он ходит где угодно.
-const GAP_KEEP : float = 0.62   # в долях высоты линии
+func _enter_recover() -> void:
+	_chase   = "recover"
+	_phase_t = 0.0
+	if is_instance_valid(_fist):
+		_fist.set_deferred("monitorable", false)
 
-func _keep_off_gap(y: float) -> float:
-	if _gap_lane < 0:
-		return y
-	var vp := get_viewport_rect().size
-	var h  : float = vp.y / float(LANES)
-	var gy : float = h * (float(_gap_lane) + 0.5)
-	var keep : float = h * GAP_KEEP
-	if absf(y - gy) >= keep:
-		return y
-	# Выталкиваем в ближнюю сторону, но не за экран: у крайних линий дыры
-	# отходить некуда вверх или вниз, и там он встаёт по другую её сторону.
-	var up   : float = gy - keep
-	var down : float = gy + keep
-	if up < vp.y * 0.12:
-		return down
-	if down > vp.y * 0.88:
-		return up
-	return up if y < gy else down
+# Удар кастетами ОЗЕМЬ. Кулаки коротко ныряют вниз, экран трясёт, от точки
+# расходится пылевое кольцо. Это единственный телеграф рывка, и он обязан быть
+# слышен и виден одновременно.
+func _slam() -> void:
+	_screen_shake(10.0, 7)
+	_play_sfx(SFX_SECURITY)
+	if is_instance_valid(_knuckles):
+		for k in _knuckles.get_children():
+			if not (k is Sprite2D):
+				continue
+			var home : Vector2 = (k as Sprite2D).position
+			var tw := k.create_tween()
+			if tw == null:
+				continue
+			tw.tween_property(k, "position", home + Vector2(0.0, W_FIGHT * 0.22), 0.12)\
+				.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+			tw.tween_property(k, "position", home, 0.22)\
+				.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if is_instance_valid(_game_root):
+		var r := Node2D.new()
+		r.set_script(RING_SCRIPT)
+		r.add_to_group("club_fx")
+		r.position = position + Vector2(0.0, W_FIGHT * 0.28)
+		r.set("color", Color(1.0, 0.85, 0.45))
+		_game_root.add_child(r)
+
+# Метка на полу: кольцо, СЖИМАЮЩЕЕСЯ к точке за время заряда. Разбегающееся
+# кольцо у него уже занято звонком, и второе такое же читалось бы как «он опять
+# кому-то звонит»; сжимающееся однозначно значит «сюда прилетит, и вот когда».
+func _mark(at: Vector2, dur: float) -> void:
+	if not is_instance_valid(_game_root):
+		return
+	var m := Node2D.new()
+	m.set_script(MARK_SCRIPT)
+	m.add_to_group("club_fx")
+	m.add_to_group("club_mark")
+	m.position = at
+	m.set("life", dur)
+	_game_root.add_child(m)
+
+const MARK_SCRIPT := preload("res://scripts/club_boss_mark.gd")
 
 # Кастеты. Появляются рывком масштаба — «надел», а не «были всегда», — и всё
 # время погони качаются: неподвижные кулаки читались бы как часть картинки.
