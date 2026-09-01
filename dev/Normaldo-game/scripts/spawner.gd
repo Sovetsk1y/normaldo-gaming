@@ -2,6 +2,9 @@ extends Node2D
 
 signal boss_time
 signal phase_entered(phase: int)
+# Уровень пройден. `boss` — кого звать (пусто, если на этом уровне босса нет),
+# `next_level` — номер следующего, 0 если кампания кончилась.
+signal level_cleared(boss: String, next_level: int)
 
 const ITEM_SCENE         := preload("res://scenes/item.tscn")
 const PIZZA_PACK_SCENE   := preload("res://scenes/pizza_pack.tscn")
@@ -97,6 +100,43 @@ var _boss_test_t      : float = 0.0
 # а после последней буквы NORMALDO (см. «Буквы»), то есть на 240-й секунде.
 # Прежние 285 с ужаты ×0.842 — пропорционально, поэтому форма кривой сложности
 # осталась прежней, изменилась только длина.
+# ── Пять уровней кампании ─────────────────────────────────────────────────────
+# Из старого проекта перенесены все пять локаций, одна за другой, каждая своей
+# нарисованной полосой (см. background.gd). Боссы стоят там же, где стояли: Нога
+# Ниндзя в конце первого, Крокодил в конце второго, Хозяин клуба в конце пятого.
+# Третий и четвёртый босса не имеют — и это не пробел, а ритм: два уровня подряд
+# с боссом и два без него дают кампании дыхание, а пятый читается как финал
+# именно потому, что до него боссов не было давно.
+#
+# КОНЕЦ УРОВНЯ — ЭТО ПОСЛЕДНЯЯ БУКВА. Слово NORMALDO выкладывается заново на
+# каждом уровне, и восьмая буква означает «уровень кончился»: на уровнях с
+# боссом сразу за ней выходит босс, на остальных — карточка следующего уровня.
+# Часы, которые не надо рисовать отдельно, и одни и те же на всю кампанию.
+#
+#   letter — период между буквами. Он же и задаёт длину уровня: восемь букв
+#            плюс их собственный пролёт (~5 с каждая). Уровни укорачиваются к
+#            финалу: 8×(14+5)=152 с в начале и 8×(10+5)=120 с в конце.
+#   phase  — с какой фазы сложности уровень НАЧИНАЕТСЯ. Внутри уровня фазы идут
+#            дальше по таблице, но стартовая планка с каждым уровнем выше:
+#            иначе пятый уровень начинался бы так же вяло, как первый.
+const CAMPAIGN_LEVELS : Array = [
+	{ "name": "КАНАЛИЗАЦИЯ", "boss": "ninja", "letter": 14.0, "phase": 0 },
+	{ "name": "УЛИЦА",       "boss": "croc",  "letter": 13.0, "phase": 1 },
+	{ "name": "СТРОЙКА",     "boss": "",      "letter": 12.0, "phase": 2 },
+	{ "name": "ЗАДВОРКИ",    "boss": "",      "letter": 11.0, "phase": 3 },
+	{ "name": "КЛУБ",        "boss": "club",  "letter": 10.0, "phase": 4 },
+]
+
+# Текущий уровень, 0-based. Публичный: интерфейс рисует по нему карточку и
+# счётчик, фон — свою полосу.
+var level : int = 0
+
+func level_name() -> String:
+	return String(CAMPAIGN_LEVELS[clampi(level, 0, CAMPAIGN_LEVELS.size() - 1)]["name"])
+
+func level_boss() -> String:
+	return String(CAMPAIGN_LEVELS[clampi(level, 0, CAMPAIGN_LEVELS.size() - 1)]["boss"])
+
 const CAMPAIGN_PHASES : Array = [
 	{ "speed": 220.0, "duration":  38.0, "no_pizza": false },  # T1
 	{ "speed": 242.0, "duration":  46.0, "no_pizza": false },  # T2
@@ -272,7 +312,11 @@ func _process(delta: float) -> void:
 # по той же причине: меньше пяти столбцов не читается M, больше семи строк не
 # влезает в высоту экрана.
 const LETTER_WORD   : String = "NORMALDO"
-const LETTER_PERIOD : float  = 30.0    # раз в столько секунд
+# Период БЕРЁТСЯ У УРОВНЯ (`CAMPAIGN_LEVELS.letter`), а не задан общим числом:
+# слово выкладывается заново на каждом уровне, и оно же задаёт его длину.
+# Константа осталась значением по умолчанию — для бесконечного режима и тестов,
+# где таблицы уровней нет.
+const LETTER_PERIOD : float  = 14.0
 const LETTER_ROWS   : int    = 7
 const LETTER_COLS   : int    = 5
 const LETTER_H_FRAC : float  = 0.86    # какую долю высоты экрана занимает буква
@@ -290,6 +334,11 @@ var _letter_idx    : int   = 0
 var _letter_timer  : float = LETTER_PERIOD
 var _letter_active : bool  = false
 
+func _letter_period() -> float:
+	if not campaign_mode:
+		return LETTER_PERIOD
+	return float(CAMPAIGN_LEVELS[clampi(level, 0, CAMPAIGN_LEVELS.size() - 1)]["letter"])
+
 func letters_done() -> int:
 	return _letter_idx
 
@@ -298,7 +347,7 @@ func _tick_letters(delta: float) -> void:
 		return
 	_letter_timer -= delta
 	if _letter_timer <= 0.0:
-		_letter_timer = LETTER_PERIOD
+		_letter_timer = _letter_period()
 		_run_letter()
 
 func _run_letter() -> void:
@@ -343,11 +392,51 @@ func _run_letter() -> void:
 	_frozen        = false
 	_spawn_timer   = 0.6
 	_reset_spans()
-	# Слово выложено — дальше босс. Именно тут, а не по таблице фаз: эпизод
-	# должен кончаться на последней букве, а не посреди слова.
+	# Слово выложено — УРОВЕНЬ КОНЧИЛСЯ. Именно тут, а не по таблице фаз:
+	# уровень должен кончаться на последней букве, а не посреди слова.
 	if _letter_idx >= LETTER_WORD.length():
-		set_process(false)
+		_finish_level()
+
+# Уровень пройден. Дальше решает интерфейс: на уровне с боссом он поднимает
+# босса и вызовет `advance_level()` после победы, на уровне без босса — покажет
+# карточку и вызовет её сразу.
+func _finish_level() -> void:
+	set_process(false)
+	_frozen = true
+	var boss : String = level_boss() if campaign_mode else "ninja"
+	var nxt  : int = level + 1
+	if not campaign_mode or nxt >= CAMPAIGN_LEVELS.size():
+		nxt = 0
+	# `boss_time` оставлен ради всего, что уже на него подписано (задания,
+	# аналитика, дев-кнопка): для них «дошёл до босса» не изменилось.
+	if boss != "":
 		boss_time.emit()
+	level_cleared.emit(boss, nxt)
+
+# Перейти на следующий уровень. Зовёт интерфейс — после победы над боссом или
+# сразу, если босса на уровне не было.
+func advance_level() -> void:
+	if not campaign_mode:
+		return
+	level = clampi(level + 1, 0, CAMPAIGN_LEVELS.size() - 1)
+	_start_level()
+
+# Общая часть старта уровня: слово с начала, фаза со своей планки, поток
+# разморожен. Скорость предметов НЕ сбрасывается — она растёт по общему времени
+# забега, и обнулять её на каждом уровне значило бы каждый раз начинать сначала.
+func _start_level() -> void:
+	_letter_idx    = 0
+	_letter_active = false
+	_letter_timer  = _letter_period()
+	_phase         = int(CAMPAIGN_LEVELS[level]["phase"])
+	_phase_elapsed = 0.0
+	_frozen        = false
+	_pattern_running = false
+	_spawn_timer   = 1.2
+	_reset_spans()
+	clear_items()
+	set_process(true)
+	phase_entered.emit(_phase)
 
 # Забыть резервы, до которых предмету уже не догнать.
 func _prune_spans(speed: float) -> void:
@@ -578,20 +667,86 @@ func _spawn_random_item(dc: Dictionary, speed: float, lanes: Array, vp_w: float)
 		elif r < 0.998: _spawn_scripted(MAGIC_BOX_SCRIPT, y, vp_w, speed)   # мэджик бокс
 		else:           _spawn_effect_item("casino_chip", y, vp_w, speed)   # жетон автомата (редкий)
 	else:
-		var h := randf()
-		if   h < 0.20: _spawn_slowing(y, vp_w, speed)                                       # banana/beer (slow)
-		elif h < 0.33: _spawn_t1_negative(y, vp_w, speed, true)                             # trash barrel (1 dmg)
-		elif h < 0.45: _spawn_item(y, vp_w, STONE_TEX, 0.16, speed, 1, false, false, false, "stone", true)
-		elif h < 0.56: _spawn_snake(y, vp_w, speed, true)
-		elif h < 0.65: _spawn_homeless(y, vp_w, speed, true)
-		elif h < 0.72: _spawn_dog(y, vp_w, speed, true)
-		elif h < 0.78: _spawn_scripted(THIEF_SCRIPT, y, vp_w, speed)          # вор
-		elif h < 0.83: _spawn_scripted(ROADSIGN_BUM_SCRIPT, y, vp_w, speed)   # бомж со знаком
-		elif h < 0.87: _spawn_scripted(COMPASS_SCRIPT, y, vp_w, speed)        # компас (реверс)
-		elif h < 0.90: _spawn_effect_item("black_ace", y, vp_w, speed)        # чёрный туз (сжигает жир)
-		elif h < 0.94: _spawn_ninja(y, vp_w, speed)                           # ниндзя (три вида)
-		elif h < 0.96: _spawn_effect_item("loser_ticket", y, vp_w, speed)     # чек лузера (обнуляет доллары)
-		else:          _spawn_hazard(_pick_hazard(), y, vp_w, speed)          # сейф/коктейль/коп/яд/птица/штурвал/шаман
+		_spawn_level_hazard(_pick_level_hazard(), y, vp_w, speed)
+
+# ── Угрозы ПО УРОВНЯМ ────────────────────────────────────────────────────────
+# У каждого уровня свой набор — тот же, что был в старом проекте
+# (`_itemsByLevel` в `pull_up_game.dart`). Именно набор и делает локацию
+# локацией: канализация — это банановая кожура под ногами и полицейская машина в
+# проезде, стройка — конусы и дорожные знаки, задворки и клуб — всё сразу и
+# вдобавок боксёрская перчатка.
+#
+# Веса перенесены как есть, с одной правкой: у банана на первом уровне в старом
+# проекте стояло 80 против трёх у мусорки, то есть уровень был банановым и
+# больше никаким. Оставлено 40 — банан по-прежнему главная угроза локации, но
+# рядом с ним видно и остальных.
+#
+# БАЗА добавляется к набору уровня и есть везде: это те угрозы, которые не
+# привязаны к месту, — камень, змея, собака, вор, компас, туз, ниндзя, чек и
+# семёрка «сюжетных» угроз под резисты скинов.
+const HAZ_BASE : Dictionary = {
+	"stone": 12, "snake": 11, "dog": 7, "thief": 6, "compass": 4,
+	"black_ace": 3, "ninja": 5, "loser_ticket": 2, "hazard": 5,
+}
+const HAZ_LEVEL : Array = [
+	{ "banana": 40, "trash": 6,  "police_car": 14 },
+	{ "banana": 20, "cone": 10, "homeless": 10 },
+	{ "banana": 20, "roadsign": 10, "cone": 10, "homeless": 5,  "trash": 3 },
+	{ "banana": 20, "roadsign": 20, "trash": 20, "cone": 20, "homeless": 20, "glove": 20 },
+	{ "banana": 20, "roadsign": 20, "trash": 20, "cone": 40, "homeless": 20, "glove": 20 },
+]
+
+func _pick_level_hazard() -> String:
+	var pool : Dictionary = HAZ_BASE.duplicate()
+	var lvl : Dictionary = HAZ_LEVEL[clampi(level, 0, HAZ_LEVEL.size() - 1)] \
+		if campaign_mode else HAZ_LEVEL[HAZ_LEVEL.size() - 1]
+	for k in lvl:
+		pool[k] = int(pool.get(k, 0)) + int(lvl[k])
+	var total : int = 0
+	for k in pool:
+		total += int(pool[k])
+	var roll : int = randi() % maxi(1, total)
+	for k in pool:
+		roll -= int(pool[k])
+		if roll < 0:
+			return String(k)
+	return "stone"
+
+func _spawn_level_hazard(kind: String, y: float, vp_w: float, speed: float) -> void:
+	match kind:
+		"banana":       _spawn_slowing(y, vp_w, speed)
+		"trash":        _spawn_t1_negative(y, vp_w, speed, true)
+		"stone":        _spawn_item(y, vp_w, STONE_TEX, 0.16, speed, 1, false, false, false, "stone", true)
+		"snake":        _spawn_snake(y, vp_w, speed, true)
+		"homeless":     _spawn_homeless(y, vp_w, speed, true)
+		"dog":          _spawn_dog(y, vp_w, speed, true)
+		"thief":        _spawn_scripted(THIEF_SCRIPT, y, vp_w, speed)
+		"roadsign":     _spawn_scripted(ROADSIGN_BUM_SCRIPT, y, vp_w, speed)
+		"compass":      _spawn_scripted(COMPASS_SCRIPT, y, vp_w, speed)
+		"black_ace":    _spawn_effect_item("black_ace", y, vp_w, speed)
+		"ninja":        _spawn_ninja(y, vp_w, speed)
+		"loser_ticket": _spawn_effect_item("loser_ticket", y, vp_w, speed)
+		"cone":         _spawn_cone(vp_w, speed)
+		"glove":        _spawn_glove(y, vp_w)
+		"police_car":   _spawn_police_car(y, vp_w, speed)
+		_:              _spawn_hazard(_pick_hazard(), y, vp_w, speed)
+
+# Полицейская машина — единственный предмет старого проекта, которого у нас не
+# было. Она НЕ вращается и заметно длиннее всего остального: это не летящий
+# мусор, а машина, и по её длине читается, что облететь её можно только сверху
+# или снизу, а не проскочить рядом.
+#
+# Лист нарисован вверх колёсами (мигалка внизу, крыша сверху) — отражаем.
+const POLICE_CAR_TEX : Texture2D = preload("res://assets/items/police_car.png")
+const POLICE_CAR_PX  : float = 150.0
+
+func _spawn_police_car(y: float, vp_w: float, speed: float) -> void:
+	var item : Node = _spawn_item(y, vp_w, POLICE_CAR_TEX, 1.0, speed, 1,
+		false, false, false, "police_car", true)
+	for c in item.get_children():
+		if c is Sprite2D:
+			ItemSizing.fit_sprite_content(c, POLICE_CAR_PX)
+			(c as Sprite2D).flip_v = true
 
 # Тяжёлые и «сюжетные» угрозы приходят не раньше указанной фазы: сейф с копом
 # на первой минуте задавили бы новичка, а шаман с реверсом управления читается

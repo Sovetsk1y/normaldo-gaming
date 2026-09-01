@@ -309,6 +309,7 @@ func _ready() -> void:
 	var spawner := get_parent().get_node_or_null("Spawner")
 	if spawner:
 		spawner.boss_time.connect(_on_boss_time)
+		spawner.level_cleared.connect(_on_level_cleared)
 		spawner.phase_entered.connect(_on_phase_entered)
 	QuestManager.quests_updated.connect(_refresh_quest_badges)
 	QuestManager.daily_quest_completed.connect(_show_quest_complete_toast)
@@ -5937,9 +5938,15 @@ func _start_game() -> void:
 	# не встроен, и без неё босса не увидит никто, включая тестеров. Поэтому
 	# стоит ВНЕ рубильника и уезжает вместе с ним только тогда, когда крокодил
 	# займёт своё место в кампании.
-	_build_croc_btn()
-	_build_club_btn()
 	if DevFlags.ENABLED:
+		# КРОК и КЛУБ стояли СНАРУЖИ рубильника, пока боссы не были встроены в
+		# кампанию: без кнопок посмотреть на них было нельзя ничем. Теперь
+		# крокодил ждёт в конце второго уровня, хозяин клуба — в конце пятого,
+		# и до обоих можно дойти игрой. Причина держать их снаружи отпала, а
+		# дев-кнопка без причины в релизной сборке — это ровно то, от чего
+		# заведён рубильник.
+		_build_croc_btn()
+		_build_club_btn()
 		_build_dev_btn()
 		_build_dev_pizza_btn()
 		_build_dev_slots_btn()
@@ -6743,8 +6750,33 @@ func _refresh_dev_immortal_visual() -> void:
 		_dev_immortal_lbl.text   = "БЕСС: OFF"
 		_dev_immortal_lbl.modulate = Color(0.55, 0.55, 0.60)
 
+# «Дошёл до босса» — только отметка для заданий и аналитики. Кого именно
+# поднимать, решает `_on_level_cleared`: боссы у уровней разные, а этот сигнал
+# ничего о них не знает и подписан на него не только бой.
 func _on_boss_time() -> void:
 	QuestManager.notify_boss_reached()
+	# Дев-кнопка «БОСС» зовёт этот метод напрямую, минуя уровни: там босс всегда
+	# Нога Ниндзя, и уровень после него не меняется.
+	if _boss_test_mode:
+		_summon_boss("ninja")
+
+# ── Конец уровня ─────────────────────────────────────────────────────────────
+# Слово NORMALDO выложено. На уровне с боссом выходит босс, и следующий уровень
+# начнётся после победы; на уровне без босса — сразу карточка следующего.
+#
+# Пятый уровень — последний: его босс кончает кампанию, а не ведёт дальше.
+var _next_level : int = 0
+
+func _on_level_cleared(boss: String, next_level: int) -> void:
+	_next_level = next_level
+	if boss != "":
+		_summon_boss(boss)
+		return
+	_show_level_card(next_level)
+
+const BOSS_SCENES : Dictionary = { "ninja": "scene", "croc": "croc", "club": "club" }
+
+func _summon_boss(kind: String) -> void:
 	var game_root := get_parent() as Node2D
 	var normaldo  := get_parent().get_node_or_null("Normaldo") as Node2D
 	var spawner   := get_parent().get_node_or_null("Spawner")
@@ -6753,10 +6785,29 @@ func _on_boss_time() -> void:
 	# Slide the HUD off-screen so the boss arena reads clean — no resource
 	# chrome competing with the fight visuals.
 	_slide_out_hud_for_boss()
-	var boss := NINJA_FOOT_SCENE.instantiate()
-	boss.setup(normaldo, spawner, game_root, _boss_test_mode)
+	# Фон ЗАМИРАЕТ на боссе. Едущая стена за спиной у стоящего босса читается как
+	# «мы всё ещё бежим», хотя бежать уже некуда: бой идёт на месте.
+	var bg := game_root.get_node_or_null("Background")
+	if bg and bg.has_method("stop_scrolling"):
+		bg.stop_scrolling()
+	var boss : Node = null
+	match kind:
+		"croc":
+			var c := Node2D.new()
+			c.set_script(LEATHERHEAD_SCRIPT)
+			c.call("setup", normaldo, spawner, game_root, false)
+			boss = c
+		"club":
+			var cb := Node2D.new()
+			cb.set_script(CLUB_BOSS_SCRIPT)
+			cb.call("setup", normaldo, spawner, game_root, false)
+			boss = cb
+		_:
+			var nf := NINJA_FOOT_SCENE.instantiate()
+			nf.setup(normaldo, spawner, game_root, _boss_test_mode)
+			boss = nf
 	game_root.add_child(boss)
-	boss.defeated.connect(_on_boss_defeated)
+	boss.connect("defeated", _on_boss_defeated)
 
 # Slide the left HUD stack (pause chip + resources + fat panel) off to the
 # left while the boss is on stage. Reversed by _slide_in_hud() after defeat.
@@ -6765,6 +6816,14 @@ func _slide_out_hud_for_boss() -> void:
 		Tween.TRANS_QUAD, Tween.EASE_IN)
 
 func _on_boss_defeated() -> void:
+	# Босс ПОСЛЕДНЕГО уровня кончает кампанию; босс любого другого — ведёт на
+	# следующий уровень, и забег продолжается тем же забегом: жир, доллары и
+	# счётчик пиццы переходят дальше. Кампания из пяти уровней, разорванная на
+	# пять отдельных забегов, перестала бы быть кампанией.
+	if _next_level > 0:
+		_slide_in_hud()
+		_show_level_card(_next_level)
+		return
 	# Boss defeat → endless mode unlock + the standard death-screen flow with
 	# an extra "ENDLESS UNLOCKED" callout (set via _endless_unlock_pending).
 	_run_outcome = "boss_defeated"
@@ -6792,6 +6851,90 @@ func _on_boss_defeated() -> void:
 		# Safety net — if normaldo is gone (shouldn't happen), still surface
 		# a game-over panel with what we have.
 		_on_normaldo_died(0, Vector2.ZERO)
+
+# ── Карточка уровня ──────────────────────────────────────────────────────────
+# Между уровнями экран накрывается карточкой: «УРОВЕНЬ 3» и название локации.
+#
+# Она не украшение, а ШОВ. Полосы уровней — разные помещения, у них не сходится
+# ни кладка, ни линия пола, и перетечь из одной в другую нельзя. Карточка на
+# полторы секунды закрывает подмену, и до игрока доезжает уже новая стена.
+#
+# Заодно она отбивает ритм кампании: пять уровней подряд без единой паузы
+# читались бы как один бесконечный, а игрок должен знать, сколько он прошёл.
+const LEVEL_CARD_T : float = 1.7
+
+func _show_level_card(next_level: int) -> void:
+	var game_root := get_parent() as Node2D
+	var normaldo  := get_parent().get_node_or_null("Normaldo")
+	var spawner   := get_parent().get_node_or_null("Spawner")
+	var bg        := game_root.get_node_or_null("Background") if game_root else null
+	if normaldo and normaldo.has_method("disable_input"):
+		normaldo.disable_input()
+	if bg and bg.has_method("stop_scrolling"):
+		bg.stop_scrolling()
+
+	var vp := get_viewport().get_visible_rect().size
+	var cl := CanvasLayer.new()
+	cl.layer = 96
+	add_child(cl)
+	var dim := ColorRect.new()
+	dim.color = Color(0.02, 0.02, 0.04, 0.0)
+	dim.size  = vp
+	cl.add_child(dim)
+
+	var num := Label.new()
+	num.add_theme_font_override("font", UI_FONT)
+	num.add_theme_font_size_override("font_size", 44)
+	# Номер ставится ПОСЛЕ перехода и берётся у спавнера, а не из аргумента: два
+	# независимых источника номера расходятся при первой же правке, и карточка
+	# начинает врать — «УРОВЕНЬ 3» над названием второго.
+	num.text                 = ""
+	num.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	num.size                 = Vector2(vp.x, 56.0)
+	num.position             = Vector2(0.0, vp.y * 0.36)
+	num.modulate             = Color(1.0, 0.92, 0.55, 0.0)
+	cl.add_child(num)
+
+	var nm := Label.new()
+	nm.add_theme_font_override("font", UI_FONT)
+	nm.add_theme_font_size_override("font_size", 22)
+	nm.text                 = String(spawner.call("level_name")) if spawner else ""
+	nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	nm.size                 = Vector2(vp.x, 30.0)
+	nm.position             = Vector2(0.0, vp.y * 0.36 + 58.0)
+	nm.modulate             = Color(0.75, 0.95, 1.0, 0.0)
+	cl.add_child(nm)
+
+	var tw := dim.create_tween()
+	tw.tween_property(dim, "color:a", 0.85, 0.30)
+	await tw.finished
+
+	# Подмена ПОД карточкой: и полоса фона, и уровень спавнера меняются, пока
+	# экран закрыт.
+	if spawner:
+		spawner.call("advance_level")
+		nm.text  = String(spawner.call("level_name"))
+		num.text = "УРОВЕНЬ %d" % (int(spawner.get("level")) + 1)
+	else:
+		num.text = "УРОВЕНЬ %d" % (next_level + 1)
+	if bg and bg.has_method("set_level"):
+		bg.call("set_level", next_level + 1)
+
+	var tw2 := num.create_tween()
+	tw2.tween_property(num, "modulate:a", 1.0, 0.22)
+	tw2.parallel().tween_property(nm, "modulate:a", 1.0, 0.22)
+	await get_tree().create_timer(LEVEL_CARD_T).timeout
+	if not is_instance_valid(cl):
+		return
+	var out := dim.create_tween()
+	out.tween_property(dim, "color:a", 0.0, 0.30)
+	out.parallel().tween_property(num, "modulate:a", 0.0, 0.30)
+	out.parallel().tween_property(nm, "modulate:a", 0.0, 0.30)
+	out.tween_callback(cl.queue_free)
+	if bg and bg.has_method("start_scrolling"):
+		bg.call("start_scrolling")
+	if normaldo and normaldo.has_method("enable_input"):
+		normaldo.enable_input()
 
 func _show_victory() -> void:
 	var vp      := get_viewport().get_visible_rect().size
