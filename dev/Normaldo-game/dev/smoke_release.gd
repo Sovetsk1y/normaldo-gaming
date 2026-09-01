@@ -48,7 +48,7 @@ const DEV_TEXTS : Array = [
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 11
+const EXPECTED_CHECKS : int = 12
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -149,6 +149,8 @@ func _test_screens() -> void:
 	# заметить это будет некому.
 	_check(hud.get("_croc_btn") != null,
 		"кнопка КРОК пережила рубильник — иначе босса не вызвать ничем")
+	_check(hud.get("_club_btn") != null,
+		"и кнопка КЛУБ тоже — хозяин клуба в кампанию не встроен так же")
 
 	# Экран лидеров — «DEV: ТЕСТ ПРИЗА» жил именно там. Собирается он своим
 	# настоящим setup(), иначе проверять было бы нечего: пустой узел «чистый»

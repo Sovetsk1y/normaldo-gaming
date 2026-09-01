@@ -72,6 +72,7 @@ const MENU_MODE_BTN_X : float = 265.0
 const MENU_MODE_BTN_Y : float = 105.0
 const NINJA_FOOT_SCENE := preload("res://scenes/ninja_foot.tscn")
 const LEATHERHEAD_SCRIPT := preload("res://scripts/leatherhead.gd")
+const CLUB_BOSS_SCRIPT   := preload("res://scripts/club_boss.gd")
 
 const FAT_THRESHOLDS := [40, 120, 260]
 const SECTION_H      := 44.0
@@ -255,6 +256,7 @@ var _dev_immortal_lbl  : Label     = null
 var _dev_collisions_btn  : Node2D    = null
 var _dev_boss_btn        : Node2D    = null
 var _croc_btn        : Node2D    = null
+var _club_btn        : Node2D    = null
 var _dev_phase_btn       : Node2D    = null
 var _dev_phase_lbl       : Label     = null
 var _dev_collisions_bg   : ColorRect = null
@@ -5936,6 +5938,7 @@ func _start_game() -> void:
 	# стоит ВНЕ рубильника и уезжает вместе с ним только тогда, когда крокодил
 	# займёт своё место в кампании.
 	_build_croc_btn()
+	_build_club_btn()
 	if DevFlags.ENABLED:
 		_build_dev_btn()
 		_build_dev_pizza_btn()
@@ -6468,7 +6471,85 @@ func _on_croc_tapped() -> void:
 	if is_instance_valid(_croc_btn):
 		_croc_btn.queue_free()
 		_croc_btn = null
+	if is_instance_valid(_club_btn):
+		_club_btn.queue_free()
+		_club_btn = null
 	summon_leatherhead(true)
+
+# ХОЗЯИН КЛУБА — вторая кнопка вызова, рядом с крокодилом и по той же причине:
+# в кампанию он не встроен, и без кнопки посмотреть на него нельзя ничем.
+# Обе стоят СНАРУЖИ рубильника дев-кнопок и уедут отсюда тогда, когда у боссов
+# появится своё место в игре.
+#
+# Вторая кнопка садится ровно над первой — они одного рода, и разносить их по
+# разным углам значило бы делать вид, что это разные вещи.
+func _build_club_btn() -> void:
+	var vp     := get_viewport().get_visible_rect().size
+	const SZ   := 44.0
+	const GAP  := 6.0
+	var slot : float = 6.0 if DevFlags.ENABLED else 1.0
+	_club_btn          = Node2D.new()
+	_club_btn.position = Vector2(8.0, vp.y - SZ - 8.0 - slot * (SZ + GAP))
+	add_child(_club_btn)
+
+	var bg := ColorRect.new()
+	bg.color = Color(0.16, 0.05, 0.20, 0.92)
+	bg.size  = Vector2(SZ, SZ)
+	_club_btn.add_child(bg)
+
+	var stripe := ColorRect.new()
+	stripe.color = Color(0.95, 0.45, 1.00, 0.85)
+	stripe.size  = Vector2(SZ, 2.0)
+	_club_btn.add_child(stripe)
+
+	var icon := _make_icon(CLUB_BOSS_SCRIPT.F_IDLE[0], SZ - 16.0)
+	icon.position = Vector2(8.0, 1.0)
+	_club_btn.add_child(icon)
+
+	var lbl := Label.new()
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", 9)
+	lbl.text                 = "КЛУБ"
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	lbl.modulate             = Color(1.0, 0.65, 1.0)
+	lbl.size                 = Vector2(SZ, SZ - 30.0)
+	lbl.position             = Vector2(0.0, 30.0)
+	_club_btn.add_child(lbl)
+
+	var btn := Button.new()
+	btn.flat       = true
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.size       = Vector2(SZ, SZ)
+	btn.pressed.connect(_on_club_tapped)
+	_club_btn.add_child(btn)
+
+func _on_club_tapped() -> void:
+	_play_btn_sfx()
+	if is_instance_valid(_club_btn):
+		_club_btn.queue_free()
+		_club_btn = null
+	if is_instance_valid(_croc_btn):
+		_croc_btn.queue_free()
+		_croc_btn = null
+	summon_club_boss(true)
+
+# Хозяин клуба поднимается тем же путём, что крокодил и Нога Ниндзя.
+func summon_club_boss(test_mode: bool = false) -> void:
+	var game_root := get_parent() as Node2D
+	var normaldo  := get_parent().get_node_or_null("Normaldo") as Node2D
+	var spawner   := get_parent().get_node_or_null("Spawner")
+	if not normaldo or not game_root:
+		return
+	_slide_out_hud_for_boss()
+	var boss := Node2D.new()
+	boss.set_script(CLUB_BOSS_SCRIPT)
+	boss.call("setup", normaldo, spawner, game_root, test_mode)
+	game_root.add_child(boss)
+	if not test_mode:
+		boss.connect("defeated", _on_boss_defeated)
+	else:
+		boss.connect("tree_exited", _slide_in_hud)
 
 # Крокодил поднимается тем же путём, что и Нога Ниндзя: интерфейс забега
 # уезжает, босс получает Нормальдо, спавнер и корень сцены. В тестовом режиме
