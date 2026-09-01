@@ -4,7 +4,7 @@ extends SceneTree
 #   xvfb-run -a godot --path . --script res://dev/shot_club.gd -- <папка> <такт>
 #
 # такт: intro | banner | call | tele | security | siren | police | girls |
-#       track | finale
+#       track | finale | leave
 #
 # Такты снимаются ПО СОБЫТИЮ, а не по секундомеру: полоса вызова висит 0.55 с,
 # вспышка мигалки — 0.18 с, и ловить их фиксированной задержкой значит гадать.
@@ -94,8 +94,21 @@ func _initialize() -> void:
 			await _until(func() -> bool: return bool(b.get("_tracking")), 14.0)
 			await _wait(1.4)
 		"finale":
+			# Момент, ради которого финал и переделан: машина уже встала, все
+			# садятся.
 			b.call("_finale")
-			await _wait(2.2)
+			await _until(func() -> bool:
+				for c in game.get_children():
+					if c is Sprite2D and (c as Sprite2D).texture == CLUB.T_POLICE_CAR \
+							and (c as Sprite2D).position.x < vp.x:
+						return true
+				return false, 8.0)
+			await _wait(0.9)
+		"leave":
+			b.call("_finale")
+			await _until(func() -> bool:
+				return float(b.modulate.a) < 0.5 if is_instance_valid(b) else true, 10.0)
+			await _wait(0.25)
 
 	await RenderingServer.frame_post_draw
 	get_root().get_texture().get_image().save_png("%s/club_%s.png" % [out, mode])

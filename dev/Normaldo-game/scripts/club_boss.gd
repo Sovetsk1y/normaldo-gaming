@@ -71,6 +71,8 @@ const F_CALL_GIRLS := preload("res://assets/bosses/club_boss/call_girls.png")
 const F_PHONE      := preload("res://assets/bosses/club_boss/phone.png")
 const F_KNUCKLE_L  := preload("res://assets/bosses/club_boss/knuckle_l.png")
 const F_KNUCKLE_R  := preload("res://assets/bosses/club_boss/knuckle_r.png")
+const F_BANNER     := preload("res://assets/bosses/club_boss/banner.png")
+const T_POLICE_CAR := preload("res://assets/bosses/club_boss/police_car.png")
 
 const T_SECURITY := preload("res://assets/bosses/club_boss/security.png")
 const T_COP      := preload("res://assets/items/cop.png")
@@ -80,6 +82,7 @@ const T_GIRL : Array = [
 ]
 
 const MINION_SCRIPT := preload("res://scripts/club_boss_minion.gd")
+const FIST_SCRIPT   := preload("res://scripts/club_boss_fist.gd")
 const UI_FONT       := preload("res://assets/fonts/RussoOne-Regular.ttf")
 
 const SFX_WHOS_NEXT := preload("res://assets/audio/club_boss/whos_next.mp3")
@@ -121,6 +124,10 @@ var current_act : String = ""
 var _stopped  : bool = false
 var _tracking : bool = false
 var _knuckles : Node2D = null
+var _fist     : Area2D = null
+# Линия, на которой сейчас дыра в стене девочек, или −1, когда стены нет.
+# Хозяин в неё не заходит — см. `_keep_off_gap`.
+var _gap_lane : int = -1
 var _bar_lamps : Array = []
 var _bar_layer : CanvasLayer = null
 var _anim_t   : float = 0.0
@@ -173,6 +180,7 @@ func _abort() -> void:
 		return
 	_stopped  = true
 	_tracking = false
+	_gap_lane = -1
 	if is_instance_valid(_music):
 		_music.stop()
 	for grp in ["club_minion", "club_fx"]:
@@ -368,41 +376,49 @@ func _show_banner() -> void:
 	dim.size  = vp
 	cl.add_child(dim)
 
-	# Своего нарисованного титра у этого босса нет — набираем шрифтом, но по
-	# клубному: имя крупно, под ним неоновая линия.
-	var name_lbl := Label.new()
-	name_lbl.add_theme_font_override("font", UI_FONT)
-	name_lbl.add_theme_font_size_override("font_size", 46)
-	name_lbl.text                 = "ХОЗЯИН КЛУБА"
-	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	name_lbl.size                 = Vector2(vp.x, 60.0)
-	name_lbl.position             = Vector2(0.0, vp.y * 0.34)
-	name_lbl.pivot_offset         = Vector2(vp.x * 0.5, 30.0)
-	name_lbl.scale                = Vector2(0.2, 0.2)
-	name_lbl.modulate             = Color(1.0, 0.55, 1.0)
-	cl.add_child(name_lbl)
+	# Титр НАРИСОВАННЫЙ, как у крокодила: «BOSS FIGHT» с мордой хозяина вместо
+	# буквы O. Это тот же лист из старого проекта (`BOSSFIGHT FA.png`) и та же
+	# рамка, что у крокодила, — у боссов один титр на всех, и меняется в нём
+	# только лицо. Набранное шрифтом имя, которое стояло тут раньше, выпадало из
+	# этого ряда: у одного босса рисунок, у другого надпись.
+	var pic := TextureRect.new()
+	pic.texture        = F_BANNER
+	pic.expand_mode    = TextureRect.EXPAND_IGNORE_SIZE
+	pic.stretch_mode   = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	pic.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	var bw : float = vp.x * 0.56
+	var bh : float = bw * float(F_BANNER.get_height()) / float(F_BANNER.get_width())
+	pic.size         = Vector2(bw, bh)
+	pic.position     = Vector2((vp.x - bw) * 0.5, vp.y * 0.22)
+	pic.pivot_offset = pic.size * 0.5
+	pic.scale        = Vector2.ZERO
+	cl.add_child(pic)
 
-	var neon := ColorRect.new()
-	neon.color    = Color(0.85, 0.25, 1.0, 0.0)
-	neon.size     = Vector2(vp.x * 0.5, 3.0)
-	neon.position = Vector2(vp.x * 0.25, vp.y * 0.34 + 62.0)
-	cl.add_child(neon)
+	var sub := Label.new()
+	sub.add_theme_font_override("font", UI_FONT)
+	sub.add_theme_font_size_override("font_size", 22)
+	sub.text                 = "ХОЗЯИН КЛУБА"
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.modulate             = Color(1.0, 0.55, 1.0, 0.0)
+	sub.size                 = Vector2(vp.x, 32.0)
+	sub.position             = Vector2(0.0, vp.y * 0.22 + bh + 6.0)
+	cl.add_child(sub)
 
 	var tw_d := dim.create_tween()
 	tw_d.tween_property(dim, "color:a", 0.66, 0.26)
 	await tw_d.finished
 	_play_sfx(BOSS_STINGER)
-	var tw_p := name_lbl.create_tween()
-	tw_p.tween_property(name_lbl, "scale", Vector2.ONE, 0.30)\
+	var tw_p := pic.create_tween()
+	tw_p.tween_property(pic, "scale", Vector2.ONE, 0.30)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tw_p.parallel().tween_property(neon, "color:a", 1.0, 0.30)
+	tw_p.parallel().tween_property(sub, "modulate:a", 1.0, 0.30)
 	await tw_p.finished
-	await get_tree().create_timer(0.9).timeout
+	await get_tree().create_timer(1.0).timeout
 	if is_instance_valid(cl):
 		var out := dim.create_tween()
 		out.tween_property(dim, "color:a", 0.0, 0.30)
-		out.parallel().tween_property(name_lbl, "modulate:a", 0.0, 0.30)
-		out.parallel().tween_property(neon, "color:a", 0.0, 0.30)
+		out.parallel().tween_property(pic, "modulate:a", 0.0, 0.30)
+		out.parallel().tween_property(sub, "modulate:a", 0.0, 0.30)
 		out.tween_callback(cl.queue_free)
 		await out.finished
 
@@ -521,8 +537,8 @@ func _send(tex: Texture2D, lane: int, dir_x: float, spd: float, px: float = MINI
 #
 # Ускоряется ПАУЗА МЕЖДУ волнами, а не телеграф: лента по-прежнему висит свои
 # 0.55 с, и последняя волна так же честна, как первая.
-const SEC_WAVES : Array = [2, 3, 3, 4]        # сколько линий занимает волна
-const SEC_WAITS : Array = [1.50, 1.20, 0.95, 0.75]
+const SEC_WAVES : Array = [2, 2, 3, 3, 4, 4]   # сколько линий занимает волна
+const SEC_WAITS : Array = [1.50, 1.30, 1.10, 0.95, 0.82, 0.70]
 const SEC_SPEED : float = 300.0
 const COL_SEC : Color = Color(0.40, 1.00, 0.45)
 
@@ -568,9 +584,14 @@ func _pick_lanes(count: int) -> Array:
 # Приход С ДВУХ СТОРОН — то, чего в старом проекте не было вовсе: там все
 # вызванные появлялись за правым краем, и полиция отличалась от охраны только
 # скоростью, то есть ничем.
-const POL_VOLLEYS : int   = 3
+# Шесть залпов, и сторона у каждого СВОЯ СЛУЧАЙНАЯ. Чередование через один
+# читалось как считалка: после второго залпа сторону третьего можно было не
+# смотреть, а просто знать, — и мигалка, ради которой акт и делался, переставала
+# что-либо значить. Случайная сторона возвращает ей работу: смотреть придётся
+# каждый раз.
+const POL_VOLLEYS : int   = 6
 const POL_SPEED   : float = 430.0
-const POL_GAP     : float = 1.55   # между залпами
+const POL_GAP     : float = 1.45   # между залпами
 const COL_BLUE : Color = Color(0.30, 0.55, 1.00)
 const COL_RED  : Color = Color(1.00, 0.25, 0.25)
 
@@ -581,7 +602,7 @@ func _act_police() -> void:
 		return
 	_animate(F_RAGE, 9.0)
 	for v in POL_VOLLEYS:
-		var from_left : bool = (v % 2) == 1
+		var from_left : bool = randf() < 0.5
 		var col : Color = COL_BLUE if from_left else COL_RED
 		_siren(col, from_left)
 		var free_lane : int = randi() % LANES
@@ -667,6 +688,7 @@ func _act_floor() -> void:
 
 	# Дыра ползёт: игрок обязан ДВИГАТЬСЯ, а не занять одну линию и стоять.
 	var gap : int = randi() % LANES
+	_gap_lane = gap
 	var step : int = 1 if randf() < 0.5 else -1
 	for w in GIRL_WAVES:
 		for l in LANES:
@@ -684,6 +706,11 @@ func _act_floor() -> void:
 		if gap + step < 0 or gap + step >= LANES:
 			step = -step
 		gap += step
+		_gap_lane = gap
+		# Выталкиваем ЕГО СРАЗУ, а не со следующим кадром погони: дыра переехала
+		# на соседнюю линию, и один кадр он стоял бы ровно в ней.
+		if _tracking:
+			position.y = _keep_off_gap(position.y)
 		# Со второй волны он уже гонится — ждать конца стены незачем.
 		if w == 1:
 			_start_track()
@@ -691,6 +718,9 @@ func _act_floor() -> void:
 		if not _alive():
 			return
 
+	# Стена кончилась — запрет на линию дыры снимается, и последние секунды
+	# погони хозяин ходит где угодно.
+	_gap_lane = -1
 	await get_tree().create_timer(TRACK_T).timeout
 	if not _alive():
 		return
@@ -705,12 +735,36 @@ func _start_track() -> void:
 	_play_sfx(SFX_BRACERS)
 	_knuckles_up()
 	_animate(F_RAGE, 10.0)
+	# Ударная зона появляется ВМЕСТЕ с кастетами и уходит вместе с ними: два
+	# первых акта хозяин звонит, а не дерётся, и постоянный хитбокс у правого
+	# края был бы просто стеной, в которую нельзя войти.
+	_fist = Area2D.new()
+	_fist.set_script(FIST_SCRIPT)
+	_fist.call("setup", W_FIGHT * 0.30)
+	_fist.connect("punched", _on_punched)
+	add_child(_fist)
 	_tracking = true
+
+# Достал — отскакивает назад. Без отскока зона просто ехала бы дальше вместе с
+# ним и на откате читалась как «он промахнулся», а не «он попал».
+func _on_punched() -> void:
+	_screen_shake(9.0, 6)
+	if not is_instance_valid(_normaldo):
+		return
+	var away : Vector2 = (position - _normaldo.global_position).normalized()
+	var tw := create_tween()
+	tw.tween_property(self, "position", position + away * PUNCH_RECOIL, 0.18)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+const PUNCH_RECOIL : float = 130.0
 
 func _stop_track() -> void:
 	if not _tracking:
 		return
 	_tracking = false
+	if is_instance_valid(_fist):
+		_fist.queue_free()
+	_fist = null
 	_knuckles_down()
 	_stop_anim(F_IDLE[0])
 	var vp := get_viewport_rect().size
@@ -727,9 +781,39 @@ func _track_step(delta: float) -> void:
 		position += d.normalized() * TRACK_SPEED * delta
 	position.x = clampf(position.x, W_FIGHT * 0.4, vp.x - W_FIGHT * 0.2)
 	position.y = clampf(position.y, vp.y * 0.12, vp.y * 0.88)
+	position.y = _keep_off_gap(position.y)
 	# Смотрит туда, куда идёт. Нарисован он лицом влево.
 	if is_instance_valid(_sprite):
 		_sprite.flip_h = d.x > 0.0
+
+# ── Коридор неприкосновенен ──────────────────────────────────────────────────
+# Пока стоит стена девочек, у неё есть ровно ОДНА дыра, и это единственный
+# честный путь. Хозяин, гонящийся за головой, вставал ровно в эту дыру: игрок
+# шёл к проходу, а проход был уже занят, и пройти было физически нельзя.
+#
+# Поэтому на время стены линия дыры для него ЗАКРЫТА — он ходит рядом с ней, но
+# не внутрь. Кончилась стена (`_gap_lane = -1`) — запрет снимается, и последние
+# секунды погони он ходит где угодно.
+const GAP_KEEP : float = 0.62   # в долях высоты линии
+
+func _keep_off_gap(y: float) -> float:
+	if _gap_lane < 0:
+		return y
+	var vp := get_viewport_rect().size
+	var h  : float = vp.y / float(LANES)
+	var gy : float = h * (float(_gap_lane) + 0.5)
+	var keep : float = h * GAP_KEEP
+	if absf(y - gy) >= keep:
+		return y
+	# Выталкиваем в ближнюю сторону, но не за экран: у крайних линий дыры
+	# отходить некуда вверх или вниз, и там он встаёт по другую её сторону.
+	var up   : float = gy - keep
+	var down : float = gy + keep
+	if up < vp.y * 0.12:
+		return down
+	if down > vp.y * 0.88:
+		return up
+	return up if y < gy else down
 
 # Кастеты. Появляются рывком масштаба — «надел», а не «были всегда», — и всё
 # время погони качаются: неподвижные кулаки читались бы как часть картинки.
@@ -802,10 +886,13 @@ func _finale() -> void:
 	_stop_anim(F_IDLE[0])
 	if is_instance_valid(_normaldo) and _normaldo.has_method("disable_input"):
 		_normaldo.disable_input()
+	if is_instance_valid(_sprite):
+		_sprite.flip_h = false
 
 	# Выходит в центр — сам, спокойно, как хозяин.
+	var mid := Vector2(vp.x * 0.58, vp.y * 0.52)
 	var tw := create_tween()
-	tw.tween_property(self, "position", Vector2(vp.x * 0.62, vp.y * 0.5), 0.6)\
+	tw.tween_property(self, "position", mid, 0.6)\
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	await tw.finished
 	if not _alive():
@@ -813,64 +900,118 @@ func _finale() -> void:
 	_phone_up()
 	_animate(F_TALK, 8.0)
 	_play_sfx(SFX_FINAL)
-	for i in 4:
+	for i in 3:
 		_ring(COL_PINK)
 		await get_tree().create_timer(0.14).timeout
 		if not _alive():
 			return
 	_phone_down()
+	_stop_anim(F_IDLE[0])
 
-	# И вот тут они приходят — со всех линий и с обеих сторон, но идут не на
-	# игрока, а НА НЕГО. Летят они мимо линий, сходясь в одну точку: это уже не
-	# атака, и путать её с атакой нельзя.
-	_animate(F_RAGE, 12.0)
-	for i in 18:
-		var from_left : bool = i % 2 == 0
-		var tex : Texture2D = [T_SECURITY, T_COP, T_GIRL[0], T_GIRL[1]][i % 4]
-		_crowd_rush(tex, from_left, global_position)
-		await get_tree().create_timer(0.07).timeout
-		if not _alive():
-			return
-	await get_tree().create_timer(0.7).timeout
+	# ── Его УВОЗЯТ ───────────────────────────────────────────────────────────
+	# Раньше тут была толпа, слетающаяся к боссу со всех сторон. На экране это
+	# читалось как «все спрятались за него», а не как конец: приехавшие просто
+	# исчезали за его спиной, и было непонятно, чем всё кончилось.
+	#
+	# Теперь конец рассказан движением, и рассказывает он ровно то, что нужно:
+	# его УВОДЯТ. К нему с двух сторон подходят девочки, подъезжает полицейская
+	# машина, все садятся в неё, и машина уезжает за экран. Хозяин не побеждён
+	# ударом — он снят с точки, и заведение осталось без хозяина.
+	var girls : Array = []
+	for i in 2:
+		var g := _walk_in(T_GIRL[i % T_GIRL.size()], i == 0,
+			mid + Vector2(-118.0 if i == 0 else 118.0, 26.0), MINION_PX + 6.0)
+		girls.append(g)
+	_play_sfx(SFX_KISS)
+	await get_tree().create_timer(0.75).timeout
 	if not _alive():
 		return
 
+	# Машина въезжает СПРАВА и тормозит рядом — с мигалкой, чтобы её ни с чем не
+	# спутали: этот же синий с красным мигал весь второй акт.
+	var car := Sprite2D.new()
+	car.texture        = T_POLICE_CAR
+	car.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	ItemSizing.fit_sprite_content(car, CAR_PX)
+	car.position = Vector2(vp.x + CAR_PX, mid.y + 34.0)
+	car.z_index  = 41
+	car.add_to_group("club_fx")
+	_game_root.add_child(car)
+	# Встаёт РЯДОМ, а не поверх: машина шире босса, и остановленная вплотную она
+	# просто накрывала его собой — вместо «за ним приехали» получалось «он
+	# исчез».
+	var car_stop := Vector2(mid.x + W_FIGHT * 0.5 + CAR_PX * 0.42, mid.y + 34.0)
+	var tw_car := car.create_tween()
+	tw_car.tween_property(car, "position", car_stop, 0.75)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_siren(COL_BLUE, false)
+	await tw_car.finished
+	if not _alive():
+		return
+	_screen_shake(6.0, 4)
+	# Поворачивается к машине: садиться, глядя в другую сторону, — не садиться.
+	if is_instance_valid(_sprite):
+		_sprite.flip_h = true
+	await get_tree().create_timer(0.3).timeout
+	if not _alive():
+		return
+
+	# Садятся: все трое сходятся к машине и «ныряют» в неё — уменьшаясь и гаснув.
 	_play_sfx(SFX_LAUGH)
-	_screen_flash(Color(1.0, 0.75, 1.0))
-	_screen_shake(16.0, 12)
-	var out := create_tween()
-	out.tween_property(_sprite, "scale", _sprite.scale * 0.05, 0.35)\
+	for gv in girls:
+		var g : Sprite2D = gv
+		if not is_instance_valid(g):
+			continue
+		var tg : Tween = g.create_tween()
+		tg.tween_property(g, "position", car_stop, 0.34)\
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		tg.parallel().tween_property(g, "scale", g.scale * 0.25, 0.34)
+		tg.parallel().tween_property(g, "modulate:a", 0.0, 0.34)
+		tg.tween_callback(g.queue_free)
+	var tb := create_tween()
+	tb.tween_property(self, "position", car_stop, 0.40)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tb.parallel().tween_property(_sprite, "scale", _sprite.scale * 0.25, 0.40)
+	tb.parallel().tween_property(self, "modulate:a", 0.0, 0.40)
+	await tb.finished
+	if not _alive():
+		return
+
+	# И машина уезжает — быстро и ЗА ЛЕВЫЙ край, туда же, куда весь забег уходит
+	# всё остальное.
+	var tw_out := car.create_tween()
+	tw_out.tween_property(car, "position:x", -CAR_PX * 1.5, 0.85)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
-	out.parallel().tween_property(self, "modulate:a", 0.0, 0.35)
-	await out.finished
+	tw_out.tween_callback(car.queue_free)
+	await tw_out.finished
 	if not _alive():
 		return
 	if is_instance_valid(_normaldo) and _normaldo.has_method("enable_input"):
 		_normaldo.enable_input()
-	await get_tree().create_timer(0.4).timeout
+	await get_tree().create_timer(0.3).timeout
 
-# Один из толпы: летит из-за края В ТОЧКУ, гаснет по дороге. Хитбокса нет
-# намеренно — финал не отнимает жизни.
-func _crowd_rush(tex: Texture2D, from_left: bool, target: Vector2) -> void:
+const CAR_PX : float = 300.0
+
+# Подходит из-за края и ВСТАЁТ рядом. Не «прилетает», как вызванные в бою:
+# бой кончился, и то же самое движение на той же скорости читалось бы как ещё
+# одна атака.
+func _walk_in(tex: Texture2D, from_left: bool, to: Vector2, px: float) -> Sprite2D:
 	if not is_instance_valid(_game_root):
-		return
+		return null
 	var vp := get_viewport_rect().size
 	var s := Sprite2D.new()
 	s.texture        = tex
 	s.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	s.flip_h         = from_left
-	ItemSizing.fit_sprite_content(s, MINION_PX)
-	s.position = Vector2(-70.0 if from_left else vp.x + 70.0,
-		randf_range(vp.y * 0.12, vp.y * 0.88))
-	s.z_index  = 39
+	ItemSizing.fit_sprite_content(s, px)
+	s.position = Vector2(-80.0 if from_left else vp.x + 80.0, to.y)
+	s.z_index  = 41
 	s.add_to_group("club_fx")
 	_game_root.add_child(s)
 	var tw := s.create_tween()
-	tw.tween_property(s, "position", target + Vector2(
-		randf_range(-40.0, 40.0), randf_range(-40.0, 40.0)), 0.42)\
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tw.parallel().tween_property(s, "modulate:a", 0.35, 0.42)
-	tw.tween_callback(s.queue_free)
+	tw.tween_property(s, "position", to, 0.7)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	return s
 
 # ── Индикатор актов ──────────────────────────────────────────────────────────
 # Три полоски сигнала на телефоне: сколько ещё звонков в нём осталось. У

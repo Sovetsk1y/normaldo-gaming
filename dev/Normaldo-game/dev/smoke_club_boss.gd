@@ -23,7 +23,7 @@ const CLUB := preload("res://scripts/club_boss.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 28
+const EXPECTED_CHECKS : int = 37
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -42,6 +42,10 @@ func _initialize() -> void:
 	await _test_police()
 	print("── Акт 3: танцпол ──")
 	await _test_floor()
+	print("── Кулаки бьют по-настоящему ──")
+	await _test_fist_hurts()
+	print("── Финал: его увозят ──")
+	await _test_finale()
 	print("── Смерть игрока обрывает битву ──")
 	await _test_death_stops()
 	print("── Битва доходит до конца ──")
@@ -133,6 +137,13 @@ func _test_assets() -> void:
 	e["game"].queue_free()
 	await process_frame
 
+# Ударная зона самого босса, если она сейчас есть.
+func _fist_of(b: Node) -> Area2D:
+	for c in b.get_children():
+		if c is Area2D and c.is_in_group("obstacle"):
+			return c
+	return null
+
 func _labels(node: Node, out: Array) -> void:
 	if node is Label and String((node as Label).text) != "":
 		out.append(String((node as Label).text))
@@ -198,6 +209,10 @@ func _test_security() -> void:
 			leaves_gap = false
 	_check(grows and leaves_gap,
 		"линий занимают всё больше, но всегда меньше пяти: %s" % [lanes])
+	# А вот УДАРНОЙ ЗОНЫ у самого босса на этом такте быть не должно: он звонит,
+	# а не дерётся, и стоит у правого края. Постоянный хитбокс там был бы просто
+	# стеной, в которую нельзя войти.
+	_check(_fist_of(b) == null, "сам он на этом такте не бьёт — зоны у него нет")
 
 	b.call("_abort")
 	e["game"].queue_free()
@@ -236,6 +251,9 @@ func _test_police() -> void:
 		"залп накрывает почти все линии: %d из 5" % lanes_hit.size())
 	_check(CLUB.POL_SPEED > CLUB.SEC_SPEED * 1.3,
 		"и она заметно быстрее охраны: %.0f против %.0f" % [CLUB.POL_SPEED, CLUB.SEC_SPEED])
+	# Залпов должно быть много: акт из трёх залпов кончался раньше, чем игрок
+	# успевал понять правило мигалки.
+	_check(CLUB.POL_VOLLEYS >= 6, "залпов шесть: %d" % CLUB.POL_VOLLEYS)
 
 	b.call("_abort")
 	e["game"].queue_free()
@@ -276,6 +294,36 @@ func _test_floor() -> void:
 			chased = true
 	_check(chased, "хозяин надевает кастеты и начинает гнаться")
 	if chased:
+		# У него есть УДАРНАЯ ЗОНА — и ровно на этом такте. Раньше её не было
+		# вовсе: он доезжал до головы и проходил сквозь неё без всякого урона,
+		# то есть последний акт был пустым.
+		var fist : Area2D = _fist_of(b)
+		_check(fist != null and int(fist.get("damage")) >= 1,
+			"и наконец БЬЁТ: у него появилась ударная зона")
+
+		# И он НЕ ВСТАЁТ В ДЫРУ. Стена девочек оставляет ровно один проход, и
+		# хозяин, гонящийся за головой, вставал ровно в него: игрок шёл к
+		# проходу, а проход был занят, и пройти было физически нельзя.
+		# Замер идёт ПО КАДРАМ, а стена живёт по РЕАЛЬНОМУ времени: под нагрузкой
+		# кадры длиннее, и фиксированное окно успевало закончиться уже после
+		# стены — проб не набиралось, и проверка падала на ровном месте. Поэтому
+		# окно с запасом, а выход — по числу набранных проб.
+		var in_gap := 0
+		var samples := 0
+		var tg := 0.0
+		while tg < 6.0 and samples < 90:
+			await _tick(1.0 / 60.0)
+			tg += 1.0 / 60.0
+			if not is_instance_valid(b):
+				break
+			var gap : int = int(b.get("_gap_lane"))
+			if gap < 0:
+				continue
+			samples += 1
+			if int(floor(b.position.y / (e["vp"].y / CLUB.LANES))) == gap:
+				in_gap += 1
+		_check(samples > 20 and in_gap == 0,
+			"и не встаёт в дыру стены: %d кадров из %d" % [in_gap, samples])
 		var knuck : Node = null
 		for c in b.get_children():
 			if c is Node2D and c.get_child_count() == 2 and c.get_child(0) is Sprite2D:
@@ -293,6 +341,87 @@ func _test_floor() -> void:
 	b.call("_abort")
 	e["game"].queue_free()
 	await process_frame
+
+# ── Кулаки ───────────────────────────────────────────────────────────────────
+# «Зона есть» и «зона бьёт» — разные утверждения, и второе важнее. Проверяется
+# оно на СМЕРТНОМ Нормальдо: его ставят вплотную к боссу на такте погони и
+# смотрят, дошёл ли урон до игрока. До этой правки босс проходил сквозь голову
+# насквозь, и весь последний акт был пустым.
+func _test_fist_hurts() -> void:
+	var e : Dictionary = await _boot(false)
+	var b : Node2D = _boss(e)
+	await process_frame
+	b.position = Vector2(e["vp"].x * 0.5, e["vp"].y * 0.5)
+	b.call("_start_track")
+	await _tick(0.3)
+	_check(_fist_of(b) != null, "на такте погони у босса есть зона")
+	(e["n"] as Node2D).position = b.position
+	await _tick(2.0)
+	_check(bool(e["n"].get("_dead")),
+		"и она ДОХОДИТ до игрока: удар засчитан")
+	if is_instance_valid(b):
+		b.call("_abort")
+	e["game"].queue_free()
+	await process_frame
+
+# ── Финал ────────────────────────────────────────────────────────────────────
+# Конец рассказан ДВИЖЕНИЕМ: к боссу подходят девочки, подъезжает полицейская
+# машина, все садятся, машина уезжает. Раньше тут была толпа, слетающаяся к
+# нему со всех сторон, и на экране это читалось как «все спрятались за него», а
+# не как конец.
+func _test_finale() -> void:
+	var e : Dictionary = await _boot()
+	var b : Node2D = _boss(e)
+	await process_frame
+	b.call("_finale")
+
+	var car : Sprite2D = null
+	var t := 0.0
+	while t < 6.0 and car == null:
+		await _tick(1.0 / 60.0)
+		t += 1.0 / 60.0
+		car = _car(e["game"])
+	_check(car != null, "полицейская машина подъехала")
+	if car == null:
+		e["game"].queue_free()
+		await process_frame
+		_check(false, "—")
+		_check(false, "—")
+		return
+
+	# Она ОСТАНАВЛИВАЕТСЯ в кадре, а не проезжает мимо: садиться надо во
+	# что-то стоящее. Ищем кадр, где машина внутри экрана и УЖЕ НЕ ЕДЕТ.
+	var x_stop : float = -1.0
+	var x_prev : float = car.position.x
+	t = 0.0
+	while t < 3.0 and x_stop < 0.0:
+		await _tick(1.0 / 60.0)
+		t += 1.0 / 60.0
+		if not is_instance_valid(car):
+			break
+		var x : float = car.position.x
+		if x > 0.0 and x < e["vp"].x and absf(x - x_prev) < 1.0:
+			x_stop = x
+		x_prev = x
+	_check(x_stop > 0.0, "и встала в кадре: x=%.0f" % x_stop)
+
+	# Дальше уезжает ЗА ЛЕВЫЙ край и увозит его: босс к этому моменту погас.
+	t = 0.0
+	while t < 6.0 and is_instance_valid(b) and float(b.modulate.a) > 0.05:
+		await _tick(1.0 / 60.0)
+		t += 1.0 / 60.0
+	_check(not is_instance_valid(b) or float(b.modulate.a) <= 0.05,
+		"хозяина увезли — с экрана он ушёл вместе с машиной")
+	if is_instance_valid(b):
+		b.call("_abort")
+	e["game"].queue_free()
+	await process_frame
+
+func _car(game: Node) -> Sprite2D:
+	for c in game.get_children():
+		if c is Sprite2D and (c as Sprite2D).texture == CLUB.T_POLICE_CAR:
+			return c
+	return null
 
 # ── Смерть игрока ────────────────────────────────────────────────────────────
 # Такты сшиты через `get_tree().create_timer()`, а тот тикает и на паузе: без
