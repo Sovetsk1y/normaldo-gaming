@@ -380,7 +380,26 @@ func _make_icon(tex: Texture2D, sz: float) -> TextureRect:
 # скина, ячейка игрока), меняют именно его.
 const UI_HEAD_FILL : float = 0.72
 
-func _skin_head_icon(skin_id: String, fat: int, box: float) -> Control:
+# ПОРТРЕТ — отдельный режим той же аватарки, для крупной картинки в карточке
+# скина. Там сверх нормировки головы рисунок ещё и не выпускается за коробку.
+#
+# Разница не в размере, а в назначении. Иконке 52 px руки и посох можно обрезать:
+# от неё требуется, чтобы читалась голова. Портрет в пол-карточки обрезать
+# нельзя — срезанное краем тело читается не как кадрирование, а как поломка.
+#
+# А главное, «голова» в замерах — это САМОЕ КРУПНОЕ СВЯЗНОЕ ПЯТНО спрайта, и
+# честной головой оно оказывается не у всех: у Гарри руки и рубашка нарисованы
+# отдельными пятнами, и мерится ровно голова, а у Волшебника шляпа с телом
+# слиты в одно пятно, и мерится вся фигура. Нормировка по такому «размеру
+# головы» ставила рядом Гарри, у которого лицо занимало 0.70 коробки, и
+# Волшебника, у которого 0.37, — вдвое. Ограничение по рисунку это выравнивает:
+# у обоих коробку занимает фигура целиком, а лица выходят сопоставимыми.
+#
+# Тот же приём, что у MAX_BODY в забеге, и по той же причине.
+const UI_BODY_FILL : float = 0.94
+
+func _skin_head_icon(skin_id: String, fat: int, box: float,
+		portrait: bool = false) -> Control:
 	var holder := Control.new()
 	holder.size               = Vector2(box, box)
 	holder.custom_minimum_size = holder.size
@@ -392,7 +411,7 @@ func _skin_head_icon(skin_id: String, fat: int, box: float) -> Control:
 	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	holder.add_child(r)
 	holder.set_meta("head_rect", r)
-	_fit_head_rect(r, _avatar_texture(skin_id, fat), skin_id, fat, box)
+	_fit_head_rect(r, _avatar_texture(skin_id, fat), skin_id, fat, box, portrait)
 	return holder
 
 # Спрайт внутри держателя — для тех, кто меняет аватарку на лету.
@@ -403,7 +422,8 @@ func _head_icon_rect(holder: Control) -> TextureRect:
 
 # Кладёт текстуру в rect так, чтобы центр головы совпал с центром коробки, а
 # ширина головы составила UI_HEAD_FILL от коробки.
-func _fit_head_rect(r: TextureRect, tex: Texture2D, skin_id: String, fat: int, box: float) -> void:
+func _fit_head_rect(r: TextureRect, tex: Texture2D, skin_id: String, fat: int,
+		box: float, portrait: bool = false) -> void:
 	if not is_instance_valid(r):
 		return
 	r.texture = tex
@@ -412,6 +432,7 @@ func _fit_head_rect(r: TextureRect, tex: Texture2D, skin_id: String, fat: int, b
 	r.set_meta("head_skin", skin_id)
 	r.set_meta("head_box",  box)
 	r.set_meta("head_fat",  fat)
+	r.set_meta("head_portrait", portrait)
 	if tex == null:
 		return
 	var sz : Vector2 = tex.get_size()
@@ -419,13 +440,39 @@ func _fit_head_rect(r: TextureRect, tex: Texture2D, skin_id: String, fat: int, b
 		return
 	var head_px : float = maxf(1.0, sz.x * SkinMetrics.head_frac_for(skin_id))
 	var k : float = (box * UI_HEAD_FILL) / head_px
+	var used := ItemSizing.content_rect(tex)
+	var has_used : bool = used.size.x > 0 and used.size.y > 0
+	if portrait and has_used:
+		# Второе ограничение портрета: рисунок целиком в коробке. См. UI_BODY_FILL.
+		k = minf(k, (box * UI_BODY_FILL)
+			/ maxf(float(used.size.x), float(used.size.y)))
 	r.size = sz * k
 	# Центр головы в долях кадра — центр кадра плюс замеренное смещение.
 	var c : Vector2 = Vector2(0.5, 0.5) + SkinMetrics.offset_for(skin_id, fat)
 	r.position     = Vector2(box, box) * 0.5 - Vector2(c.x * r.size.x, c.y * r.size.y)
+	if portrait and has_used:
+		# Голова по-прежнему метит в центр — но если из-за неё за край уходит
+		# тело, рисунок подвигается обратно. Центрировать сам рисунок нельзя: у
+		# классики в кадре одна голова, и центрирование по рисунку опустило бы
+		# её ниже, чем у соседей по ленте.
+		var tl : Vector2 = r.position + Vector2(used.position) * k
+		var wh : Vector2 = Vector2(used.size) * k
+		r.position += Vector2(_pull_in(tl.x, wh.x, box), _pull_in(tl.y, wh.y, box))
 	# Вращение при морфе жира должно идти вокруг ГОЛОВЫ, а не вокруг центра
 	# кадра, иначе у скинов с руками голова уезжает по дуге за край коробки.
 	r.pivot_offset = Vector2(c.x * r.size.x, c.y * r.size.y)
+
+# Насколько подвинуть отрезок [lo, lo+size], чтобы он влез в [0, limit]. Не
+# влезающий по размеру центрируется — обрезать его симметрично честнее, чем
+# прижать к одному краю.
+func _pull_in(lo: float, size: float, limit: float) -> float:
+	if size >= limit:
+		return (limit - size) * 0.5 - lo
+	if lo < 0.0:
+		return -lo
+	if lo + size > limit:
+		return limit - (lo + size)
+	return 0.0
 
 # Пересадить уже созданный спрайт на другое состояние жира того же скина.
 func _refit_head_rect(r: TextureRect, tex: Texture2D, fat: int) -> void:
@@ -433,7 +480,8 @@ func _refit_head_rect(r: TextureRect, tex: Texture2D, fat: int) -> void:
 		if is_instance_valid(r):
 			r.texture = tex
 		return
-	_fit_head_rect(r, tex, String(r.get_meta("head_skin")), fat, float(r.get_meta("head_box")))
+	_fit_head_rect(r, tex, String(r.get_meta("head_skin")), fat,
+		float(r.get_meta("head_box")), bool(r.get_meta("head_portrait", false)))
 
 # ── ЖИРОБОСС end fly-in targets ───────────────────────────────────────────────
 # Screen-space centre of the top-left pizza / dollar counters, so fat_boss.gd can
@@ -4378,7 +4426,7 @@ func _build_skin_card(parent: Control, pos: Vector2, w: float, h: float,
 	# Портрет — главное в карточке, и места ему отдаётся половина высоты: ради
 	# него карточный вид и делался.
 	var box : float = minf(w - 40.0, h * 0.52)
-	var holder := _skin_head_icon(skin_id, 0, box)
+	var holder := _skin_head_icon(skin_id, 0, box, true)
 	holder.name     = "Portrait"
 	holder.position = Vector2((w - box) * 0.5, y)
 	card.add_child(holder)
@@ -4420,7 +4468,7 @@ func _build_skin_card(parent: Control, pos: Vector2, w: float, h: float,
 		var f : int = int(state["fat"])
 		var r := _head_icon_rect(holder)
 		if r != null:
-			_fit_head_rect(r, _avatar_texture(skin_id, f), skin_id, f, box)
+			_fit_head_rect(r, _avatar_texture(skin_id, f), skin_id, f, box, true)
 		holder.modulate = Color(1, 1, 1, 0.35) if f > max_fat else Color.WHITE
 		lock.visible    = f > max_fat
 		# Без анимации: пролистывание витрины — это не набор и не потеря жира.

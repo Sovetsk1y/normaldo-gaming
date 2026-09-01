@@ -148,6 +148,41 @@ func _test_cards(hud: Node, save: Node) -> void:
 		_check(lock_ok and with_locks > 0,
 			"закрытые состояния под замком, замки есть на %d карточках" % with_locks)
 
+		# ПОРТРЕТ ДЕРЖИТ РИСУНОК В КОРОБКЕ. Нормировка идёт по «голове», а голова
+		# в замерах — это самое крупное связное пятно спрайта, и честной головой
+		# оно оказывается не у всех: у Гарри руки и рубашка нарисованы отдельно и
+		# мерится ровно голова, а у Волшебника шляпа слита с телом и мерится вся
+		# фигура. Гарри от этого вылезал за коробку на треть, и рядом с соседями,
+		# которые в неё помещались, читался как вдвое более крупный.
+		#
+		# Проверяется поэтому не «голова такого-то размера» (по кривой метрике
+		# это ничего не значит), а РИСУНОК: он у всех внутри коробки и у всех
+		# занимает её сопоставимо.
+		var out_of_box : Array = []
+		var fill_min : float = 9.0
+		var fill_max : float = 0.0
+		for c in cards:
+			var hd : Control = c.get_node_or_null("Portrait")
+			if hd == null:
+				continue
+			var rr : TextureRect = hud.call("_head_icon_rect", hd)
+			if rr == null or rr.texture == null:
+				continue
+			var used : Rect2i = ItemSizing.content_rect(rr.texture)
+			var k : float = rr.size.x / float(rr.texture.get_width())
+			var tl : Vector2 = rr.position + Vector2(used.position) * k
+			var wh : Vector2 = Vector2(used.size) * k
+			if tl.x < -1.0 or tl.y < -1.0 \
+					or tl.x + wh.x > hd.size.x + 1.0 or tl.y + wh.y > hd.size.y + 1.0:
+				out_of_box.append(String(c.name))
+			var fill : float = maxf(wh.x, wh.y) / hd.size.x
+			fill_min = minf(fill_min, fill)
+			fill_max = maxf(fill_max, fill)
+		_check(out_of_box.is_empty(),
+			"рисунок ни у кого не вылезает за портрет: %s" % [out_of_box])
+		_check(fill_min > 0.55 and fill_max <= 1.0,
+			"и занимает коробку сопоставимо: от %.2f до %.2f" % [fill_min, fill_max])
+
 	await _close(overlay)
 
 # Индикатор 💀 F A T карточки. Ищется по классу, а не по имени узла: имя можно
