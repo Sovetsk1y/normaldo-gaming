@@ -192,6 +192,8 @@ func _start() -> void:
 		_spawner.pause_for_event()
 	if _spawner.has_method("collapse_items"):
 		_spawner.collapse_items()
+	if _spawner.has_method("collapse_minigame_debris"):
+		_spawner.call("collapse_minigame_debris", self)
 	if is_instance_valid(_background):
 		_background.stop_scrolling()
 
@@ -379,6 +381,24 @@ func _clear_projectiles() -> void:
 	_proj.clear()
 
 # ── End ───────────────────────────────────────────────────────────────────────
+
+# Убрать всё, что ещё летит ИЗ ПАЧКИ. Зовётся, когда забег замораживает ДРУГАЯ
+# мини-игра: спиты — наши дети, а не спавнера, и `collapse_items()` спавнера их
+# не видит. Оставленные, они продолжали лететь поверх развернувшихся на весь
+# экран автоматов.
+#
+# Мало удалить узлы: их двигает НАШ `_process` по списку `_proj`, и узел,
+# отпущенный в падение, продолжал бы дёргаться нашей же рукой.
+func drop_flying() -> void:
+	for e in _proj:
+		var node = e["node"]
+		if not is_instance_valid(node):
+			continue
+		if is_instance_valid(_spawner) and _spawner.has_method("collapse_node"):
+			_spawner.call("collapse_node", node)
+		else:
+			node.queue_free()
+	_proj.clear()
 
 func _end_minigame() -> void:
 	if _state == State.OUTRO:

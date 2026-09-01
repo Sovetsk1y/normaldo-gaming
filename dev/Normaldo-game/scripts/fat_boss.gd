@@ -286,6 +286,9 @@ func _freeze_run() -> void:
 	if is_instance_valid(_spawner):
 		_spawner.pause_for_event()
 		_spawner.collapse_items()   # items tumble down instead of blinking out
+		# И чужой мусор в воздухе: спиты пицца-пати — её дети, а не спавнера.
+		if _spawner.has_method("collapse_minigame_debris"):
+			_spawner.call("collapse_minigame_debris", self)
 	if is_instance_valid(_background):
 		_background.stop_scrolling()
 
@@ -659,6 +662,11 @@ func _make_item(tex: Texture2D, scl: float, eatable: bool, dmg: int, group: Stri
 	spr.texture = tex
 	spr.scale   = Vector2.ONE * scl
 	return it
+
+# То же, что _clear_mg_items, но снаружи: другая мини-игра, замораживающая
+# забег, обязана убрать и наш поток — он наши дети, а не спавнера.
+func drop_flying() -> void:
+	_clear_mg_items()
 
 func _clear_mg_items() -> void:
 	# Collapse them (tumble + fall) instead of blinking out, same as the freeze.

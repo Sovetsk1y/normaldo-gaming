@@ -1698,9 +1698,27 @@ func _inst_lane(scene: PackedScene, speed: float, vp_w: float, lanes: Array, set
 
 # Собрать предмет, НЕ добавляя в дерево — нужно и обычному спавну, и мэджик
 # боксу, который сам решает, куда предмет полетит.
+# Текстура → запись каталога для предметов на общем `item.gd`.
+#
+# Каталог берётся ПО ПУТИ в дереве, а не по имени автолоада: `godot --script`
+# компилирует спавнер раньше, чем поднимаются автолоады, и любой тест, который
+# его подгружает, падал бы на «Identifier not found: Bestiary».
+const BESTIARY_BY_TEX : Dictionary = {
+	PIZZA_TEX: "pizza", DOLLAR_TEX: "dollar", STONE_TEX: "stone",
+	TRASH_TEX: "trash", POLICE_CAR_TEX: "police_car",
+}
+
 func _make_item(tex: Texture2D, scale: float, speed: float, damage: int,
 		eatable: bool = false, rotates: bool = true, pulses: bool = false,
 		skin_tag: String = "") -> Node2D:
+	# Пицца, доллар и часть опасностей летят ОДНИМ скриптом `item.gd` и
+	# отличаются только текстурой — хук каталога по скрипту их не различает.
+	# Поэтому здесь, где текстура ещё известна, запись помечается вручную.
+	var bid : String = String(BESTIARY_BY_TEX.get(tex, ""))
+	if bid != "":
+		var cat : Node = get_node_or_null("/root/Bestiary")
+		if cat != null:
+			cat.call("mark", bid)
 	var item          := ITEM_SCENE.instantiate()
 	item.speed         = speed
 	item.is_eatable    = eatable
@@ -1943,6 +1961,26 @@ func collapse_node(node: Node2D) -> void:
 	tw.tween_property(node, "rotation", node.rotation + randf_range(-4.0, 4.0), t)
 	tw.tween_property(node, "modulate:a", 0.0, t)
 	tw.chain().tween_callback(node.queue_free)
+
+# ── Чужой мусор в воздухе ────────────────────────────────────────────────────
+# Мини-игры держат свои снаряды У СЕБЯ, а не здесь: спиты пицца-пати и поток
+# ЖИРОБОССА — дети своих узлов. Поэтому `collapse_items()` их не видит: он
+# перебирает СВОИХ детей, и всё, что уже вылетело из пачки, продолжало лететь
+# поверх развернувшихся на весь экран автоматов.
+#
+# Замораживающая забег мини-игра зовёт это вместе с `collapse_items()` и
+# передаёт себя, чтобы не уронить собственный поток.
+const MINIGAME_NODES : Array = ["PizzaParty", "FatBoss", "SlotsGame"]
+
+func collapse_minigame_debris(except: Node = null) -> void:
+	var root := get_parent()
+	if root == null:
+		return
+	for n in MINIGAME_NODES:
+		var mg : Node = root.get_node_or_null(String(n))
+		if mg == null or mg == except or not mg.has_method("drop_flying"):
+			continue
+		mg.call("drop_flying")
 
 func collapse_items() -> void:
 	set_process(false)

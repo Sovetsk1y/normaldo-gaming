@@ -22,6 +22,12 @@ var owned_skins          : Array  = ["classic"]
 # Per-skin progress store: { skin_id: {xp, level, mastery} }
 var skin_progress        : Dictionary = {}
 
+# ── Каталог книги: что игрок уже видел ───────────────────────────────────────
+# Ключ — id записи каталога (см. scripts/bestiary.gd), значение всегда true:
+# нужен именно НАБОР, а словарь взят потому, что в JSON он и переживает
+# сохранение, и проверяется за константу.
+var seen_entries : Dictionary = {}
+
 # Slot machine bonuses consumed at run start
 var slot_xp_mult    : float = 1.0   # ×N XP for next run
 var slot_luck_runs  : int   = 0     # ×2 XP for next N runs
@@ -363,6 +369,16 @@ func consume_slot_bonuses() -> Dictionary:
 	_save()
 	return result
 
+# Пометить запись каталога встреченной. Возвращает true, если это ПЕРВАЯ
+# встреча: сохраняться на каждый пролетевший банан незачем — сейв пишется
+# только когда набор действительно изменился.
+func mark_seen(id: String) -> bool:
+	if id == "" or seen_entries.has(id):
+		return false
+	seen_entries[id] = true
+	_save()
+	return true
+
 func _save() -> void:
 	_flush_active()
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -372,6 +388,7 @@ func _save() -> void:
 		"active_skin":      active_skin,
 		"owned_skins":      owned_skins,
 		"skin_progress":    skin_progress,
+		"seen_entries":     seen_entries,
 		"slot_xp_mult":     slot_xp_mult,
 		"slot_luck_runs":   slot_luck_runs,
 		"slot_extra_life":  slot_extra_life,
@@ -417,6 +434,10 @@ func _load() -> void:
 		owned_skins.append(str(s))
 	if not "classic" in owned_skins:
 		owned_skins.append("classic")
+
+	if d.has("seen_entries") and d["seen_entries"] is Dictionary:
+		for k in (d["seen_entries"] as Dictionary):
+			seen_entries[str(k)] = true
 
 	if d.has("skin_progress"):
 		# Current format: per-skin dictionary

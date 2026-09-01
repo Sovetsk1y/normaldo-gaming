@@ -356,6 +356,11 @@ func _on_caught() -> void:
 	if is_instance_valid(_spawner):
 		if _spawner.has_method("pause_for_event"): _spawner.pause_for_event()
 		if _spawner.has_method("collapse_items"):  _spawner.collapse_items()
+		# Пицца-пати и ЖИРОБОСС держат свои снаряды у себя, и collapse_items()
+		# их не видит: спиты пачки продолжали лететь поверх развернувшихся на
+		# весь экран автоматов. Это и был баг «летят предметы поверх автоматов».
+		if _spawner.has_method("collapse_minigame_debris"):
+			_spawner.call("collapse_minigame_debris", self)
 	if is_instance_valid(_background) and _background.has_method("stop_scrolling"):
 		_background.stop_scrolling()
 
@@ -508,6 +513,10 @@ func _drive_falling(delta: float) -> void:
 			else:
 				n.queue_free()
 	_falling = alive
+
+# Наш собственный поток — падающие ячейки барабанов.
+func drop_flying() -> void:
+	_clear_falling()
 
 func _clear_falling() -> void:
 	for n in _falling:

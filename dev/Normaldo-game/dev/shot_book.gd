@@ -44,7 +44,18 @@ func _initialize() -> void:
 	# Четвёртый аргумент — номер главы, которую открыть (1-based). Без него
 	# экран сам выбирает главу с готовой наградой.
 	if argv.size() > 3:
-		screen.call("_on_select_chapter", int(argv[3]) - 1)
+		# Вкладка каталога снимается по имени раздела; число — номер главы.
+		var a3 := String(argv[3])
+		if a3 in ["items", "enemies", "bosses"]:
+			# В кадре должны быть ОБА состояния: пара встреченных записей и
+			# запертые. Снимок с одними «???» ничего не показывает про каталог.
+			var cat : Node = get_root().get_node_or_null("/root/Bestiary")
+			var rows : Array = cat.call("entries_of", a3)
+			for i in mini(3, rows.size()):
+				cat.call("mark", String((rows[i] as Dictionary)["id"]))
+			screen.call("_on_tab", a3)
+		else:
+			screen.call("_on_select_chapter", int(a3) - 1)
 	for _i in 60:
 		await process_frame
 	await RenderingServer.frame_post_draw

@@ -45,6 +45,8 @@ func _initialize() -> void:
 	await _test_focus(hud, qm)
 	print("── Получение награды ──")
 	await _test_claim(hud, qm, save)
+	print("── Каталог: вкладки ──")
+	await _test_catalog(hud)
 	print("── Закрытие ──")
 	await _test_close(hud, qm)
 
@@ -54,6 +56,64 @@ func _initialize() -> void:
 	else:
 		print("ПРОВАЛОВ: ", _fails)
 	quit(1 if _fails > 0 else 0)
+
+# ── Каталог: ПРЕДМЕТЫ · ВРАГИ · БОССЫ ────────────────────────────────────────
+# Каталог показывает ТОЛЬКО встреченное, и ломается это молча: достаточно
+# перепутать «есть в списке» с «встречено», и книга разом выдаст весь бестиарий
+# и всех боссов игроку, который прошёл полуровня.
+func _test_catalog(hud: Node) -> void:
+	var cat : Node = get_root().get_node_or_null("/root/Bestiary")
+	var save : Node = get_root().get_node_or_null("SaveData")
+	_check(cat != null, "каталог поднялся автолоадом")
+	if cat == null:
+		return
+
+	# Чистый сейв: не встречено ничего.
+	save.set("seen_entries", {})
+	var scr : Node = await _open(hud)
+	scr.call("_on_tab", cat.S_ENEMY)
+	await process_frame
+	_check(String(scr.get("_tab")) == cat.S_ENEMY, "вкладка ВРАГИ открылась")
+
+	var rows : Array = scr.call("_cat_entries")
+	_check(rows.size() > 8, "в разделе есть записи: %d" % rows.size())
+	var texts : Array = _texts(scr.get("_spine_body"), [])
+	var named := 0
+	for t in texts:
+		if String(t) != "???":
+			named += 1
+	_check(named == 0, "на чистом сейве все записи заперты: названий %d" % named)
+
+	# Страница запертой записи не рассказывает, что это.
+	var page : Array = _texts(scr.get("_page_body"), [])
+	var leaks : Array = []
+	for e in rows:
+		for t in page:
+			if String(t) == String((e as Dictionary)["text"]):
+				leaks.append((e as Dictionary)["id"])
+	_check(leaks.is_empty(), "и описание не показано: %s" % [leaks])
+
+	# Встретили — запись открылась.
+	var first : Dictionary = rows[0]
+	cat.call("mark", String(first["id"]))
+	scr.call("_rebuild_content")
+	await process_frame
+	_check(_texts(scr.get("_spine_body"), []).has(String(first["title"])),
+		"встреченная запись названа: %s" % first["title"])
+	_check(_texts(scr.get("_page_body"), []).has(String(first["text"])),
+		"и у неё есть описание")
+
+	# Вкладок четыре, и переключаются они.
+	scr.call("_on_tab", cat.S_BOSS)
+	await process_frame
+	_check(String(scr.get("_tab")) == cat.S_BOSS, "вкладка БОССЫ открылась")
+	_check((scr.call("_cat_entries") as Array).size() >= 3,
+		"боссов в каталоге: %d" % (scr.call("_cat_entries") as Array).size())
+	scr.call("_on_tab", "")
+	await process_frame
+	_check(String(scr.get("_tab")) == "", "и обратно к главам")
+	_check(scr.get("_sel_chapter") >= 0, "глава при этом выбрана")
+	await _close(scr)
 
 # ── Хелперы ───────────────────────────────────────────────────────────────────
 

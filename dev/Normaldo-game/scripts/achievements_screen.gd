@@ -51,8 +51,20 @@ const SPINE_X : float = 12.0
 const SPINE_W : float = 118.0
 const PAGE_X  : float = 136.0
 const PAGE_W  : float = 282.0
-const SPREAD_Y : float = 34.0
-const SPREAD_H : float = 150.0
+# Разворот сдвинут вниз и подрезан на высоту РЯДА ВКЛАДОК. Вкладки не влезали
+# между заголовком и разворотом: там оставалось восемь пикселей канвы.
+const SPREAD_Y : float = 48.0
+const SPREAD_H : float = 136.0
+
+# ── Вкладки ──────────────────────────────────────────────────────────────────
+# Книга была одним списком — главами кампании. Каталог живёт в ней же и по той
+# же причине: это единственный экран, где игра ОБЪЯСНЯЕТ себя.
+#
+# Пустой id — главы, остальные три приходят из каталога (scripts/bestiary.gd).
+const TAB_CHAPTERS : String = ""
+const TAB_Y  : float = 28.0
+const TAB_H  : float = 16.0
+const TAB_GAP: float = 4.0
 # Въезд экрана — тот же тайминг, что у заданий и автоматов.
 const SLIDE_TIME      : float = 0.45
 const SLIDE_TRANS     : int   = Tween.TRANS_QUAD
@@ -61,7 +73,9 @@ const SLIDE_EASE_OUT  : int   = Tween.EASE_IN
 
 # Внутренние размеры страниц (экранные px, считаются от разворота).
 const PAD          : float = 10.0
-const CH_ROW_H_MIN : float = 36.0
+# Минимум подрезан с 36: разворот отдал четырнадцать пикселей канвы под ряд
+# вкладок, и шесть глав по 36 перестали помещаться ровно на два пикселя.
+const CH_ROW_H_MIN : float = 33.0
 const CH_ROW_H_MAX : float = 52.0
 const CH_ROW_GAP   : float = 5.0
 const Q_ROW_GAP    : float = 8.0
@@ -90,6 +104,10 @@ var _lay          : Dictionary = {}
 # Выбранная глава — индекс в QuestManager.CHAPTERS (не порядковый номер среди
 # видимых: главы про бесконечный режим до его открытия скрыты).
 var _sel_chapter    : int = -1
+# Открытая вкладка: "" — главы, иначе раздел каталога (items/enemies/bosses).
+var _tab            : String = TAB_CHAPTERS
+var _sel_entry      : int = 0
+var _tabs_root      : Control = null
 # Задание, на которое привёл переход по уведомлению: его строка подсвечивается.
 var _focus_story_idx : int = -1
 
@@ -122,6 +140,8 @@ func _layout(vp: Vector2) -> Dictionary:
 		"sx": sx, "sy": sy,
 		"spine": spine,
 		"page": page,
+		"tabs": Rect2(SPINE_X * sx, TAB_Y * sy,
+			(PAGE_X + PAGE_W - SPINE_X) * sx, TAB_H * sy),
 		# Корешок: заголовок с числом, общая полоса, ниже список глав.
 		"overall": Rect2(spine.position.x + PAD, spine.position.y + PAD,
 			spine.size.x - PAD * 2.0, 40.0),
@@ -241,6 +261,10 @@ func _build(vp: Vector2) -> void:
 	UiKit.panel(_slide_root, spine.position, spine.size, CLR_PAGE, 12, CLR_PAGE_EDGE, 2)
 	UiKit.panel(_slide_root, page.position,  page.size,  CLR_PAGE, 12, CLR_PAGE_EDGE, 2)
 
+	_tabs_root = Control.new()
+	_tabs_root.mouse_filter = Control.MOUSE_FILTER_PASS
+	_slide_root.add_child(_tabs_root)
+
 	_overall_root = Control.new()
 	_overall_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_slide_root.add_child(_overall_root)
@@ -300,12 +324,207 @@ func _make_scroll(rect: Rect2) -> ScrollContainer:
 func _rebuild_content() -> void:
 	if not is_instance_valid(_slide_root):
 		return
-	var vis := _visible_chapters()
-	if not vis.has(_sel_chapter):
-		_sel_chapter = _initial_chapter()
-	_build_overall()
-	_build_spine(vis)
-	_build_page()
+	_build_tabs()
+	if _tab == TAB_CHAPTERS:
+		var vis := _visible_chapters()
+		if not vis.has(_sel_chapter):
+			_sel_chapter = _initial_chapter()
+		_build_overall()
+		_build_spine(vis)
+		_build_page()
+	else:
+		_build_cat_overall()
+		_build_cat_spine()
+		_build_cat_page()
+
+# ── Вкладки ──────────────────────────────────────────────────────────────────
+func _tab_ids() -> Array:
+	return [TAB_CHAPTERS, Bestiary.S_ITEM, Bestiary.S_ENEMY, Bestiary.S_BOSS]
+
+func _tab_title(id: String) -> String:
+	if id == TAB_CHAPTERS:
+		return "ГЛАВЫ"
+	return String(Bestiary.SECTION_TITLES.get(id, id))
+
+func _build_tabs() -> void:
+	for c in _tabs_root.get_children():
+		c.queue_free()
+	var r : Rect2 = _lay["tabs"]
+	var ids := _tab_ids()
+	var w : float = (r.size.x - TAB_GAP * float(ids.size() - 1)) / float(ids.size())
+	var x : float = r.position.x
+	for id in ids:
+		var on : bool = String(id) == _tab
+		var pan := UiKit.panel(_tabs_root, Vector2(x, r.position.y), Vector2(w, r.size.y),
+			CLR_ROW_SEL if on else CLR_ROW, 6,
+			CLR_ACCENT if on else CLR_ROW_EDGE, 2)
+		pan.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+		var lbl := Label.new()
+		lbl.add_theme_font_override("font", UI_FONT)
+		lbl.add_theme_font_size_override("font_size", 11)
+		_apply_text_fx(lbl)
+		lbl.text                 = _tab_title(String(id))
+		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		lbl.modulate             = CLR_GOLD if on else CLR_TEXT_DIM
+		lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+		UiKit.place(_tabs_root, lbl, Vector2(x, r.position.y), Vector2(w, r.size.y))
+
+		var btn := Button.new()
+		btn.flat       = true
+		btn.focus_mode = Control.FOCUS_NONE
+		var cap := String(id)
+		btn.pressed.connect(func(): _on_tab(cap))
+		UiKit.place(_tabs_root, btn, Vector2(x, r.position.y), Vector2(w, r.size.y))
+		x += w + TAB_GAP
+
+func _on_tab(id: String) -> void:
+	if id == _tab:
+		return
+	_play_click()
+	_tab = id
+	_sel_entry = 0
+	_rebuild_content()
+
+func _play_click() -> void:
+	if _hud != null and _hud.has_method("_play_btn_sfx"):
+		_hud.call("_play_btn_sfx")
+
+# ── Каталог: корешок со списком записей ──────────────────────────────────────
+# Незнакомое показывается ЗАПЕРТЫМ, а не прячется. Спрятанное не даёт понять,
+# что каталог ещё не пройден, а «???» в списке — это и есть половина смысла:
+# видно, сколько всего бывает и сколько ты уже видел.
+func _cat_entries() -> Array:
+	return Bestiary.entries_of(_tab)
+
+func _build_cat_overall() -> void:
+	for c in _overall_root.get_children():
+		c.queue_free()
+	var r : Rect2 = _lay["overall"]
+	var pr : Vector2i = Bestiary.progress_of(_tab)
+
+	var lbl := Label.new()
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", 12)
+	_apply_text_fx(lbl)
+	lbl.text                 = "ВСТРЕЧЕНО  %d / %d" % [pr.x, pr.y]
+	lbl.modulate             = CLR_GOLD
+	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_overall_root, lbl, r.position, Vector2(r.size.x, 18.0))
+	_bar(_overall_root, r.position + Vector2(0.0, 22.0), r.size.x, 6.0,
+		0.0 if pr.y == 0 else float(pr.x) / float(pr.y), CLR_ACCENT)
+
+func _build_cat_spine() -> void:
+	for c in _spine_body.get_children():
+		c.queue_free()
+	var rect : Rect2 = _lay["ch_list"]
+	var rows := _cat_entries()
+	_sel_entry = clampi(_sel_entry, 0, maxi(0, rows.size() - 1))
+	const ROW_H : float = 24.0
+	const GAP   : float = 4.0
+	var y := 0.0
+	for i in rows.size():
+		_build_cat_row(Vector2(0.0, y), Vector2(rect.size.x, ROW_H), i, rows[i])
+		y += ROW_H + GAP
+	_spine_body.custom_minimum_size = Vector2(rect.size.x, maxf(0.0, y - GAP))
+
+func _build_cat_row(pos: Vector2, size: Vector2, idx: int, e: Dictionary) -> void:
+	var known : bool = Bestiary.seen(String(e["id"]))
+	var on    : bool = idx == _sel_entry
+	var pan := UiKit.panel(_spine_body, pos, size,
+		CLR_ROW_SEL if on else CLR_ROW, 6,
+		CLR_ACCENT if on else CLR_ROW_EDGE, 2)
+	pan.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var ic := _make_icon(load(String(e["icon"])) as Texture2D, size.y - 6.0)
+	ic.position = pos + Vector2(4.0, 3.0)
+	# Незнакомое — СИЛУЭТ: рисунок узнаваем по форме, но не рассказывает, что это.
+	ic.modulate = Color(1, 1, 1) if known else Color(0.10, 0.09, 0.08, 0.95)
+	_spine_body.add_child(ic)
+
+	var lbl := Label.new()
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", 10)
+	_apply_text_fx(lbl)
+	lbl.text                 = String(e["title"]) if known else "???"
+	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	lbl.modulate             = CLR_TEXT if known else Color(0.55, 0.52, 0.46)
+	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_spine_body, lbl,
+		pos + Vector2(size.y + 2.0, 0.0), Vector2(size.x - size.y - 6.0, size.y))
+
+	var btn := Button.new()
+	btn.flat       = true
+	btn.focus_mode = Control.FOCUS_NONE
+	var cap := idx
+	btn.pressed.connect(func():
+		_play_click()
+		_sel_entry = cap
+		_rebuild_content())
+	UiKit.place(_spine_body, btn, pos, size)
+
+# ── Каталог: страница записи ─────────────────────────────────────────────────
+func _build_cat_page() -> void:
+	for c in _page_head.get_children():
+		c.queue_free()
+	for c in _page_body.get_children():
+		c.queue_free()
+	var rows := _cat_entries()
+	if rows.is_empty():
+		return
+	var e : Dictionary = rows[clampi(_sel_entry, 0, rows.size() - 1)]
+	var known : bool = Bestiary.seen(String(e["id"]))
+	var head : Rect2 = _lay["page_head"]
+
+	var title := Label.new()
+	title.add_theme_font_override("font", UI_FONT)
+	title.add_theme_font_size_override("font_size", 15)
+	_apply_text_fx(title)
+	title.text               = String(e["title"]) if known else "??? ??? ???"
+	title.modulate           = CLR_GOLD if known else Color(0.60, 0.56, 0.50)
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	title.size               = head.size
+	title.position           = head.position
+	title.mouse_filter       = Control.MOUSE_FILTER_IGNORE
+	_page_head.add_child(title)
+
+	var rule := ColorRect.new()
+	rule.color        = Color(0.40, 0.32, 0.16, 0.55)
+	rule.size         = Vector2(head.size.x, 1.0)
+	rule.position     = head.position + Vector2(0.0, head.size.y + 3.0)
+	rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_page_head.add_child(rule)
+
+	var list : Rect2 = _lay["q_list"]
+	var art : float = minf(list.size.y - 8.0, 96.0)
+	var ic := _make_icon(load(String(e["icon"])) as Texture2D, art)
+	ic.position = Vector2(4.0, (list.size.y - art) * 0.5)
+	ic.modulate = Color(1, 1, 1) if known else Color(0.10, 0.09, 0.08, 0.95)
+	_page_body.add_child(ic)
+
+	var txt := Label.new()
+	txt.add_theme_font_override("font", UI_FONT)
+	txt.add_theme_font_size_override("font_size", 12)
+	_apply_text_fx(txt)
+	txt.text = String(e["text"]) if known \
+		else "Ещё не встречал. Дойди до него в забеге — и запись откроется."
+	txt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# Ширину надо задать ДО того, как Control посчитает минимальный размер:
+	# перенос по словам считает высоту от ширины, а безразмерная метка меряет
+	# себя по ширине в единицы пикселей и требует высоту в полторы тысячи. При
+	# вертикальном центрировании текст уезжал на километр вниз от страницы —
+	# он был на месте, просто далеко за краем.
+	var tw : float = list.size.x - art - 18.0
+	txt.custom_minimum_size  = Vector2(tw, 0.0)
+	txt.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	txt.modulate             = CLR_TEXT if known else Color(0.62, 0.58, 0.52)
+	txt.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	_page_body.add_child(txt)
+	txt.size     = Vector2(tw, list.size.y)
+	txt.position = Vector2(art + 14.0, 0.0)
+	_page_body.custom_minimum_size = list.size
 
 # ── Корешок: общий прогресс ──────────────────────────────────────────────────
 func _build_overall() -> void:
