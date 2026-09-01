@@ -42,7 +42,7 @@ func _ready() -> void:
 
 	_sprite = Sprite2D.new()
 	_sprite.texture = BOX_TEX
-	ItemSizing.fit_sprite(_sprite, ItemSizing.BASE_PX * 1.15)
+	ItemSizing.fit_sprite_content(_sprite, ItemSizing.BASE_PX * 1.15)
 	add_child(_sprite)
 
 	var cs        := CollisionShape2D.new()

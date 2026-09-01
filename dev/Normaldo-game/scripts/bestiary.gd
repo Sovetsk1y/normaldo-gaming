@@ -151,23 +151,45 @@ const ENTRIES : Array = [
 	{ "id": "ninja", "section": S_ENEMY, "title": "НИНДЗЯ",
 	  "icon": "res://assets/bosses/ninja_foot/ninja_foot.png", "script": "ninja_item",
 	  "text": "Младшая родня босса. Три вида: сюрикены, рывок и дым." },
+	{ "id": "girl", "section": S_ENEMY, "title": "ДЕВОЧКА-ЗАЗЫВАЛА",
+	  "icon": "res://assets/bosses/club_boss/girl1.png", "script": "club_boss_minion",
+	  "text": "Урона нет — есть вязкость. Влип — не успел уйти от следующего." },
 	{ "id": "bum_barrel", "section": S_ENEMY, "title": "БОМЖ С БОЧКОЙ",
 	  "icon": "res://assets/items/barrel_open1.png", "script": "bum_barrel",
 	  "text": "Ставит бочку поперёк дороги и выпускает из неё собаку." },
 
 	# ── БОССЫ ────────────────────────────────────────────────────────────────
+	# Восемь на всю игру, и порядок здесь — порядок ВСТРЕЧИ, а не алфавит: раздел
+	# читается как дорожная карта. Трое уже стоят в кампании, пятеро ещё нет —
+	# и это ЗАТРАВКА: запертые записи показывают, что впереди, не рассказывая
+	# что именно.
+	#
+	# Портреты общие, из авторского листа `dev/art/boss_book/`: в книге у боссов
+	# один вид, а не «трое настоящих спрайтов и пятеро силуэтов».
 	{ "id": "boss_ninja", "section": S_BOSS, "title": "НОГА НИНДЗЯ",
-	  "icon": "res://assets/bosses/ninja_foot/ninja_foot1.png", "script": "ninja_foot",
+	  "icon": "res://assets/ui/book/bosses/ninja.png", "script": "ninja_foot",
 	  "text": "Конец КАНАЛИЗАЦИИ. Сюрикены, рывки и дым, закрывающий экран." },
-	{ "id": "boss_croc", "section": S_BOSS, "title": "КРОКОДИЛ",
-	  "icon": "res://assets/bosses/leatherhead/idle.png", "script": "leatherhead",
+	{ "id": "boss_croc", "section": S_BOSS, "title": "КРОКЕР",
+	  "icon": "res://assets/ui/book/bosses/croc.png", "script": "leatherhead",
 	  "text": "Конец УЛИЦЫ. Снайпер, картечь и пасть, которую отбивают тапами." },
-	{ "id": "boss_club", "section": S_BOSS, "title": "ХОЗЯИН КЛУБА",
-	  "icon": "res://assets/bosses/club_boss/idle1.png", "script": "club_boss",
-	  "text": "Конец КЛУБА. Охрана, полиция, девочки — и рывок его самого." },
-	{ "id": "boss_fat", "section": S_BOSS, "title": "ЖИРОБОСС",
-	  "icon": "res://assets/items/mutagen.png", "script": "",
-	  "text": "Не противник, а ты сам после мутагена. Держи жир, пока хватит рук." },
+	{ "id": "boss_club", "section": S_BOSS, "title": "ФЭТ ФЕЙС",
+	  "icon": "res://assets/ui/book/bosses/club.png", "script": "club_boss",
+	  "text": "Хозяин КЛУБА. Охрана, полиция, девочки — и рывок его самого." },
+	{ "id": "boss_beatbop", "section": S_BOSS, "title": "БИТ БОП",
+	  "icon": "res://assets/ui/book/bosses/beatbop.png",
+	  "text": "Кабан в розовой бандане. Пока не встречался — но встретится." },
+	{ "id": "boss_rocksteady", "section": S_BOSS, "title": "РОК СТЕДИ",
+	  "icon": "res://assets/ui/book/bosses/rocksteady.png",
+	  "text": "Носорог в каске. Пока не встречался — но встретится." },
+	{ "id": "boss_robotcan", "section": S_BOSS, "title": "РОБОТ КЭН",
+	  "icon": "res://assets/ui/book/bosses/robotcan.png",
+	  "text": "Жестянка с антенной. Пока не встречалась — но встретится." },
+	{ "id": "boss_sickbrain", "section": S_BOSS, "title": "СИК БРЕЙН",
+	  "icon": "res://assets/ui/book/bosses/sickbrain.png",
+	  "text": "Розовый мозг на щупальцах. Пока не встречался — но встретится." },
+	{ "id": "boss_shredo", "section": S_BOSS, "title": "ШРЕДО",
+	  "icon": "res://assets/ui/book/bosses/shredo.png",
+	  "text": "Тот, кто в шлеме. Последний в списке — и не случайно." },
 ]
 
 # script → [запись, …]; вид разбирается уже внутри.

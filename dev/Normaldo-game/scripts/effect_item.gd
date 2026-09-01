@@ -69,7 +69,9 @@ func _ready() -> void:
 
 	_sprite = Sprite2D.new()
 	_sprite.texture = TEX.get(kind, TEX["hourglass"])
-	ItemSizing.fit_sprite(_sprite)
+	# Чуть крупнее рядового предмета: эффект надо УВИДЕТЬ и решить, брать ли, а
+	# ресурсы и опасности вокруг мельтешат постоянно.
+	ItemSizing.fit_sprite_content(_sprite, ItemSizing.BASE_PX * 1.12)
 	_sprite.z_index = 1
 	add_child(_sprite)
 

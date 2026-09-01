@@ -29,8 +29,8 @@ const CRASH_FRAME_TIME : float = 0.10
 const MENU_OFFSET := Vector2(0.0, 110.0)
 const SCALE_FACTOR : float = 2.0
 # Same scroll speed as the background — TV is a piece of the scene.
-# (Синхронизировано с background.gd SCROLL_SPEED = 100 — иначе ТВ отрывается от пола.)
-const SCROLL_SPEED : float = 100.0
+# (Синхронизировано с background.gd SCROLL_SPEED = 68 — иначе ТВ отрывается от пола.)
+const SCROLL_SPEED : float = 68.0
 
 # How many seconds before the current track ends to cue Normaldo to start his
 # remote animation. The animation takes ~ this long so the press jerk lands

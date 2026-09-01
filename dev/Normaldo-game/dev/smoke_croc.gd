@@ -49,6 +49,8 @@ func _initialize() -> void:
 	await _test_death_stops()
 	print("── Битва доходит до конца ──")
 	await _test_full()
+	print("── После боя музыка вернулась ──")
+	await _test_music_back()
 	_finish()
 
 # ── Хелперы ──────────────────────────────────────────────────────────────────
@@ -631,6 +633,43 @@ func _test_full() -> void:
 	_check(t > 30.0, "и заняла не пару секунд: %.0f с" % t)
 	_check(_count("croc_tail") == 0 and _count("bullet") == 0,
 		"после боя на экране не осталось ни хвостов, ни пуль")
+	e["game"].queue_free()
+	await process_frame
+
+# Музыка забега уходит в fade_out на входе в бой. Вернуть её обязан сам босс —
+# и В КАМПАНИИ ТОЖЕ, а не только при дев-вызове. Стояло только под
+# `boss_test_mode`, и после победы кампания продолжалась в полной тишине до
+# самой смерти: слышно это лишь пройдя босса целиком, а тесты гоняли дев-режим.
+func _test_music_back() -> void:
+	var e : Dictionary = await _boot()
+	var music : Node = e["game"].get_node_or_null("Music")
+	_check(music != null, "узел музыки на месте")
+	if music == null:
+		return
+	if music.has_method("start"):
+		music.call("start")
+	await process_frame
+	var c := Node2D.new()
+	c.set_script(CROC)
+	# ВАЖНО: боевой режим, а не дев-вызов — ломалось именно здесь.
+	c.call("setup", e["n"], e["sp"], e["game"], false)
+	e["game"].add_child(c)
+	await process_frame
+
+	var t := 0.0
+	var silent_mid := false
+	while t < 200.0 and is_instance_valid(c):
+		get_root().get_tree().paused = false
+		await process_frame
+		t += 1.0 / 60.0
+		if t > 6.0 and not bool(music.get("playing")):
+			silent_mid = true
+	_check(silent_mid, "во время боя музыка забега молчит — играет боссовая")
+	# Даём такт на start(): он зовётся в том же кадре, где босс убирается.
+	for _i in 6:
+		get_root().get_tree().paused = false
+		await process_frame
+	_check(bool(music.get("playing")), "после победы музыка забега снова играет")
 	e["game"].queue_free()
 	await process_frame
 

@@ -65,7 +65,13 @@ const RIM_GROW : float = 1.18
 # Красный: разбег, рывок и меч.
 const PRED_WINDUP_T : float = 0.42    # замах: видно, куда он сейчас пойдёт
 const PRED_SPEED    : float = 760.0
-const PRED_ARM_PX   : float = 86.0
+# Меч КРАСНОГО ниндзя. Был 86 при голове 113 — на экране это ножик в руке
+# великана, а замах мечом и есть весь его телеграф: не разглядел меч — не понял,
+# что сейчас будет рывок. Теперь меч ЗАМЕТНО ДЛИННЕЕ головы.
+#
+# Считается по РИСУНКУ, а не по кадру: у обоих кадров меча вокруг клинка
+# нарисованы поля в 13 % длинной стороны, и по кадру он выходил ещё мельче.
+const PRED_ARM_PX   : float = 165.0
 
 # Жёлтый: шашки и облака.
 const SMOKE_BOMBS   : int   = 3
@@ -113,7 +119,7 @@ func _ready() -> void:
 	# z_index поднят намеренно: обводка рисуется на слой НИЖЕ спрайта, и при
 	# нулевом z она уходила под фон — цветного канта не было видно вовсе.
 	_sprite.z_index  = 2
-	ItemSizing.fit_sprite(_sprite, NINJA_PX)
+	ItemSizing.fit_sprite_content(_sprite, NINJA_PX)
 	add_child(_sprite)
 	if KIND_RIM.has(kind):
 		var rim := Sprite2D.new()
@@ -199,7 +205,7 @@ func _run_predator() -> void:
 	var arm := Sprite2D.new()
 	arm.texture        = SWORD1_TEX
 	arm.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	arm.scale          = Vector2.ONE * ItemSizing.fit_scale(SWORD1_TEX, PRED_ARM_PX)
+	arm.scale          = Vector2.ONE * ItemSizing.content_scale(SWORD1_TEX, PRED_ARM_PX)
 	arm.z_index        = 1
 	add_child(arm)
 	_play_sfx(PREDATOR_SFX)
@@ -216,7 +222,7 @@ func _run_predator() -> void:
 	var dir : Vector2 = (_normaldo.global_position - global_position).normalized()
 	if dir.length() < 0.01:
 		dir = Vector2.LEFT
-	arm.position = dir * NINJA_PX * 0.55
+	arm.position = dir * NINJA_PX * 0.62
 	arm.rotation = dir.angle()
 	_sprite.flip_h = dir.x > 0.0
 

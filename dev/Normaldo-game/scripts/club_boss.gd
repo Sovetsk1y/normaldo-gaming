@@ -265,11 +265,14 @@ func _run_boss() -> void:
 	current_act = "done"
 	_music.stop()
 	_drop_bars()
+	# Музыка возвращается ВСЕГДА, а не только при дев-вызове. Она уходит в
+	# fade_out на входе в бой, и в кампании её никто не включал обратно: после
+	# победы над боссом забег продолжался в тишине до самой смерти.
+	if is_instance_valid(game_music) and game_music.has_method("start"):
+		game_music.start()
 	if boss_test_mode:
 		# Дев-вызов: возвращаем забег в рабочее состояние — заморозку снял бы
 		# только конец кампании, а его тут нет.
-		if is_instance_valid(game_music) and game_music.has_method("start"):
-			game_music.start()
 		if is_instance_valid(_spawner):
 			_spawner.set("_frozen", false)
 			_spawner.set("_pattern_running", false)

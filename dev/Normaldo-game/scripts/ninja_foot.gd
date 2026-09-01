@@ -173,9 +173,12 @@ func _run_boss() -> void:
 
 	# Defeated
 	_music.stop()
+	# Музыка возвращается ВСЕГДА, а не только при дев-вызове. Она уходит в
+	# fade_out на входе в бой, и в кампании её никто не включал обратно: после
+	# победы над боссом забег продолжался в тишине до самой смерти.
+	if is_instance_valid(game_music) and game_music.has_method("start"):
+		game_music.start()
 	if boss_test_mode:
-		if is_instance_valid(game_music) and game_music.has_method("start"):
-			game_music.start()
 		# Undo the freeze set by clear_items() so patterns can spawn again.
 		_spawner.set("_frozen", false)
 		_spawner.set("_pattern_running", false)
@@ -192,6 +195,19 @@ func _run_boss() -> void:
 		kill_tw.tween_callback(func(): if is_instance_valid(_normaldo): _normaldo.call("_die"))
 	queue_free()
 
+# ── Куда он смотрит ──────────────────────────────────────────────────────────
+# Голова нарисована СМОТРЯЩЕЙ ВЛЕВО — она и приезжает справа, навстречу игроку.
+# Значит зеркалить надо тогда, когда цель СПРАВА, а не слева.
+#
+# Стояло наоборот, и обе атаки из ПРАВЫХ углов он отыгрывал спиной к игроку:
+# вылезал в углу, отворачивался и кидал сюрикены куда-то за кадр. На рывке это
+# ещё как-то читалось (он летит на игрока), а на сюрикенах — нет.
+func _face_player() -> void:
+	if not is_instance_valid(_normaldo):
+		_sprite.flip_h = false
+		return
+	_sprite.flip_h = _normaldo.global_position.x > global_position.x
+
 # ── Attack: Shuriken Shower ───────────────────────────────────────────────────
 
 func _shuriken_shower(speed: float, end_delay: float, invisible: bool = false, count: int = 3) -> void:
@@ -207,7 +223,7 @@ func _shuriken_shower(speed: float, end_delay: float, invisible: bool = false, c
 		await get_tree().create_timer(end_delay).timeout
 		return
 
-	_sprite.flip_h  = position.x > vp.size.x * 0.5
+	_face_player()
 	_sprite.texture = NINJA_FOOT1_TEX
 	var tsz         := NINJA_FOOT1_TEX.get_size()
 	var base_s      := Vector2(SHURIKEN_W / tsz.x, SHURIKEN_H / tsz.y)
@@ -251,7 +267,7 @@ func _predator_attack(speed: float, post_delay: float = 0.0) -> void:
 	var base_s      := Vector2(SHURIKEN_W / tsz.x, SHURIKEN_H / tsz.y)
 	_sprite.scale   = base_s
 	var to_norm     := _normaldo.global_position - global_position
-	_sprite.flip_h  = to_norm.x < 0.0
+	_face_player()
 	_sprite.visible = true
 
 	var dir := to_norm.normalized()

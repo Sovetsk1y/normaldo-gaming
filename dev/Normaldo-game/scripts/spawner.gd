@@ -122,7 +122,7 @@ var _boss_test_t      : float = 0.0
 const CAMPAIGN_LEVELS : Array = [
 	{ "name": "КАНАЛИЗАЦИЯ", "boss": "ninja", "letter": 14.0, "phase": 0 },
 	{ "name": "УЛИЦА",       "boss": "croc",  "letter": 13.0, "phase": 1 },
-	{ "name": "СТРОЙКА",     "boss": "",      "letter": 12.0, "phase": 2 },
+	{ "name": "ДОРОГА В КЛУБ", "boss": "",    "letter": 12.0, "phase": 2 },
 	{ "name": "ЗАДВОРКИ",    "boss": "",      "letter": 11.0, "phase": 3 },
 	{ "name": "КЛУБ",        "boss": "club",  "letter": 10.0, "phase": 4 },
 ]
@@ -691,7 +691,12 @@ const HAZ_BASE : Dictionary = {
 const HAZ_LEVEL : Array = [
 	{ "banana": 40, "trash": 6,  "police_car": 14 },
 	{ "banana": 20, "cone": 10, "homeless": 10 },
-	{ "banana": 20, "roadsign": 10, "cone": 10, "homeless": 5,  "trash": 3 },
+	# ДОРОГА В КЛУБ. Уровень уже пахнет клубом: по дороге стоят девочки-зазывалы
+	# (замедляют, не бьют — как у хозяина клуба), летят молотовы и перчатки,
+	# катаются полицейские, отираются бомжи. Конусы и знаки остаются от стройки,
+	# через которую эта дорога и идёт.
+	{ "banana": 20, "roadsign": 10, "cone": 10, "homeless": 10, "trash": 3,
+	  "girl": 14, "molotov": 10, "glove": 10, "police_car": 10 },
 	{ "banana": 20, "roadsign": 20, "trash": 20, "cone": 20, "homeless": 20, "glove": 20 },
 	{ "banana": 20, "roadsign": 20, "trash": 20, "cone": 40, "homeless": 20, "glove": 20 },
 ]
@@ -729,6 +734,8 @@ func _spawn_level_hazard(kind: String, y: float, vp_w: float, speed: float) -> v
 		"cone":         _spawn_cone(vp_w, speed)
 		"glove":        _spawn_glove(y, vp_w)
 		"police_car":   _spawn_police_car(y, vp_w, speed)
+		"girl":         _spawn_girl(y, vp_w, speed)
+		"molotov":      _spawn_molotov_single(y, vp_w, speed)
 		_:              _spawn_hazard(_pick_hazard(), y, vp_w, speed)
 
 # Полицейская машина — единственный предмет старого проекта, которого у нас не
@@ -841,6 +848,45 @@ func _spawn_scripted(script: Script, y: float, vp_w: float, speed: float) -> voi
 	add_child(node)
 
 # Конус — высокий (3 лейна), ставим по центру, блокирует средние ряды.
+# ── Девочка-зазывала ─────────────────────────────────────────────────────────
+# Приходит из свиты [[хозяина клуба]] и работает ровно так же: НЕ БЬЁТ, а
+# ЗАМЕДЛЯЕТ. Это и делает её уместной на дороге в клуб — угроза без урона,
+# которая портит не жизнь, а линию: влип в девочку — не успел уйти от того, что
+# летит следом.
+#
+# Узел тот же, что у босса (`club_boss_minion.gd`), с теми же метаданными
+# замедления: заводить второй «почти такой же» вид значило бы получить две
+# девочки с разным поведением.
+const GIRL_SCRIPT := preload("res://scripts/club_boss_minion.gd")
+const GIRL_TEX : Array = [
+	preload("res://assets/bosses/club_boss/girl1.png"),
+	preload("res://assets/bosses/club_boss/girl2.png"),
+]
+const GIRL_SFX     := preload("res://assets/audio/club_boss/kiss.mp3")
+const GIRL_PX      : float = 96.0
+const GIRL_SLOW_T  : float = 1.6
+
+func _spawn_girl(y: float, vp_w: float, speed: float) -> void:
+	var g := Area2D.new()
+	g.set_script(GIRL_SCRIPT)
+	# init ДО add_child: узел читает текстуру и размер в своём _ready.
+	g.call("init", GIRL_TEX[randi() % GIRL_TEX.size()], GIRL_PX, Vector2.LEFT, speed)
+	g.set("slows", true)
+	g.set("slow_duration", GIRL_SLOW_T)
+	g.set("slow_sound", GIRL_SFX)
+	g.set("damage", 0)
+	g.position = Vector2(vp_w + 90.0, y)
+	add_child(g)
+
+# Одиночный молотов — тот же снаряд, что и в волне, но без хвостовой паузы:
+# в потоке уровня он один из многих, а не сет-пис.
+func _spawn_molotov_single(y: float, vp_w: float, speed: float) -> void:
+	var m := MOLOTOV_SCENE.instantiate()
+	m.speed      = speed
+	m.fire_count = 4
+	m.position   = Vector2(vp_w + 80.0, y)
+	add_child(m)
+
 func _spawn_cone(vp_w: float, speed: float) -> void:
 	var node := Area2D.new()
 	node.set_script(CONE_SCRIPT)

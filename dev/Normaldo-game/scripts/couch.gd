@@ -20,7 +20,7 @@ const MENU_OFFSET := Vector2(-260, 110)
 # Same scroll speed as the background and the TV — the couch is a piece of
 # the room, so once the bg starts moving it slides off-screen with everything
 # else instead of hovering in place.
-const SCROLL_SPEED : float = 100.0   # синхронно с фоном (background.gd)
+const SCROLL_SPEED : float = 68.0   # синхронно с фоном (background.gd)
 
 var _bob_t          : float             = 0.0
 var _normaldo       : Node2D            = null

@@ -190,8 +190,8 @@ const TWEAK : Dictionary = {
 # её не трогает.
 const MANUAL : Dictionary = {
 	"kuss": {
-		"nudge": [Vector2(-0.0025, -0.0475), Vector2(-0.0075, -0.0375),
-		          Vector2( 0.0200, -0.0875), Vector2(-0.0050, -0.0325)],
+		"nudge": [Vector2(-0.0025, -0.0625), Vector2(-0.0075, -0.0375),
+		          Vector2( 0.0200, -0.0175), Vector2(-0.0050, -0.0325)],
 		"box":   [Vector2(0.5000, 0.5400), Vector2(0.3100, 0.2900),
 		          Vector2(0.3550, 0.3800), Vector2(0.3850, 0.2950)],
 	},

@@ -43,6 +43,25 @@ func _initialize() -> void:
 	# Режим «tap»: один кадр с подсказкой мини-игры — картинка TAP! и пальцы по
 	# бокам. Пальцы снимаются в НИЖНЕЙ точке (кадр «прижат»), иначе в кадре стоят
 	# две поднятые руки и проверить нечего.
+	# «one:<скин>:<жир>» — один кадр босса по конкретному скину и жиру.
+	if argv.size() > 1 and String(argv[1]).begins_with("one:"):
+		var parts := String(argv[1]).split(":")
+		save.active_skin = parts[1]
+		save.skin_level  = 10
+		normaldo.reload_skin()
+		await process_frame
+		normaldo.set("fat_state", int(parts[2]))
+		normaldo.call("_apply_skin_to_sprite")
+		normaldo.call("begin_fat_boss")
+		boss.call("dev_pose_boss")
+		for _i in 4:
+			await process_frame
+		await RenderingServer.frame_post_draw
+		get_root().get_texture().get_image().save_png("%s/boss_%s_%s.png" % [out, parts[1], parts[2]])
+		print("готово")
+		quit(0)
+		return
+
 	if argv.size() > 1 and argv[1] == "tap":
 		save.active_skin = "classic"
 		save.skin_level  = 10

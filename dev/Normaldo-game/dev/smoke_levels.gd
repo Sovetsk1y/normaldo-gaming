@@ -84,18 +84,33 @@ func _test_pools() -> void:
 			kinds[String(sp.call("_pick_level_hazard"))] = true
 		seen.append(kinds)
 
-	# Полицейская машина — примета ПЕРВОГО уровня и больше ничья.
-	var car_only_first : bool = seen[0].has("police_car")
-	for i in range(1, 5):
-		if seen[i].has("police_car"):
-			car_only_first = false
-	_check(car_only_first, "полицейская машина — только на первом уровне")
-	# Конусы начинаются со второго, перчатка — с четвёртого.
+	# Полицейская машина ездит там, где есть дорога: канализационный проезд на
+	# первом уровне и сама ДОРОГА В КЛУБ на третьем. На стройке и задворках её
+	# нет — там ездить негде.
+	var car_ok : bool = seen[0].has("police_car") and seen[2].has("police_car") \
+		and not seen[1].has("police_car") and not seen[3].has("police_car") \
+		and not seen[4].has("police_car")
+	_check(car_ok, "полицейская машина — на первом и третьем уровнях")
+	# Конусы начинаются со второго, перчатка — с третьего.
 	_check(not seen[0].has("cone") and seen[1].has("cone"),
 		"конусы приходят со второго уровня")
 	_check(not seen[0].has("glove") and not seen[1].has("glove")
-			and not seen[2].has("glove") and seen[3].has("glove"),
-		"боксёрская перчатка — с четвёртого")
+			and seen[2].has("glove") and seen[3].has("glove"),
+		"боксёрская перчатка — с третьего")
+
+	# ДОРОГА В КЛУБ — единственный уровень с девочками и молотовом в потоке:
+	# уровень уже пахнет клубом, но до самого клуба ещё два уровня.
+	var girls_ok  : bool = (seen[2] as Dictionary).has("girl")
+	var moloto_ok : bool = (seen[2] as Dictionary).has("molotov")
+	for i in 5:
+		if i == 2:
+			continue
+		if seen[i].has("girl"):
+			girls_ok = false
+		if seen[i].has("molotov"):
+			moloto_ok = false
+	_check(girls_ok, "девочки-зазывалы — только на ДОРОГЕ В КЛУБ")
+	_check(moloto_ok, "и молотов в потоке — тоже только там")
 	_check(not seen[0].has("roadsign") and not seen[1].has("roadsign")
 			and seen[2].has("roadsign"),
 		"дорожный знак — с третьего")

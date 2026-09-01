@@ -52,7 +52,7 @@ const KINDS : Dictionary = {
 	# прямой, надо читать фазу.
 	"bird":     { "px": 54.0, "dmg": 1, "speed_mult": 1.35, "move": "wave" },
 	# Штурвал — оружие Пирата, обёрнутое против игрока: крутится и летит быстро.
-	"helm":     { "px": 60.0, "dmg": 1, "speed_mult": 1.2,  "move": "spin" },
+	"helm":     { "px": 66.0, "dmg": 1, "speed_mult": 1.2,  "move": "spin" },
 	# Шаман — не бьёт больно, а ПРОКЛИНАЕТ: разворачивает управление на 3 с.
 	"shaman":   { "px": 68.0, "dmg": 1, "speed_mult": 0.95, "move": "straight", "invert": 3.0 },
 }
@@ -97,7 +97,7 @@ func _ready() -> void:
 
 	_sprite = Sprite2D.new()
 	_sprite.texture = TEX.get(kind, TEX["safe"])
-	ItemSizing.fit_sprite(_sprite, float(_cfg.get("px", 56.0)))
+	ItemSizing.fit_sprite_content(_sprite, float(_cfg.get("px", 56.0)))
 	add_child(_sprite)
 
 	var cs := CollisionShape2D.new()

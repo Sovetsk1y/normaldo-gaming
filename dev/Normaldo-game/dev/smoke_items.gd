@@ -203,6 +203,31 @@ func _test_sizing() -> void:
 		_check(absf(on_screen - ItemSizing.BASE_PX) < 0.5,
 			"%s → %.1f px" % [p.get_file(), on_screen])
 
+	# ── Мерить надо РИСУНОК, а не кадр ───────────────────────────────────────
+	# `fit_scale` приводит к BASE_PX длинную сторону КАДРА, и у ассетов с полями
+	# вокруг рисунка предмет выходит заметно мельче соседей: у знака и шляпы мага
+	# рисунок занимает 0.70–0.74 длинной стороны, то есть на экране они были на
+	# четверть мельче пиццы при формально одинаковом размере.
+	#
+	# Проверяем не «поля есть», а РЕЗУЛЬТАТ: после `content_scale` нарисованная
+	# часть у всех приходит к заданному размеру. Порог полей — 0.85: ассет с
+	# бо́льшими полями пройдёт мимо `fit_scale` незаметно, и это ловится здесь.
+	var thin : Array = []
+	for p in ["res://assets/items/road_sign.png", "res://assets/items/magic_hat.png",
+			"res://assets/items/casey_mask.png", "res://assets/items/handcuffs.png",
+			"res://assets/skills/ship_wheel.png"]:
+		var tex : Texture2D = load(p)
+		var r := ItemSizing.content_rect(tex)
+		var frac : float = float(maxi(r.size.x, r.size.y)) \
+			/ maxf(tex.get_size().x, tex.get_size().y)
+		var drawn : float = float(maxi(r.size.x, r.size.y)) \
+			* ItemSizing.content_scale(tex, ItemSizing.BASE_PX)
+		if absf(drawn - ItemSizing.BASE_PX) > 0.5:
+			thin.append("%s %.1f" % [p.get_file(), drawn])
+	_check(thin.is_empty(),
+		"рисунок приводится к %.0f px независимо от полей кадра: %s"
+			% [ItemSizing.BASE_PX, thin])
+
 	var mults : Array = []
 	for i in 4000:
 		mults.append(ItemSizing.roll_hazard_mult())
