@@ -244,22 +244,30 @@ func _test_glasses_pose() -> void:
 	var f2 : Texture2D = n.get("_skin_spell2_tex")[1]
 	_check(f1 != null and f2 != null, "оба кадра позы подгрузились")
 
+	# Такты считаются ОТ КОНСТАНТЫ, а не числами: кадр заряда у Очков свой,
+	# укороченный, и вписанные сюда 0.34 пришлось бы править вместе с ним —
+	# только тест об этом молчал бы, а падал бы через раз.
+	var ft : float = float(n.call("pose_time_for", "electric_dash"))
+	_check(ft < float(n.get("SPELL_POSE_TIME")),
+		"заряд рывка короче обычной позы: %.2f против %.2f"
+			% [ft, n.get("SPELL_POSE_TIME")])
+
 	var start : Vector2 = (n as Node2D).global_position
 	var tap   : Vector2 = start + Vector2(240.0, -70.0)
 	n.call("_try_fire_ability", tap)
-	await _wait(0.12)
+	await _wait(ft * 0.35)
 	_check(spr.texture == f1, "первый кадр: пьёт банку")
 
 	# На ВТОРОМ кадре включается электричество: обводка, дрожь и искры. На первом
 	# он ещё пьёт, и искрить там нечему.
-	await _wait(0.34)
+	await _wait(ft)
 	_check(spr.texture == f2, "второй кадр: поехало")
 	_check(spr.get_node_or_null("DashRim") != null, "и появилась обводка")
 	_check(n.get("_dash_sparks") != null, "и полетели искры")
 
 	# Рывок: голова уходит В ТОЧКУ ТАПА, а не «куда-то вперёд». Он начинается
-	# ПОСЛЕ обоих кадров позы (0.34 + 0.34) и длится 0.24 — целимся в середину.
-	await _wait(0.30)
+	# ПОСЛЕ обоих кадров позы и длится 0.24 — целимся в середину.
+	await _wait(ft * 0.65 + 0.12)
 	_check(bool(n.call("is_dashing")), "пошёл рывок")
 	var trail : Line2D = n.get("_dash_trail")
 	_check(trail != null, "и за ним тянется хвост")

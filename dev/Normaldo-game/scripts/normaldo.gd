@@ -1740,7 +1740,7 @@ func _try_fire_ability(target: Vector2) -> void:
 		# летит анимированным — на экране получалось два кулака сразу. Кулак
 		# должен быть один, и это тот, который двигается: позу пропускаем.
 		if not _POSE_SKIP.has(String(_ability_cfg.get("id", ""))):
-			_show_spell_pose()
+			_show_spell_pose(pose_time_for(String(_ability_cfg.get("id", ""))))
 		_cast_spell(str(_ability_cfg.get("id", "")), dir)
 	# Consume a charge; start the cooldown only when they're all gone.
 	_active_charges -= 1
@@ -1796,9 +1796,23 @@ func _fire_rygality(dir: Vector2, col: Color) -> void:
 # позу вместо обычной. Владеет спрайтом ненадолго и уступает его обратно
 # _update_mouth, поэтому с анимацией поедания не дерётся.
 const SPELL_POSE_TIME : float = 0.34
+
+# У большинства скинов поза — это РЕАКЦИЯ: спелл уже ушёл, поза его комментирует,
+# и держать её треть секунды нормально. У Очков поза — это ЗАРЯД: рывок ждёт,
+# пока она доиграет, и игрок всё это время стоит на месте. Полсекунды с лишним
+# ожидания перед рывком читаются не как замах, а как задержка нажатия.
+#
+# Поэтому у заряжающих спеллов кадр свой, короче общего. Оба кадра при этом
+# остаются: «глотнул энергетик» → «поехало» — по одному кадру спелл Очков не
+# читается вовсе.
+const POSE_TIME_BY_ID : Dictionary = { "electric_dash": 0.20 }
+
+func pose_time_for(id: String) -> float:
+	return float(POSE_TIME_BY_ID.get(id, SPELL_POSE_TIME))
+
 var _spell_pose_token : int = 0
 
-func _show_spell_pose() -> void:
+func _show_spell_pose(frame_t: float = SPELL_POSE_TIME) -> void:
 	if _morphing or fat_state >= _skin_spell_tex.size():
 		return
 	var tex = _skin_spell_tex[fat_state]
@@ -1807,7 +1821,7 @@ func _show_spell_pose() -> void:
 	_spell_pose_token += 1
 	var tok := _spell_pose_token
 	_show_head(tex, "_spell")
-	await get_tree().create_timer(SPELL_POSE_TIME).timeout
+	await get_tree().create_timer(frame_t).timeout
 	if not is_instance_valid(self) or tok != _spell_pose_token or _morphing:
 		return
 	# Второй кадр, если он нарисован: у Очков каст — это «глотнул энергетик» и
@@ -1816,7 +1830,7 @@ func _show_spell_pose() -> void:
 	var tex2 = _skin_spell2_tex[fat_state] if fat_state < _skin_spell2_tex.size() else null
 	if tex2 != null:
 		_show_head(tex2, "_spell2")
-		await get_tree().create_timer(SPELL_POSE_TIME).timeout
+		await get_tree().create_timer(frame_t).timeout
 		if not is_instance_valid(self) or tok != _spell_pose_token or _morphing:
 			return
 	_update_mouth()
@@ -2384,7 +2398,12 @@ func _cast_invisibility(duration: float) -> void:
 #      а пропущенный удар — в способ не думать; ни то, ни другое к «пролетел
 #      насквозь» отношения не имеет.
 const DASH_COL      : Color = Color(1.00, 0.92, 0.15)   # электрический жёлтый
-const DASH_CHARGE_T : float = SPELL_POSE_TIME * 2.0     # ровно длина позы каста
+# Заряд идёт РОВНО столько, сколько длится поза каста Очков, — они обязаны
+# кончиться вместе, иначе на экране либо рывок из обычной головы, либо поза,
+# висящая после рывка. Поэтому длина кадра берётся ИЗ ТОЙ ЖЕ таблицы, по которой
+# играется сама поза (POSE_TIME_BY_ID), а не пишется здесь вторым числом: два
+# независимых источника одной величины расходятся на первой же правке.
+const DASH_CHARGE_T : float = 0.40      # = pose_time_for("electric_dash") * 2
 const DASH_T        : float = 0.24
 const DASH_TRAIL_W  : float = 84.0    # ширина хвоста У ГОЛОВЫ
 const DASH_TAIL_W   : float = 0.10    # и доля этой ширины на дальнем конце
@@ -2406,14 +2425,15 @@ func _cast_electric_dash(target: Vector2) -> void:
 		return
 	# Электричество включается НА ВТОРОМ кадре позы: на первом он ещё пьёт, и
 	# искрить там нечему.
-	await get_tree().create_timer(SPELL_POSE_TIME).timeout
+	var frame_t : float = pose_time_for("electric_dash")
+	await get_tree().create_timer(frame_t).timeout
 	if not is_instance_valid(self):
 		return
 	var rim := _dash_rim(true)
 	_dash_sparks = _dash_spark_emitter()
-	_dash_shake(SPELL_POSE_TIME)
+	_dash_shake(frame_t)
 	_play_oneshot(_SFX_GLITTER, -4.0)
-	await get_tree().create_timer(SPELL_POSE_TIME).timeout
+	await get_tree().create_timer(frame_t).timeout
 	if not is_instance_valid(self):
 		_dash_rim(false)
 		return
