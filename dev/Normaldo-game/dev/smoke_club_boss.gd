@@ -372,7 +372,7 @@ func _test_dash_is_fixed() -> void:
 	var b : Node2D = _boss(e)
 	await process_frame
 	(e["n"] as Node2D).position = Vector2(e["vp"].x * 0.35, e["vp"].y * 0.5)
-	b.position = Vector2(e["vp"].x * 0.35 + 300.0, e["vp"].y * 0.5)
+	b.position = Vector2(e["vp"].x * 0.35 + CLUB.CHARGE_D + 140.0, e["vp"].y * 0.5)
 	b.call("_start_track")
 
 	var t := 0.0
@@ -409,7 +409,7 @@ func _test_fist_hurts() -> void:
 	var b : Node2D = _boss(e)
 	await process_frame
 	(e["n"] as Node2D).position = Vector2(e["vp"].x * 0.4, e["vp"].y * 0.5)
-	b.position = Vector2(e["vp"].x * 0.4 + 260.0, e["vp"].y * 0.5)
+	b.position = Vector2(e["vp"].x * 0.4 + CLUB.CHARGE_D + 90.0, e["vp"].y * 0.5)
 	b.call("_start_track")
 	await _tick(0.3)
 	_check(_fist_of(b) != null, "на такте погони у босса есть зона")
