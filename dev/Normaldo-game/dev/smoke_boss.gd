@@ -31,6 +31,16 @@ func _initialize() -> void:
 		quit(1)
 		return
 
+	# Скин ПРИБИТ к классике. Пик раздувания считается от нарисованной головы, а
+	# она у каждого скина своя — и тест, читающий скин из сейва, зависел от того,
+	# какой прогон был перед ним: smoke_skins оставляет на диске последний скин
+	# реестра, и пороги здесь то проходили, то нет.
+	var save : Node = get_root().get_node_or_null("SaveData")
+	if save != null:
+		save.active_skin = "classic"
+		normaldo.call("reload_skin")
+		await process_frame
+
 	print("── Взял мутаген — стал большим ──")
 	await _test_start(boss, normaldo)
 	print("── Не тапаешь — уменьшаешься ──")
@@ -45,6 +55,8 @@ func _initialize() -> void:
 	await _test_stream(boss, normaldo)
 	print("── Мини-игра всегда кончается ──")
 	await _test_always_ends(boss, normaldo)
+	print("── Подсказка TAP! ──")
+	await _test_prompt(boss)
 	print("── Возврат в забег ──")
 	await _test_return_guard(boss, normaldo)
 	await _test_restore(boss, normaldo)
@@ -265,6 +277,67 @@ func _test_always_ends(boss: Node, normaldo: Node) -> void:
 # нельзя, оттуда забег непроходим — предметы прилетают сразу на голову.
 # Сравнение идёт с КРАЕМ: раньше сравнивалось с якорем босса, но якорь уехал в
 # играбельное место и такая проверка начала срабатывать на обычной позиции.
+# Подсказка мини-игры — КАРТИНКА «TAP!» и два тапающих пальца по бокам, а не
+# слово, набранное шрифтом. Ломается это молча: достаточно вернуть Label, и на
+# экране снова появится отладочного вида подпись — тесты механики не заметят.
+func _test_prompt(boss: Node) -> void:
+	await _begin(boss, 1.0)
+	boss.call("_show_prompt")
+	await process_frame
+	var root : Node2D = boss.get("_title_root")
+	_check(is_instance_valid(root), "подсказка собралась")
+	if not is_instance_valid(root):
+		return
+
+	var labels : Array = []
+	var sprites : Array = []
+	for c in root.get_children():
+		if c is Label:
+			labels.append(c)
+		elif c is Sprite2D:
+			sprites.append(c)
+	_check(labels.is_empty(), "слова в подсказке нет — только картинки")
+	_check(sprites.size() == 3, "картинка TAP! и два пальца: %d спрайтов" % sprites.size())
+
+	var tap : Sprite2D = null
+	var fingers : Array = []
+	for s in sprites:
+		if (s as Sprite2D).texture == boss.TAP_TEX:
+			tap = s
+		else:
+			fingers.append(s)
+	_check(tap != null, "картинка TAP! на месте")
+	_check(fingers.size() == 2, "пальцев ровно два")
+	if fingers.size() == 2:
+		var x0 : float = (fingers[0] as Sprite2D).position.x
+		var x1 : float = (fingers[1] as Sprite2D).position.x
+		_check(x0 * x1 < 0.0, "пальцы по РАЗНЫЕ стороны: %.0f и %.0f" % [x0, x1])
+
+	# Полный цикл тапа: палец обязан и уехать вниз, и сменить кадр на прижатый.
+	# Кадр без движения — это мигание, движение без кадра — качание.
+	var f : Sprite2D = fingers[0]
+	var y0 : float = f.position.y
+	var low : float = y0
+	var pressed := false
+	var t0 : float = Time.get_ticks_msec() / 1000.0
+	var cycle : float = float(boss.FINGER_DOWN_T) + float(boss.FINGER_HOLD_T) \
+		+ float(boss.FINGER_UP_T) + float(boss.FINGER_REST_T)
+	while Time.get_ticks_msec() / 1000.0 - t0 < cycle * 1.6:
+		low = maxf(low, f.position.y)
+		if f.texture == boss.FINGER_DOWN:
+			pressed = true
+		await process_frame
+	_check(low - y0 > float(boss.FINGER_DROP) * 0.7,
+		"палец уходит вниз на %.0f px при ходе %.0f" % [low - y0, boss.FINGER_DROP])
+	_check(pressed, "в нижней точке кадр меняется на прижатый")
+
+	# Проверка БЕЗ ожидания кадра: мини-игра простаивает, и на следующем же
+	# `_process` она честно покажет подсказку заново.
+	boss.call("_hide_prompt")
+	_check(boss.get("_finger_taps").is_empty(), "твины пальцев погашены вместе с подсказкой")
+	boss.call("_end_minigame")
+	await _await_idle(boss)
+
 func _test_return_guard(boss: Node, normaldo: Node) -> void:
 	var vp : Vector2 = get_root().get_visible_rect().size
 	(normaldo as Node2D).position = Vector2(0.0, vp.y * 0.5)

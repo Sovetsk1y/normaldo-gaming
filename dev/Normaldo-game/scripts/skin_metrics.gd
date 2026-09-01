@@ -118,7 +118,7 @@ func pose_off(skin_id: String, variant: String, fat_state: int) -> Vector2:
 	var offs : Array = row.get(variant, [])
 	if offs.is_empty():
 		return offset_for(skin_id, fat_state)
-	return offs[clampi(fat_state, 0, offs.size() - 1)]
+	return offs[clampi(fat_state, 0, offs.size() - 1)] + nudge_for(skin_id, fat_state)
 
 func has_pose_off(skin_id: String, variant: String) -> bool:
 	return not (POSE_OFF.get(skin_id, {}) as Dictionary).get(variant, []).is_empty()
@@ -144,10 +144,76 @@ func pose_k(skin_id: String, variant: String, fat_state: int) -> float:
 # про этот силуэт, но ужать можно только весь спрайт, вместе с и без того
 # мелким лицом. 0.92 убирает лишний объём, не превращая лицо в точку; дальше
 # лечится только перерисовкой кадра, где тела меньше.
+#
+# У Кусса правка КРУПНАЯ, и вот почему. Замер приводит к одному размеру не
+# лицо, а «самое крупное пятно» — а у лягушки голова и брюхо нарисованы одной
+# зелёной кляксой (см. MANUAL ниже). Плюс первое состояние лежит на холсте
+# 500×500, остальные три — на 1000×1000, а масштаб делится на ширину КАДРА:
+# один и тот же рисунок на вдвое меньшем холсте выходит вдвое крупнее. Отсюда
+# и жалоба «первый жир большой, остальные мелкие» — 82, 56, 65, 70 пикселей
+# лица вместо ровного роста. Здесь лицо выведено на 76 → 82 → 88 → 94.
 const TWEAK : Dictionary = {
 	"classic":      [1.08, 1.08, 1.08, 1.08],
 	"harry_potter": [0.92, 1.00, 1.00, 1.00],
+	"kuss":         [0.89, 1.67, 1.31, 1.52],
 }
+
+# ── Ручной замер там, где автоматический врёт ────────────────────────────────
+# Автозамер стоит на одном допущении: голова — САМОЕ КРУПНОЕ связное пятно, а
+# руки, посохи и прочий реквизит нарисованы отдельными пятнами. Для тринадцати
+# скинов это правда. Для Кусса — нет: он лягушка, у которой голова переходит в
+# брюхо без единого разрыва, и «самое крупное пятно» это голова ВМЕСТЕ с тушей.
+#
+# Отсюда две поломки сразу:
+#
+#   • ЯКОРЬ. Центр такого пятна лежит в животе. На третьем жире хитбокс уезжал
+#     под подбородок почти на девятую часть кадра — удары засчитывались по
+#     пузу, а не по лицу. Разрезать пятно замером нельзя, оно связное.
+#
+#   • КОРОБКА. Ладонь и лопатка у Кусса отлетают от туши далеко, и коробка
+#     видимого силуэта меряет в основном ВОЗДУХ между ними. MAX_BODY срабатывал
+#     на этом воздухе и ужимал персонажа целиком: на четвёртом жире туша
+#     занимала 70 пикселей при коробке в 144.
+#
+# Поэтому здесь лежат два ручных замера:
+#
+#   nudge — ДОБАВКА к смещению головы, снятая по сетке с самих кадров (центр
+#           лица = кепка + глаза + рот). Добавка, а не замена: у вариантов
+#           («ест», поза каста) своя клякса и свой замер, и промах у них тот же,
+#           так что одна и та же поправка кладётся и на них.
+#   box   — коробка ТУШИ: главное пятно плюс пятна целиком внутри его столбца
+#           (бабочка, лапы). Отлетевший реквизит в неё не входит — он и не
+#           читается как туша. Именно по ней работает MAX_BODY; общий разлёт
+#           рисунка держит отдельная, более широкая MAX_SPREAD.
+#
+# Правится глазами и лежит ОТДЕЛЬНО от сгенерированных таблиц: measure_heads.py
+# её не трогает.
+const MANUAL : Dictionary = {
+	"kuss": {
+		"nudge": [Vector2(-0.0025, -0.0475), Vector2(-0.0075, -0.0375),
+		          Vector2( 0.0200, -0.0875), Vector2(-0.0050, -0.0325)],
+		"box":   [Vector2(0.5000, 0.5400), Vector2(0.3100, 0.2900),
+		          Vector2(0.3550, 0.3800), Vector2(0.3850, 0.2950)],
+	},
+}
+
+# Разлёт всего рисунка вместе с отлетевшим реквизитом. Шире MAX_BODY: ладонь в
+# стороне и лопатка — не туша, ими ничего не задевается, и ужимать из-за них
+# персонажа не за что. Но и разлетаться без предела нельзя, иначе спрайт полезет
+# в соседние лейны. Держит только Кусса — у остальных рисунок и так в MAX_BODY.
+const MAX_SPREAD : Vector2 = Vector2(230.0, 150.0)
+
+func _manual(skin_id: String, key: String, fat_state: int):
+	var row : Dictionary = MANUAL.get(skin_id, {})
+	var arr : Array = row.get(key, [])
+	if arr.is_empty():
+		return null
+	return arr[clampi(fat_state, 0, arr.size() - 1)]
+
+# Ручная добавка к якорю головы. Ноль для всех, у кого замер не врёт.
+func nudge_for(skin_id: String, fat_state: int) -> Vector2:
+	var n = _manual(skin_id, "nudge", fat_state)
+	return Vector2.ZERO if n == null else n
 
 func tweak_for(skin_id: String, fat_state: int) -> float:
 	var t : Array = TWEAK.get(skin_id, [])
@@ -180,8 +246,17 @@ func head_size_for(skin_id: String, fat_state: int) -> Vector2:
 		return Vector2(head_frac_for(skin_id), head_h_frac_for(skin_id))
 	return hs[clampi(fat_state, 0, hs.size() - 1)]
 
-# Габариты ВИДИМОГО силуэта в долях кадра для состояния жира.
+# Габариты ТУШИ в долях кадра для состояния жира — то, что MAX_BODY ограничивает.
+# У Кусса берётся ручной замер: автоматический меряет воздух между отлетевшими
+# ладонью и лопаткой (см. MANUAL).
 func box_for(skin_id: String, fat_state: int) -> Vector2:
+	var m = _manual(skin_id, "box", fat_state)
+	if m != null:
+		return m
+	return content_box_for(skin_id, fat_state)
+
+# Габариты ВСЕГО рисунка в долях кадра, вместе с отлетевшим реквизитом.
+func content_box_for(skin_id: String, fat_state: int) -> Vector2:
 	var boxes : Array = (HEADS.get(skin_id, {}) as Dictionary).get("box", [])
 	if boxes.is_empty():
 		return Vector2.ONE
@@ -209,5 +284,5 @@ func offset_for(skin_id: String, fat_state: int) -> Vector2:
 	var row : Dictionary = HEADS.get(skin_id, {})
 	var offs : Array = row.get("off", [])
 	if offs.is_empty():
-		return Vector2.ZERO
-	return offs[clampi(fat_state, 0, offs.size() - 1)]
+		return nudge_for(skin_id, fat_state)
+	return offs[clampi(fat_state, 0, offs.size() - 1)] + nudge_for(skin_id, fat_state)

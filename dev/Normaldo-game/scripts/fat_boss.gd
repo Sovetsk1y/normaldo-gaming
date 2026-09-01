@@ -35,7 +35,21 @@ const HARD_TRACK  := preload("res://assets/audio/hard_track.mp3")
 const CRASH_SFX   := preload("res://assets/audio/crash.mp3")
 const FIRECRACKER := preload("res://assets/audio/firecracker.mp3")
 const UI_FONT    := preload("res://assets/fonts/RussoOne-Regular.ttf")
-const FINGER_TEX := preload("res://assets/ui/quests/back_arrow.png")
+
+# Подсказка мини-игры: картинка «TAP!» из набора выкриков и два кадра
+# тапающего пальца. Кадры собираются dev/tools/bake_tap.py — придут авторские,
+# заменяются эти файлы, код о них больше ничего не знает.
+const TAP_TEX     := preload("res://assets/ui/reactions/tap.png")
+const FINGER_UP   := preload("res://assets/ui/reactions/finger_1.png")
+const FINGER_DOWN := preload("res://assets/ui/reactions/finger_2.png")
+const TAP_W       : float = 190.0   # ширина «TAP!» на экране
+const FINGER_SC   : float = 0.115
+const FINGER_GAP  : float = 18.0
+const FINGER_DROP : float = 18.0    # ход пальца вниз
+const FINGER_DOWN_T : float = 0.16
+const FINGER_HOLD_T : float = 0.07
+const FINGER_UP_T   : float = 0.20
+const FINGER_REST_T : float = 0.10
 
 # ── Tunables (designer-facing) ────────────────────────────────────────────────
 @export var enabled         : bool  = true
@@ -166,8 +180,9 @@ var _mg_items : Array[Node] = []
 
 # Overlay / fx nodes (created lazily)
 var _ui         : CanvasLayer = null
-var _title_root : Node2D = null   # holds the title label + its two fingers
+var _title_root : Node2D = null   # holds the TAP! picture + its two fingers
 var _title_tw   : Tween = null
+var _finger_taps : Array = []     # по твину на палец — гасим их вместе с титром
 var _shake_cam  : Camera2D = null
 var _debris    : CPUParticles2D = null
 var _disco      : ColorRect = null   # full-screen additive light wash at madness
@@ -672,45 +687,37 @@ func _clear_mg_items() -> void:
 # Boss-fight-style banner (54 px red RussoOne) with a "finger" (back-arrow)
 # pointing inward on each side of the text. The whole thing blinks (scale +
 # alpha) for the entire mini-game; quick fade-out at the end via _hide_title().
-func _show_title(text: String) -> void:
+func _show_title(_text: String = "") -> void:
 	_hide_title()
 	var vp := get_viewport_rect().size
-	var font_size := 54
-	var tw_px : float = UI_FONT.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 
-	# Root centred on screen — label + fingers all scale/blink together.
+	# Root centred on screen — картинка и пальцы мигают вместе.
 	var root := Node2D.new()
 	root.position = Vector2(vp.x * 0.5, vp.y * 0.30 + 40.0)
 	_ui.add_child(root)
 	_title_root = root
 
-	var lbl := Label.new()
-	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", font_size)
-	lbl.add_theme_color_override("font_color", Color(1.0, 0.12, 0.06))
-	lbl.text                 = text
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.size                 = Vector2(tw_px, 80.0)
-	lbl.position             = Vector2(-tw_px * 0.5, -40.0)
-	root.add_child(lbl)
+	var tap := Sprite2D.new()
+	tap.texture = TAP_TEX
+	tap.scale   = Vector2.ONE * (TAP_W / float(TAP_TEX.get_width()))
+	root.add_child(tap)
+	var tw_px : float = TAP_W
 
-	# A finger on each side, pointing inward at the text (back_arrow points left).
-	const FSC  := 0.9
-	const FGAP := 30.0
-	var fw : float = FINGER_TEX.get_width() * FSC
-	var fl := Sprite2D.new()
-	fl.texture        = FINGER_TEX
-	fl.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	fl.scale          = Vector2(-FSC, FSC)   # flipped → points right toward text
-	fl.position       = Vector2(-tw_px * 0.5 - FGAP - fw * 0.5, 0.0)
-	root.add_child(fl)
-	var fr := Sprite2D.new()
-	fr.texture        = FINGER_TEX
-	fr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	fr.scale          = Vector2(FSC, FSC)    # default → points left toward text
-	fr.position       = Vector2(tw_px * 0.5 + FGAP + fw * 0.5, 0.0)
-	root.add_child(fr)
+	# Палец с каждой стороны. Оба ТАПАЮТ: идут вниз и в нижней точке меняют
+	# кадр на «прижатый». Раньше по бокам стояли стрелки «назад» из экрана
+	# заданий — они показывали НА подпись, но ничего не подсказывали про то,
+	# что от игрока нужно, а нужно именно тапать.
+	_finger_taps.clear()
+	var fw : float = FINGER_UP.get_width() * FINGER_SC
+	for side in [-1.0, 1.0]:
+		var f := Sprite2D.new()
+		f.texture        = FINGER_UP
+		f.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		f.scale          = Vector2(FINGER_SC * side, FINGER_SC)
+		f.position       = Vector2(side * (tw_px * 0.5 + FINGER_GAP + fw * 0.5),
+			-FINGER_DROP * 0.5)
+		root.add_child(f)
+		_finger_taps.append(_tap_finger(f))
 
 	root.scale = Vector2(0.2, 0.2)
 	_title_tw = root.create_tween().set_loops()
@@ -720,10 +727,35 @@ func _show_title(text: String) -> void:
 	_title_tw.tween_property(root, "scale", Vector2(1.0, 1.0), 0.24)
 	_title_tw.parallel().tween_property(root, "modulate:a", 1.0, 0.24)
 
+# Один цикл тапа: палец идёт вниз, в НИЖНЕЙ точке меняется кадр на прижатый,
+# держится мгновение и возвращается наверх обычным кадром. Кадр меняется именно
+# внизу, а не по таймеру: иначе прижатая ладонь мелькает на подъёме и движение
+# читается как дрожь, а не как удар по экрану.
+func _tap_finger(f: Sprite2D) -> Tween:
+	var y0 : float = f.position.y
+	var tw := f.create_tween().set_loops()
+	tw.tween_property(f, "position:y", y0 + FINGER_DROP, FINGER_DOWN_T) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_callback(func():
+		if is_instance_valid(f):
+			f.texture = FINGER_DOWN)
+	tw.tween_interval(FINGER_HOLD_T)
+	tw.tween_callback(func():
+		if is_instance_valid(f):
+			f.texture = FINGER_UP)
+	tw.tween_property(f, "position:y", y0, FINGER_UP_T) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(FINGER_REST_T)
+	return tw
+
 func _hide_title() -> void:
 	if _title_tw and _title_tw.is_valid():
 		_title_tw.kill()
 	_title_tw = null
+	for t in _finger_taps:
+		if t != null and (t as Tween).is_valid():
+			(t as Tween).kill()
+	_finger_taps.clear()
 	if is_instance_valid(_title_root):
 		var root := _title_root
 		var tw := root.create_tween()
@@ -796,7 +828,7 @@ func _show_prompt() -> void:
 	if _prompt_shown:
 		return
 	_prompt_shown = true
-	_show_title("ТАПАЙ")
+	_show_title()
 
 func _hide_prompt() -> void:
 	if not _prompt_shown:

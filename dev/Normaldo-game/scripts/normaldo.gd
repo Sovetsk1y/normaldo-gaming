@@ -1868,15 +1868,24 @@ func _make_anim_sprite(dir_path: String, prefix: String, count: int, px: float) 
 # а сама голова на время удара подаётся вперёд по той же дуге.
 const MELEE_SWEEP_TIME : float = 0.26
 const MELEE_ARC        : float = 0.85   # раствор дуги в радианах
-const MELEE_RADIUS     : float = 60.0   # радиус поражения
+const MELEE_RADIUS     : float = 60.0   # радиус поражения по умолчанию
+# Викингу радиус СВОЙ и заметно больший: его спелл — не точечный тычок, а
+# «взрывной кулак», и обещание карточки «сносит всё вплотную» с радиусом 60
+# сбывалось ровно на одной цели. Линии стоят через 86 пикселей, поэтому 96
+# накрывает свою и обе соседние — три цели, как и задумано.
+const VIKING_MELEE_RADIUS : float = 96.0
+# И кулак под этот радиус: бьющая зона больше нарисованного кулака читается как
+# «попало мимо картинки».
+const VIKING_FIST_PX : float = 215.0
 
-func _cast_melee(dir: Vector2, reach: float, show_fist: bool = true) -> void:
-	var proj := _spawn_skill_projectile(dir, 0.0, null, MELEE_RADIUS,
+func _cast_melee(dir: Vector2, reach: float, show_fist: bool = true,
+		radius: float = MELEE_RADIUS, fist_px: float = FIST_PX) -> void:
+	var proj := _spawn_skill_projectile(dir, 0.0, null, radius,
 		_RYAG_HIT_GROUPS, _melee_hit_handler(), 0.0, MELEE_SWEEP_TIME + 0.05)
 	if proj == null:
 		return
 	if show_fist:
-		_attach_big_fist(proj, dir)
+		_attach_big_fist(proj, dir, fist_px)
 	# Дуга: от «замаха» сверху к «доводке» снизу, с вылетом вперёд на reach.
 	var steps := 4
 	var tw := proj.create_tween()
@@ -1909,9 +1918,9 @@ const _FIST_FALLBACK : Texture2D = preload("res://assets/skills/fist_generic.png
 const _POWER_TEX     : Texture2D = preload("res://assets/skills/power.png")
 const FIST_PX        : float = 150.0   # голова — 99: кулак заведомо крупнее её
 
-func _attach_big_fist(proj: Node2D, dir: Vector2) -> void:
+func _attach_big_fist(proj: Node2D, dir: Vector2, px: float = FIST_PX) -> void:
 	var tex : Texture2D = _FIST_TEX.get(SaveData.active_skin, _FIST_FALLBACK)
-	var fist := _make_sprite(tex, FIST_PX)
+	var fist := _make_sprite(tex, px)
 	fist.rotation = dir.angle()
 	# Кулак «вырастает» за первую треть замаха, а не появляется целиком: именно
 	# рост и читается как превращение руки, а не как подставленная картинка.
@@ -2018,7 +2027,9 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 		"explosive_fist":
 			# Викинг: кулак проходит дугой вплотную перед собой. Позы каста у
 			# него нет (см. _POSE_SKIP) — кулак ровно один, и он движется.
-			_cast_melee(dir, 92.0)
+			# Радиус и кулак у него СВОИ: «взрывной кулак» обязан сносить три
+			# цели, а не одну (см. VIKING_MELEE_RADIUS).
+			_cast_melee(dir, 92.0, true, VIKING_MELEE_RADIUS, VIKING_FIST_PX)
 			_play_skill_sfx(SkinSkills.COUNTER)
 		"glove_punch":
 			# Тайсон бьёт ПОЗОЙ, без летящего кулака: у него удар нарисован

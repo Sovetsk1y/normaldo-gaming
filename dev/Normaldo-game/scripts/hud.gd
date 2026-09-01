@@ -6096,6 +6096,9 @@ func _modal_layer(idx: int) -> CanvasLayer:
 func _open_pause_menu() -> void:
 	if is_instance_valid(_pause_overlay):
 		return
+	# Свернуть окно на середине отсчёта — та же пауза, и уходить она должна туда
+	# же. Иначе отсчёт доиграл бы поверх меню и снял паузу под ним.
+	_cancel_resume_countdown()
 	var scr : Control = _PAUSE_SCREEN_SCRIPT.new()
 	scr.call("setup", self)
 	_pause_layer = _modal_layer(PAUSE_LAYER)
@@ -6109,6 +6112,89 @@ func _close_pause_menu() -> void:
 	_pause_layer = null
 	_pause_overlay = null
 	get_tree().paused = false
+
+# ── Отсчёт возврата в забег ──────────────────────────────────────────────────
+# Экран паузы закрывает собой ВЕСЬ кадр, и снятая в тот же момент пауза
+# возвращает игрока в положение, которого он не видел: предмет мог за это время
+# оказаться в полулейне от лица. Между экраном и игрой встаёт отсчёт: экран
+# паузы уходит сразу, но игра стоит ещё полторы секунды, пока по центру идут
+# 3-2-1 поверх СРЕДНЕГО затемнения — сквозь него видно и лейны, и летящее, и
+# где сам Нормальдо. Полное затемнение здесь не годится: тогда осматриваться
+# было бы негде и отсчёт стал бы просто ожиданием.
+const RESUME_DIGITS  : Array = [3, 2, 1]
+const RESUME_DIGIT_T : float = 0.5
+const RESUME_DIM     : float = 0.45
+
+var _resume_layer : CanvasLayer = null
+var _resume_tw    : Tween       = null
+
+func _resume_with_countdown() -> void:
+	if is_instance_valid(_pause_layer):
+		_pause_layer.queue_free()
+	_pause_layer   = null
+	_pause_overlay = null
+	if is_instance_valid(_resume_layer):
+		return
+
+	var vp := get_viewport().get_visible_rect().size
+	_resume_layer = _modal_layer(PAUSE_LAYER)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0.02, 0.02, 0.04, RESUME_DIM)
+	dim.size  = vp
+	# Тапы во время отсчёта не должны доходить до забега: иначе игрок случайным
+	# касанием по затемнению уже дёргает Нормальдо в лейн.
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_resume_layer.add_child(dim)
+
+	var num := Label.new()
+	num.add_theme_font_override("font", UI_FONT)
+	num.add_theme_font_size_override("font_size", 72)
+	num.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	num.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	num.size          = Vector2(vp.x, 90.0)
+	num.position      = Vector2(0.0, vp.y * 0.5 - 45.0)
+	num.pivot_offset  = Vector2(vp.x * 0.5, 45.0)
+	num.modulate      = Color(1.0, 0.92, 0.55, 1.0)
+	num.text          = str(RESUME_DIGITS[0])
+	_resume_layer.add_child(num)
+
+	# Твин идёт СКВОЗЬ паузу: дерево стоит, и обычный твин вместе с ним.
+	_resume_tw = create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	for d in RESUME_DIGITS:
+		_resume_tw.tween_callback(_resume_digit.bind(num, int(d)))
+		_resume_tw.tween_interval(RESUME_DIGIT_T)
+	_resume_tw.tween_callback(_finish_resume)
+
+func _resume_digit(num: Label, d: int) -> void:
+	if not is_instance_valid(num):
+		return
+	num.text  = str(d)
+	num.scale = Vector2(1.35, 1.35)
+	# Хлопок цифры — на нём и читается смена: без него 3-2-1 просто подменяются
+	# в одной точке и сливаются в мигание.
+	var tw := num.create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_property(num, "scale", Vector2.ONE, RESUME_DIGIT_T * 0.45) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+func _finish_resume() -> void:
+	_drop_resume_layer()
+	get_tree().paused = false
+
+func _cancel_resume_countdown() -> void:
+	if _resume_tw != null and _resume_tw.is_valid():
+		_resume_tw.kill()
+	_resume_tw = null
+	_drop_resume_layer()
+
+func _drop_resume_layer() -> void:
+	if is_instance_valid(_resume_layer):
+		_resume_layer.queue_free()
+	_resume_layer = null
+
+# Идёт ли сейчас отсчёт возврата — нужно тестам и экрану смерти.
+func resume_counting() -> bool:
+	return is_instance_valid(_resume_layer)
 
 # Выход из забега по подтверждению: снять паузу и перезапустить сцену — тот же
 # путь, что был у старой кнопки «ВЫЙТИ».

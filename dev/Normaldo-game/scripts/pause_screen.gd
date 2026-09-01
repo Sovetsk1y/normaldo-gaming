@@ -436,8 +436,12 @@ func _fmt_cooldown(sec_total: int) -> String:
 	return "%d:%02d" % [m, s]
 
 # ── Действия ─────────────────────────────────────────────────────────────────
+# «ПРОДОЛЖИТЬ» не снимает паузу сразу: экран уходит, а игра ждёт отсчёта 3-2-1.
+# См. HUD._resume_with_countdown и /Концепция/Экран паузы.md
 func _on_resume() -> void:
-	if _hud != null and _hud.has_method("_close_pause_menu"):
+	if _hud != null and _hud.has_method("_resume_with_countdown"):
+		_hud.call("_resume_with_countdown")
+	elif _hud != null and _hud.has_method("_close_pause_menu"):
 		_hud.call("_close_pause_menu")
 
 func _on_settings() -> void:

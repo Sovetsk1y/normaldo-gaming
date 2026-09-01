@@ -40,6 +40,32 @@ func _initialize() -> void:
 
 	spawner.clear_items()
 
+	# Режим «tap»: один кадр с подсказкой мини-игры — картинка TAP! и пальцы по
+	# бокам. Пальцы снимаются в НИЖНЕЙ точке (кадр «прижат»), иначе в кадре стоят
+	# две поднятые руки и проверить нечего.
+	if argv.size() > 1 and argv[1] == "tap":
+		save.active_skin = "classic"
+		save.skin_level  = 10
+		normaldo.reload_skin()
+		await process_frame
+		game.get_node("HUD").call("_start_game")
+		for _i in 20:
+			await process_frame
+		boss.call("dev_begin_play", 1.0)
+		for _i in 40:
+			await process_frame
+		boss.call("_show_prompt")
+		var t0 : float = Time.get_ticks_msec() / 1000.0
+		var want : float = float(boss.get("FINGER_DOWN_T")) \
+			+ float(boss.get("FINGER_HOLD_T")) * 0.5
+		while Time.get_ticks_msec() / 1000.0 - t0 < want:
+			await process_frame
+		await RenderingServer.frame_post_draw
+		get_root().get_texture().get_image().save_png("%s/boss_tap.png" % out)
+		print("готово")
+		quit(0)
+		return
+
 	for sid in SKINS:
 		for fat in 4:
 			save.active_skin = sid

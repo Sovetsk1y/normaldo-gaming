@@ -34,6 +34,8 @@ func _initialize() -> void:
 
 	print("── Открытие и снятие ──")
 	await _test_open_close(hud)
+	print("── Отсчёт возврата ──")
+	await _test_countdown(hud)
 	print("── Раскладка ──")
 	await _test_layout(hud)
 	print("── Цифры забега ──")
@@ -143,6 +145,61 @@ func _test_open_close(hud: Node) -> void:
 	await _shut(hud)
 	_check(not get_root().get_tree().paused, "закрытие сняло паузу")
 	_check(not is_instance_valid(scr), "экран освободился")
+
+# «ПРОДОЛЖИТЬ» не возвращает в игру мгновенно: экран паузы уходит сразу, а игра
+# ждёт отсчёта 3-2-1. Проверяем ровно этот разрыв — экрана уже нет, паузы ещё
+# нет, — потому что сломать его можно молча: достаточно вернуть в pause_screen
+# вызов _close_pause_menu, и отсчёт исчезнет, а тест раскладки не заметит.
+#
+# Время меряется таймером ДЕРЕВА, а не кадрами: кадры в headless идут медленнее
+# реального времени, и «полсекунды на цифру» в кадрах не считаются.
+func _test_countdown(hud: Node) -> void:
+	var scr : Node = await _open(hud)
+	scr.call("_on_resume")
+	await process_frame
+	_check(not is_instance_valid(scr), "экран паузы ушёл сразу")
+	_check(bool(hud.call("resume_counting")), "отсчёт пошёл")
+	_check(get_root().get_tree().paused, "игра во время отсчёта СТОИТ")
+
+	# Затемнение среднее: сквозь него видно забег. Полное здесь бессмысленно —
+	# осматриваться было бы негде.
+	var dim : ColorRect = _first_rect(hud.get("_resume_layer"))
+	_check(dim != null and dim.color.a > 0.2 and dim.color.a < 0.7,
+		"затемнение среднее: a=%.2f" % [dim.color.a if dim != null else -1.0])
+
+	var digits : Array = []
+	var t0 : float = Time.get_ticks_msec() / 1000.0
+	while bool(hud.call("resume_counting")) and Time.get_ticks_msec() / 1000.0 - t0 < 6.0:
+		var lay : Node = hud.get("_resume_layer")
+		if is_instance_valid(lay):
+			for l in _texts(lay, []):
+				if not digits.has(String(l)) and String(l) != "":
+					digits.append(String(l))
+		await process_frame
+	var dt : float = Time.get_ticks_msec() / 1000.0 - t0
+	_check(digits == ["3", "2", "1"], "цифры шли 3, 2, 1: %s" % [digits])
+	var want : float = float(hud.get("RESUME_DIGIT_T")) * 3.0
+	_check(absf(dt - want) < 0.35, "отсчёт занял %.2f с при ожидаемых %.2f" % [dt, want])
+	_check(not get_root().get_tree().paused, "после отсчёта игра пошла")
+	_check(not bool(hud.call("resume_counting")), "слой отсчёта убран")
+
+	# Свернули окно на середине отсчёта — это снова пауза, а не «доиграл и пустил».
+	scr = await _open(hud)
+	scr.call("_on_resume")
+	await process_frame
+	hud.call("_open_pause_menu")
+	await process_frame
+	_check(not bool(hud.call("resume_counting")), "открытие паузы гасит отсчёт")
+	_check(get_root().get_tree().paused, "и оставляет игру на паузе")
+	await _shut(hud)
+
+func _first_rect(node: Node) -> ColorRect:
+	if node == null:
+		return null
+	for c in node.get_children():
+		if c is ColorRect:
+			return c
+	return null
 
 func _test_layout(hud: Node) -> void:
 	var scr : Node = await _open(hud)

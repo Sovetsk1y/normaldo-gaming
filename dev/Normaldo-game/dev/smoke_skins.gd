@@ -28,6 +28,8 @@ func _initialize() -> void:
 	_test_card(skil, save)
 	print("── Размер на экране ──")
 	await _test_sizes(reg, save)
+	print("── Лицо Кусса ──")
+	_test_kuss(reg)
 	print("── ЖИРОБОСС ──")
 	await _test_boss(reg, save)
 	print("── Карточки наград ──")
@@ -175,6 +177,7 @@ func _test_sizes(reg: Node, save: Node) -> void:
 	var met : Node = get_root().get_node_or_null("SkinMetrics")
 
 	var over : Array = []
+	var spread : Array = []
 	var head_min : float = 1e9
 	var head_max : float = 0.0
 	for s in reg.SKINS:
@@ -190,12 +193,21 @@ func _test_sizes(reg: Node, save: Node) -> void:
 			var h  : float   = box.y * sz.y * k
 			if w > met.MAX_BODY.x + 1.0 or h > met.MAX_BODY.y + 1.0:
 				over.append("%s/%d %.0fx%.0f" % [id, fat, w, h])
+			# Отлетевший реквизит в тушу не входит, но и разлетаться без предела
+			# ему нельзя: спрайт полез бы в соседние лейны.
+			var cb : Vector2 = met.content_box_for(id, fat)
+			var cw : float = cb.x * sz.x * k
+			var ch : float = cb.y * sz.y * k
+			if cw > met.MAX_SPREAD.x + 1.0 or ch > met.MAX_SPREAD.y + 1.0:
+				spread.append("%s/%d %.0fx%.0f" % [id, fat, cw, ch])
 			if fat == 0:
 				var hw : float = met.head_frac_for(id) * sz.x * k
 				head_min = minf(head_min, hw)
 				head_max = maxf(head_max, hw)
-	_check(over.is_empty(), "силуэт всех скинов в коробке %.0fx%.0f, вылезли: %s"
+	_check(over.is_empty(), "туша всех скинов в коробке %.0fx%.0f, вылезли: %s"
 		% [met.MAX_BODY.x, met.MAX_BODY.y, over])
+	_check(spread.is_empty(), "весь рисунок в разлёте %.0fx%.0f, вылезли: %s"
+		% [met.MAX_SPREAD.x, met.MAX_SPREAD.y, spread])
 	# Голова не обязана совпадать пиксель в пиксель — четверых поджимает коробка,
 	# — но разброс должен остаться небольшим. До нормировки он был 2.3 раза.
 	#
@@ -243,6 +255,51 @@ func _test_sizes(reg: Node, save: Node) -> void:
 
 	game.queue_free()
 	await process_frame
+
+# Кусс — единственный скин, у которого автозамер врёт: голова и брюхо у лягушки
+# нарисованы одной связной кляксой, и «самое крупное пятно» это они вдвоём.
+# Держим руками снятую поправку (SkinMetrics.MANUAL) под проверкой: без неё
+# якорь уезжает в живот, и на третьем жире удары засчитывались по пузу.
+#
+# Прямоугольники лица сняты по сетке с самих кадров: кепка + глаза + рот.
+const KUSS_FACE : Array = [        # x0, y0, x1, y1 в долях кадра
+	Rect2(0.250, 0.210, 0.470, 0.440),
+	Rect2(0.340, 0.355, 0.270, 0.230),
+	Rect2(0.280, 0.115, 0.370, 0.215),
+	Rect2(0.310, 0.335, 0.340, 0.215),
+]
+
+func _test_kuss(reg: Node) -> void:
+	var met : Node = get_root().get_node_or_null("SkinMetrics")
+	var off_bad : Array = []
+	var faces : Array = []
+	for fat in 4:
+		var tex : Texture2D = reg.get_avatar_texture("kuss", fat)
+		if tex == null:
+			continue
+		var a : Vector2 = Vector2(0.5, 0.5) + met.offset_for("kuss", fat)
+		if not KUSS_FACE[fat].has_point(a):
+			off_bad.append("%d %.3f,%.3f" % [fat + 1, a.x, a.y])
+		var k : float = met.sprite_scale("kuss", fat, tex.get_size())
+		faces.append(KUSS_FACE[fat].size.x * tex.get_size().x * k)
+	_check(off_bad.is_empty(), "якорь головы на лице во всех жирах, мимо: %s" % [off_bad])
+
+	# Лицо обязано РАСТИ с жиром, а не скакать: до правки было 82, 56, 65, 70 —
+	# первое состояние крупнее остальных, и это ровно то, на что жаловались.
+	var grows := true
+	for i in range(1, faces.size()):
+		if faces[i] <= faces[i - 1]:
+			grows = false
+	_check(grows, "лицо растёт с жиром: %s" % [_px(faces)])
+	# И остаётся в разумном разбросе вокруг классической головы (91 px).
+	_check(faces[0] > 60.0 and faces[faces.size() - 1] < 120.0,
+		"лицо в пределах классической головы: %s" % [_px(faces)])
+
+func _px(a: Array) -> String:
+	var out : Array = []
+	for v in a:
+		out.append("%.0f" % float(v))
+	return ", ".join(out)
 
 # ЖИРОБОСС должен для КАЖДОГО скина и КАЖДОГО состояния жира встать одинаково:
 # голова ростом с экран, у левого края, но В КАДРЕ — видно три четверти лица. И

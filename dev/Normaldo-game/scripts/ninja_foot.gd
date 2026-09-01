@@ -17,6 +17,7 @@ const SHURIKEN_SCENE  := preload("res://scenes/shuriken.tscn")
 const SMOKE_SCRIPT    := preload("res://scripts/smoke_obstacle.gd")
 const SMOKE_TEX       := preload("res://assets/bosses/ninja_foot/smoke.png")
 const SMOKE_PROJ_TEX  := preload("res://assets/bosses/ninja_foot/smoke_projectile.png")
+const BANNER_TEX      := preload("res://assets/bosses/ninja_foot/banner.png")
 const SWORD1_TEX      := preload("res://assets/bosses/ninja_foot/sword1.png")
 const SWORD2_TEX      := preload("res://assets/bosses/ninja_foot/sword2.png")
 const UI_FONT         := preload("res://assets/fonts/RussoOne-Regular.ttf")
@@ -595,7 +596,11 @@ func _smoke_final() -> void:
 	await tw_in.finished
 	await get_tree().create_timer(0.35).timeout
 
-	var norm_pos := _normaldo.global_position if is_instance_valid(_normaldo) else vp.size * 0.5
+	# Финальный дым летит в ЦЕНТР ЭКРАНА, а не в голову. Он накрывает всё поле
+	# целиком, и уворачиваться от него нечем; брошенный в игрока, он читался как
+	# прицельный удар, от которого просто нельзя уйти. Из центра то же облако
+	# читается как «занавес», чем оно и является: это конец боя, а не атака.
+	var norm_pos : Vector2 = vp.size * 0.5
 
 	var proj := Node2D.new()
 	_game_root.add_child(proj)
@@ -770,17 +775,24 @@ func _show_boss_banner() -> void:
 	overlay.size  = vp.size
 	cl.add_child(overlay)
 
-	var lbl := Label.new()
-	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 54)
-	lbl.text                 = "БОСС ФАЙТ"
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.modulate             = Color(1.0, 0.12, 0.06)
-	lbl.size                 = Vector2(vp.size.x, 80)
-	lbl.position             = Vector2(0, vp.size.y * 0.38)
-	lbl.pivot_offset         = Vector2(vp.size.x * 0.5, 40)
-	lbl.scale                = Vector2.ZERO
+	# Титр НАРИСОВАННЫЙ, как у крокодила и хозяина клуба: «BOSS FIGHT» с мордой
+	# босса вместо буквы O. У боссов один титр на всех, и меняется в нём только
+	# лицо; набранное шрифтом «БОСС ФАЙТ», которое стояло тут раньше, выпадало
+	# из этого ряда — у двоих рисунок, у третьего надпись.
+	#
+	# Лист собран из авторского `BOSSFIGHT LH.png`: то же кольцо, те же шипы, в
+	# круг вставлена голова ноги ниндзя (dev/tools/bake_ninja_banner.py).
+	var lbl := TextureRect.new()
+	lbl.texture        = BANNER_TEX
+	lbl.expand_mode    = TextureRect.EXPAND_IGNORE_SIZE
+	lbl.stretch_mode   = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	lbl.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	var bw : float = vp.size.x * 0.56
+	var bh : float = bw * float(BANNER_TEX.get_height()) / float(BANNER_TEX.get_width())
+	lbl.size         = Vector2(bw, bh)
+	lbl.position     = Vector2((vp.size.x - bw) * 0.5, vp.size.y * 0.22)
+	lbl.pivot_offset = lbl.size * 0.5
+	lbl.scale        = Vector2.ZERO
 	cl.add_child(lbl)
 
 	var sub := Label.new()
@@ -790,7 +802,7 @@ func _show_boss_banner() -> void:
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	sub.modulate             = Color(0.95, 0.75, 0.10, 0.0)
 	sub.size                 = Vector2(vp.size.x, 36)
-	sub.position             = Vector2(0, vp.size.y * 0.38 + 90)
+	sub.position             = Vector2(0, vp.size.y * 0.22 + bh + 6.0)
 	cl.add_child(sub)
 
 	var tw_ov := overlay.create_tween()
@@ -800,7 +812,7 @@ func _show_boss_banner() -> void:
 	_play_sfx(BOSS_STINGER)
 
 	var tw_l := lbl.create_tween()
-	tw_l.tween_property(lbl, "scale", Vector2(1.25, 1.25), 0.28) \
+	tw_l.tween_property(lbl, "scale", Vector2.ONE, 0.28) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	await tw_l.finished
 
@@ -815,8 +827,8 @@ func _show_boss_banner() -> void:
 	# Pulse
 	var tw_p := lbl.create_tween()
 	for _i in 2:
-		tw_p.tween_property(lbl, "scale", Vector2(1.08, 1.08), 0.12)
-		tw_p.tween_property(lbl, "scale", Vector2(1.25, 1.25), 0.12)
+		tw_p.tween_property(lbl, "scale", Vector2(0.94, 0.94), 0.12)
+		tw_p.tween_property(lbl, "scale", Vector2.ONE, 0.12)
 	await tw_p.finished
 
 	await get_tree().create_timer(0.35).timeout
