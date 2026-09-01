@@ -27,10 +27,12 @@ const FADE_MIN  : float = 0.55
 const FADE_MAX  : float = 1.00
 
 # Спрайт-аура цвета `col`. `px` — диаметр свечения на экране; по умолчанию кадр
-# рисуется как есть, крупным предметам его имеет смысл растянуть.
-static func make(col: Color, px: float = PX) -> Sprite2D:
+# рисуется как есть, крупным предметам его имеет смысл растянуть. `alpha` —
+# СИЛА свечения: у предмета-эффекта аура зовёт («возьми меня»), у твари она
+# только метит («этот кусает по-своему»), и метке яркость нужна вдвое меньше.
+static func make(col: Color, px: float = PX, alpha: float = ALPHA) -> Sprite2D:
 	var grad := Gradient.new()
-	grad.set_color(0, Color(col.r, col.g, col.b, ALPHA))
+	grad.set_color(0, Color(col.r, col.g, col.b, alpha))
 	grad.set_color(1, Color(col.r, col.g, col.b, 0.0))
 
 	var gt := GradientTexture2D.new()

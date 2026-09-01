@@ -45,6 +45,8 @@ func _initialize() -> void:
 	await _test_rage_volleys()
 	print("── Акт 3: пасть доходит до игрока ──")
 	await _test_jaw_reaches()
+	print("── Акт 3: спелл заперт ──")
+	await _test_spell_lock()
 	print("── Смерть игрока обрывает битву ──")
 	await _test_death_stops()
 	print("── Битва доходит до конца ──")
@@ -200,10 +202,13 @@ func _test_hunt() -> void:
 	e["game"].queue_free()
 	await process_frame
 
-# Акт разгоняется: шесть выстрелов с одинаковым шагом — это метроном, после
-# второго игрок знает всё, что будет дальше. Разгоняется при этом ПАУЗА, а не
-# телеграф: нить обязана висеть свои 0.45 с и на последнем выстреле, иначе
-# «сложнее» означает «отняли возможность увернуться».
+# Акт разгоняется ЦЕЛИКОМ: и пауза, и передёрг, и нить телеграфа, и скорость
+# пули. Двенадцать выстрелов с одинаковым шагом — это метроном, после второго
+# игрок знает всё, что будет дальше.
+#
+# Телеграф теперь тоже сжимается, и вот та граница, которую нельзя переходить:
+# нить обязана гореть и на последнем выстреле, и достаточно долго, чтобы с линии
+# можно было сойти. Ноль на её месте — это не «сложнее», это отнятая жизнь.
 func _test_hunt_ramp() -> void:
 	var w : Array = CROC.HUNT_WAITS
 	var ramps := true
@@ -213,14 +218,22 @@ func _test_hunt_ramp() -> void:
 	_check(ramps, "паузы между выстрелами убывают: %s" % [w])
 	_check(int(CROC.HUNT_SHOTS) == w.size(),
 		"число выстрелов совпадает со списком пауз: %d и %d" % [CROC.HUNT_SHOTS, w.size()])
+	_check(int(CROC.HUNT_SHOTS) >= 12,
+		"выстрелов в акте не меньше двенадцати: %d" % CROC.HUNT_SHOTS)
 
 	# Темп боя. Бой честно телеграфит каждый выстрел, и от этого читался
 	# медленным: между «нить погасла» и следующим передёргом игрок просто ехал.
-	# Паузы сжаты, ТЕЛЕГРАФ не тронут — и это две разные величины, которые легко
-	# перепутать при следующей правке сложности.
 	_check(float(w[0]) <= 1.0, "первая пауза не тянется: %.2f с" % w[0])
-	_check(is_equal_approx(float(CROC.LASER_T), 0.45),
-		"нить телеграфа по-прежнему 0.45 с: %.2f" % CROC.LASER_T)
+	_check(float(CROC.LASER_T_LAST) < float(CROC.LASER_T),
+		"нить к концу акта короче: %.2f против %.2f" % [CROC.LASER_T_LAST, CROC.LASER_T])
+	_check(float(CROC.LASER_T_LAST) >= 0.16,
+		"но не исчезает — с линии успевает сойти тот, кто движется: %.2f с"
+			% CROC.LASER_T_LAST)
+	# И пуля разгоняется вместе с ним: короткая нить при медленной пуле дала бы
+	# разгон только на бумаге.
+	_check(float(CROC.SNIPE_SPEED_LAST) > float(CROC.SNIPE_SPEED) * 1.3,
+		"последняя пуля заметно быстрее первой: %.0f против %.0f"
+			% [CROC.SNIPE_SPEED_LAST, CROC.SNIPE_SPEED])
 	_check(float(CROC.BUCK_PERIOD) <= 1.1 and float(CROC.RAGE_WAVE_GAP) <= 1.0,
 		"паузы картечи и злой картечи сжаты: %.2f и %.2f"
 			% [CROC.BUCK_PERIOD, CROC.RAGE_WAVE_GAP])
@@ -237,7 +250,7 @@ func _test_hunt_ramp() -> void:
 	var shots : Array = []
 	var seen  : Dictionary = {}
 	var t := 0.0
-	while t < 24.0 and shots.size() < int(CROC.HUNT_SHOTS):
+	while t < 40.0 and shots.size() < int(CROC.HUNT_SHOTS):
 		get_root().get_tree().paused = false
 		await process_frame
 		t += 1.0 / 60.0
@@ -256,7 +269,59 @@ func _test_hunt_ramp() -> void:
 	e["game"].queue_free()
 	await process_frame
 
+# Последний акт играется РУКАМИ. Картечь бьёт по площади, злая — тем более, а
+# пасть отбивается тапами; спелл снимал картечь с экрана и отменял такт целиком, а
+# на пасти двойной тап уходил в спелл вместо удара.
+#
+# Проверяется не только «флаг поставлен», но и обе стороны договора: пока акт
+# идёт — спелл не срабатывает, а как только крокодила не стало (умер игрок,
+# оборвалась битва) — запрет снят. Снять его после смерти уже некому, и забытая
+# блокировка означала бы забег без спелла до самого конца.
+func _test_spell_lock() -> void:
+	var e : Dictionary = await _boot()
+	var n : Node = e["n"]
+	var save : Node = get_root().get_node_or_null("SaveData")
+	save.active_skin = "harry_potter"     # у мага активный спелл есть всегда
+	save.skin_level  = 10
+	n.call("reload_skin")
+	n.call("_build_skin_runtime")
+	await process_frame
+	_check(not bool(n.get("spells_blocked")), "до боя спелл свободен")
+
+	var c : Node2D = _croc(e)
+	await process_frame
+	c.call("_act_shotgun")
+	await _tick(0.2)
+	_check(bool(n.get("spells_blocked")), "на третьем акте спелл заперт")
+
+	# И запрет РАБОТАЕТ, а не просто записан: заряд не тратится, каст не идёт.
+	var ch0 : int = int(n.call("active_charges"))
+	n.call("_try_fire_ability", Vector2(80.0, (e["vp"] as Vector2).y * 0.5))
+	await process_frame
+	_check(int(n.call("active_charges")) == ch0,
+		"двойной тап не тратит заряд: %d → %d" % [ch0, n.call("active_charges")])
+
+	# Битву оборвали — запрет снят.
+	c.call("_abort")
+	await process_frame
+	_check(not bool(n.get("spells_blocked")),
+		"после обрыва битвы спелл снова свободен")
+	e["game"].queue_free()
+	await process_frame
+
 func _test_tail() -> void:
+	# Взмахи разгоняются, но НАЧИНАЮТСЯ уже быстро. Работу такта делает не
+	# скорость хвоста, а свечение края и дорожка до него — к моменту самого
+	# взмаха всё уже решено, и медленный хвост это не напряжение, а ожидание.
+	var sw : Array = CROC.TAIL_SWEEPS
+	var rises := true
+	for i in range(1, sw.size()):
+		if float(sw[i]["speed"]) <= float(sw[i - 1]["speed"]):
+			rises = false
+	_check(rises, "взмахи разгоняются: %s" % [sw])
+	_check(float(sw[0]["speed"]) >= 400.0,
+		"и первый уже не ползёт: %.0f px/с" % float(sw[0]["speed"]))
+
 	var e : Dictionary = await _boot()
 	var c : Node2D = _croc(e)
 	await process_frame

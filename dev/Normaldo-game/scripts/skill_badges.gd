@@ -241,6 +241,11 @@ class Badge extends Control:
 		var tot : float = nrm.skill_cd_total(key)
 		var rem : float = nrm.skill_cd_remaining(key)
 		if charges_badge:
+			# Спелл заперт тактом босса — кружок гаснет. Гасим `self_modulate`, а
+			# не `modulate`: по `modulate` ходят твины готовности и отказа, и
+			# затемнение они стёрли бы на первом же срабатывании.
+			self_modulate = Color(1, 1, 1, 0.35) if bool(nrm.get("spells_blocked")) \
+				else Color(1, 1, 1, 1)
 			# Show charge count while charges remain; the cooldown sweep only
 			# appears once all charges are spent.
 			var newc : int = nrm.active_charges()

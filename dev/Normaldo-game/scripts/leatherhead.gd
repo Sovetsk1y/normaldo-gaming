@@ -130,7 +130,10 @@ const MUZZLE_RAGE : Vector2 = Vector2(0.100, 0.713)   # злая картечь
 const AIM_CLAMP : float = 0.55   # рад: дальше голова заваливается на спину
 
 const BULLET_PX   : float = 34.0
-const SNIPE_SPEED : float = 700.0
+# Снайперская пуля разгоняется вместе с самим актом: первая летит 700, последняя
+# 1250. См. HUNT_WAITS.
+const SNIPE_SPEED      : float = 700.0
+const SNIPE_SPEED_LAST : float = 1250.0
 const SHOT_SPEED  : float = 520.0
 
 var boss_test_mode : bool = false
@@ -208,6 +211,7 @@ func _abort() -> void:
 	_stopped  = true
 	_tracking = false
 	_lunging  = false
+	_set_spell_lock(false)
 	if is_instance_valid(_music):
 		_music.stop()
 	# Всё, что крокодил разложил по сцене. Само оно не уберётся: дерево на паузе,
@@ -457,16 +461,36 @@ func _show_banner() -> void:
 # будет дальше, а впереди было ещё четыре таких же. Одинаковый ритм — это не
 # сложность и не лёгкость, это скука.
 #
-# Разгоняется ПАУЗА МЕЖДУ выстрелами, а не сам выстрел: нить по-прежнему висит
-# свои 0.45 с, и последний выстрел так же честен, как первый. Ускорять телеграф
-# значило бы отбирать у игрока не время на раздумье, а возможность увернуться.
-# Разгон общий: цифры ниже — прежние, умноженные на 0.62. Бой честно телеграфит
-# каждый выстрел, и от этого он читался медленным: между «нить погасла» и
-# «следующий передёрг» игрок полторы секунды просто ехал. Паузы сжаты, ТЕЛЕГРАФ
-# не тронут — см. ниже.
-const HUNT_WAITS : Array = [0.90, 0.71, 0.53, 0.38, 0.26, 0.16]
-const HUNT_SHOTS : int   = 6      # = HUNT_WAITS.size(), см. проверку в тесте
-const LASER_T     : float = 0.45   # столько нить висит, прежде чем выстрел
+# Разгоняется ВЕСЬ цикл выстрела, а не одна пауза: и пауза, и передёрг, и нить
+# телеграфа, и скорость самой пули. К двенадцатому выстрелу он перезаряжается
+# почти мгновенно и лупит одну за одной — акт кончается не тем, что «выстрелы
+# кончились», а тем, что дальше так продолжаться уже не может.
+#
+# Шесть выстрелов с одним шагом читались метрономом: после второго игрок знал
+# всё, что будет дальше. Разгон одних пауз это чинил наполовину — цикл упирался
+# в постоянные 1.04 с на передёрг, нить и отдачу, и «быстро» упиралось в потолок.
+#
+# ТЕЛЕГРАФ УСКОРЯЕТСЯ, НО НЕ ИСЧЕЗАЕТ. Нижняя граница — 0.18 с, и она не
+# косметическая: нить фиксирует направление в момент, когда загорелась, значит
+# уходить надо с той линии, на которой стоял. 0.18 с хватает, чтобы сойти с неё
+# тому, кто УЖЕ движется, и не хватает тому, кто встал и смотрит, — а к
+# двенадцатому выстрелу стоять на месте и есть ошибка. Ноль на её месте означал
+# бы «попадание без возможности уйти», то есть отнятую жизнь, а не сложность.
+const HUNT_WAITS : Array = [
+	0.90, 0.71, 0.53, 0.38, 0.26, 0.16,
+	0.12, 0.09, 0.07, 0.05, 0.04, 0.03,
+]
+const HUNT_SHOTS : int   = 12     # = HUNT_WAITS.size(), см. проверку в тесте
+# Нить телеграфа: столько она висит перед выстрелом. Первое число — первый
+# выстрел, второе — последний, между ними ровный разгон.
+const LASER_T      : float = 0.45
+const LASER_T_LAST : float = 0.18
+# Передёрг затвора — те же три кадра, но к концу акта он их проматывает.
+const RELOAD_F      : float = 0.09
+const RELOAD_F_LAST : float = 0.035
+# И отдача с возвратом в стойку: держать их постоянными значило бы, что цикл
+# упирается в них и «очень быстро» не наступает никогда.
+const RECOVER_K_LAST : float = 0.45
 const TRACK_LERP  : float = 0.055  # насколько лениво он едет за линией игрока
 
 var _tracking : bool = false
@@ -484,6 +508,12 @@ func _act_hunt() -> void:
 	for i in HUNT_WAITS.size():
 		if not _alive():
 			return
+		# Разгон один на весь цикл: 0 на первом выстреле, 1 на последнем.
+		var k : float = 0.0 if HUNT_WAITS.size() < 2 \
+			else float(i) / float(HUNT_WAITS.size() - 1)
+		var laser_t  : float = lerpf(LASER_T, LASER_T_LAST, k)
+		var reload_f : float = lerpf(RELOAD_F, RELOAD_F_LAST, k)
+		var rec      : float = lerpf(1.0, RECOVER_K_LAST, k)
 		await get_tree().create_timer(float(HUNT_WAITS[i])).timeout
 		if not _alive():
 			return
@@ -491,7 +521,7 @@ func _act_hunt() -> void:
 		_play_sfx(SFX_RELOAD)
 		for f in F_RELOAD_UP:
 			_set_pose(f)
-			await get_tree().create_timer(0.09).timeout
+			await get_tree().create_timer(reload_f).timeout
 			if not _alive():
 				return
 		# Нить ФИКСИРУЕТ направление: дальше он уже не доводит.
@@ -500,23 +530,26 @@ func _act_hunt() -> void:
 		var to   : Vector2 = _normaldo.global_position if is_instance_valid(_normaldo) \
 			else from + Vector2(-vp.x, 0.0)
 		var dir  := (to - from).normalized()
-		_laser(from, from + dir * vp.length(), LASER_T)
-		await get_tree().create_timer(LASER_T).timeout
+		_laser(from, from + dir * vp.length(), laser_t)
+		await get_tree().create_timer(laser_t).timeout
 		if not _alive():
 			return
 		_set_pose(F_SNIPE[0])
-		await get_tree().create_timer(0.06).timeout
+		await get_tree().create_timer(0.06 * rec).timeout
 		if not _alive():
 			return
 		_set_pose(F_SNIPE[1])
 		_play_sfx(SFX_SNIPER)
-		_fire(_muzzle(MUZZLE_AIM), dir, SNIPE_SPEED)
+		# И сама пуля разгоняется вместе с ним: короткая нить и медленная пуля
+		# дали бы разгон только на бумаге — от такого выстрела успеваешь уйти уже
+		# ПОСЛЕ него, глядя, как пуля ползёт.
+		_fire(_muzzle(MUZZLE_AIM), dir, lerpf(SNIPE_SPEED, SNIPE_SPEED_LAST, k))
 		_recoil()
-		await get_tree().create_timer(0.10).timeout
+		await get_tree().create_timer(0.10 * rec).timeout
 		if not _alive():
 			return
 		_set_pose(F_SNIPE[2])
-		await get_tree().create_timer(0.16).timeout
+		await get_tree().create_timer(0.16 * rec).timeout
 		if not _alive():
 			return
 		_set_pose(F_RELOAD_UP[0])
@@ -577,12 +610,17 @@ const TAIL_GLOW_T   : float = 0.45
 # телу, и торчащий в кадр срез читается как «хвост оторвали и бросили», а не как
 # «крокодил бьёт хвостом из-за экрана». Прячем его целиком.
 const TAIL_HIDE_FRAC : float = 0.35
+# Взмахи разгоняются, но НАЧИНАЮТСЯ уже быстро. Прежние 300 давали первому
+# взмаху почти три секунды на проход экрана: предупреждение уже отгорело, щель
+# уже выбрана, и оставалось смотреть, как хвост медленно ползёт мимо. Работу
+# делает не скорость хвоста, а свечение края и дорожка ДО него — их и не трогаем,
+# а сам взмах перестаёт быть ожиданием.
 const TAIL_SWEEPS : Array = [
-	{ "side": "bottom", "speed": 300.0 },
-	{ "side": "top",    "speed": 380.0 },
-	{ "side": "bottom", "speed": 460.0 },
-	{ "side": "top",    "speed": 560.0 },
-	{ "side": "bottom", "speed": 680.0 },
+	{ "side": "bottom", "speed": 430.0 },
+	{ "side": "top",    "speed": 500.0 },
+	{ "side": "bottom", "speed": 570.0 },
+	{ "side": "top",    "speed": 650.0 },
+	{ "side": "bottom", "speed": 740.0 },
 ]
 
 func _act_tail() -> void:
@@ -738,8 +776,25 @@ const LUNGE_TIME  : float = 4.0
 # ВЕСЬ экран, а не доезжает до точки, где игрок стоял в начале.
 const LUNGE_OVERSHOOT : float = 30.0
 
+# Последний акт играется РУКАМИ, а не кнопкой: картечь бьёт по площади и уходить
+# от неё надо телом, злая картечь — тем более, а пасть вообще отбивается тапами.
+# Спелл здесь ломал ровно то, ради чего акт написан: он снимал картечь с экрана
+# и отменял такт целиком, а на пасти двойной тап уходил в спелл вместо удара.
+# Поэтому на весь третий акт спелл заперт.
+#
+# Снимается блокировка ОБЯЗАТЕЛЬНО в двух местах: в конце акта и в `_abort()`.
+# Умер игрок посреди картечи — крокодила не станет, а забег продолжится следующим
+# заходом, и снимать запрет будет уже некому.
+func _set_spell_lock(v: bool) -> void:
+	if is_instance_valid(_normaldo) and _normaldo.has_method("set_spells_blocked"):
+		_normaldo.call("set_spells_blocked", v)
+
+func _exit_tree() -> void:
+	_set_spell_lock(false)
+
 func _act_shotgun() -> void:
 	current_act = "shotgun"
+	_set_spell_lock(true)
 	var vp := get_viewport_rect().size
 	var tw := create_tween()
 	tw.tween_property(self, "position", Vector2(vp.x - W_FIGHT * 0.62, vp.y * 0.5), 0.5)\
@@ -779,6 +834,7 @@ func _act_shotgun() -> void:
 		if not _alive():
 			return
 		await _jaw_lunge()
+	_set_spell_lock(false)
 
 func _buckshot(count: int, spread: float) -> void:
 	for f in [F_RELOAD_DOWN[1], F_SHOT_DOWN[0], F_SHOT_DOWN[1], F_SHOT_DOWN[2]]:

@@ -34,6 +34,15 @@ func _initialize() -> void:
 		get_root().get_tree().paused = false
 		await process_frame
 
+	# Скин ПРИБИТ к классике: метки резистов рисуют вокруг предметов цветные
+	# кольца, и на кадре про размеры и ауры чужое кольцо читается как часть
+	# предмета. Заодно кадр перестаёт зависеть от того, чем игралось до него.
+	var save : Node = get_root().get_node_or_null("SaveData")
+	if save != null:
+		save.active_skin = "classic"
+		n.call("reload_skin")
+		n.call("_build_skin_runtime")
+
 	sp.call("clear_items")
 	sp.set_process(false)
 	var vp : Vector2 = get_root().get_visible_rect().size

@@ -1721,8 +1721,23 @@ func _vfx_resist_break(pos: Vector2) -> void:
 
 # ── Active ability (double-tap) ───────────────────────────────────────────────
 
+# Спелл заблокирован извне — на время такта, который обязан играться руками, а
+# не кнопкой. Флаг публичный и снимается ТЕМ ЖЕ, кто поставил: если хозяин
+# такта умер вместе с забегом, снимать блокировку некому, поэтому все, кто её
+# ставит, обязаны снимать её и в своём аварийном выходе.
+var spells_blocked : bool = false
+
+func set_spells_blocked(v: bool) -> void:
+	spells_blocked = v
+
 func _try_fire_ability(target: Vector2) -> void:
 	if _ability_cfg.is_empty():
+		return
+	if spells_blocked:
+		# Отказ ВИДЕН: молча проглоченный двойной тап читается как «игра не
+		# поняла», и игрок жмёт ещё раз вместо того, чтобы играть такт.
+		_show_floating_text("Не сейчас", Color(0.85, 0.85, 0.90))
+		active_denied.emit()
 		return
 	# Charge-based cooldown: the ability holds `_active_max_charges` shots; the
 	# cooldown only starts once the LAST charge is spent, then refills them all.
