@@ -1,167 +1,97 @@
 #!/usr/bin/env python3
-"""Собирает «TAP!» и два кадра тапающего пальца для мини-игры ЖИРОБОССА.
+"""Режет авторскую раскладку тапающего пальца и кладёт картинку «TAP!».
 
-Зачем. В мини-игре по центру мигало СЛОВО «ТАПАЙ», набранное шрифтом, а по
-бокам от него стояли стрелки «назад» из интерфейса заданий. Рядом с рисованной
-мордой босса это читалось как отладочная подпись: у игры есть свой набор
-комиксовых выкриков (POW, BAM, KEK, LOL, dang, oops), и подсказка обязана быть
-из того же набора, а не из шрифта.
+Исходники — в `dev/art/tap/`:
 
-Что делается:
+  tap.png            — надпись «TAP!» граффити, как в наборе выкриков.
+  fingers_sheet.png  — раскладка 2×2: слева пара кадров ЛЕВОГО пальца, справа —
+                       ПРАВОГО; сверху «поднят», снизу «прижат» (молнии и
+                       красный след удара).
 
-  tap.png       — «TAP!» в стиле выкриков: чёрная тень со сдвигом, жёлтая
-                  обводка, розовая заливка со светлым бликом. Палитра снята
-                  пиксельно с assets/ui/reactions/pow.png.
-  finger_1.png  — палец из старого проекта (assets/images/finger.png), поднят.
-  finger_2.png  — он же в НИЖНЕЙ точке: кисть подсажена и сплюснута, вокруг
-                  подушечки — колечко удара. Два кадра плюс движение вниз и
-                  дают тап: палец идёт вниз, в нижней точке меняется кадр.
-
-Кадры пальца — ЗАГЛУШКА, собранная из того, что есть в проекте. Придут
-авторские — заменить эти два файла, код читает их по имени и больше ничего о
-них не знает.
+Главное здесь — СОВМЕЩЕНИЕ кадров. Кадры нарисованы в разных местах своей
+четверти, и если резать по содержимому, палец на подмене прыгает вбок и вверх.
+Совмещаем по МАНЖЕТЕ: это единственная часть, которая при тапе стоит на месте,
+всё остальное — сам палец и разлетающиеся молнии. Манжета берётся из верхней
+четверти рисунка (молнии туда не достают): её верх и её середина по горизонтали
+и есть якорь. Все четыре кадра выводятся на холст одного размера с якорем в
+одной и той же точке — подмена получается без прыжка.
 
     python3 dev/tools/bake_tap.py
 """
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[2]
-LEGACY = ROOT.parent / 'legacy' / 'normaldo_gaming' / 'assets' / 'images'
+SRC = ROOT / 'dev' / 'art' / 'tap'
 OUT = ROOT / 'assets' / 'ui' / 'reactions'
-FONT = ROOT / 'assets' / 'fonts' / 'RussoOne-Regular.ttf'
 
-# Палитра выкриков, снята с pow.png.
-INK    = (0, 0, 0, 255)
-FILL   = (215, 123, 186, 255)
-LIGHT  = (228, 168, 209, 255)
-EDGE   = (251, 242, 54, 255)
-
-TEXT = 'TAP!'
-SIZE = 260              # кегль
-SS = 3                  # сглаживание сверхвыборкой
-SHADOW = (18, 20)       # сдвиг чёрной тени, в пикселях итогового размера
-EDGE_W = 7              # толщина жёлтой обводки
-INK_W = 5               # толщина чёрного контура букв
+ALPHA_MIN = 40
+SPLIT_X = 500          # граница колонок раскладки
+SPLIT_Y = 510          # граница рядов
+CUFF_BAND = 0.25       # какую долю кадра сверху считать манжетой
+ANCHOR = (0.5, 0.10)   # где якорь стоит на итоговом холсте
 
 
-def _mask(text, font, w, h, pos):
-    m = Image.new('L', (w, h), 0)
-    ImageDraw.Draw(m).text(pos, text, font=font, fill=255)
-    return m
+def _bbox(im, box):
+    """Рамка непрозрачного в куске раскладки, в координатах всего листа."""
+    part = im.crop(box)
+    bb = part.split()[3].point(lambda v: 255 if v >= ALPHA_MIN else 0).getbbox()
+    if bb is None:
+        raise SystemExit('пустая четверть раскладки: %s' % (box,))
+    return (box[0] + bb[0], box[1] + bb[1], box[0] + bb[2], box[1] + bb[3])
 
 
-def _grow(mask, px):
-    """Расширить маску на px пикселей."""
-    return mask.filter(ImageFilter.MaxFilter(px * 2 + 1)) if px > 0 else mask
-
-
-def bake_tap():
-    font = ImageFont.truetype(str(FONT), SIZE * SS)
-    box = font.getbbox(TEXT)
-    pad = (EDGE_W + INK_W) * SS + max(SHADOW) * SS + 8 * SS
-    w = box[2] - box[0] + pad * 2
-    h = box[3] - box[1] + pad * 2
-    pos = (pad - box[0], pad - box[1])
-
-    body = _mask(TEXT, font, w, h, pos)
-    ink = _grow(body, INK_W * SS)
-    edge = _grow(body, (INK_W + EDGE_W) * SS)
-
-    img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
-    # Тень — тот же силуэт с контуром, сдвинутый вниз-вправо.
-    shadow = Image.new('RGBA', (w, h), (0, 0, 0, 0))
-    shadow.paste(INK, (0, 0), ink)
-    img.alpha_composite(shadow, (SHADOW[0] * SS, SHADOW[1] * SS))
-    img.paste(EDGE, (0, 0), edge)
-    img.paste(INK, (0, 0), ink)
-    img.paste(FILL, (0, 0), body)
-    # Блик — та же маска, поджатая и сдвинутая вверх-влево.
-    hi = body.filter(ImageFilter.MinFilter(9 * SS // 2 * 2 + 1))
-    hl = Image.new('RGBA', (w, h), (0, 0, 0, 0))
-    hl.paste(LIGHT, (0, 0), hi)
-    img.alpha_composite(hl, (-4 * SS, -5 * SS))
-    img.paste(FILL, (0, 0), Image.new('L', (w, h), 0))   # no-op, читаемость
-
-    img = img.resize((w // SS, h // SS), Image.LANCZOS)
-    img = img.crop(img.split()[3].getbbox())
-    img.save(OUT / 'tap.png')
-    return img.size
-
-
-def _drop_black_bg(im):
-    """Убрать залитый чёрным фон заливкой от углов.
-
-    В старом проекте палец лежит НЕ на прозрачном фоне, а на чёрном
-    прямоугольнике — вставлять его как есть значит поставить рядом с боссом две
-    чёрные плашки. Заливка идёт от углов и до контура рисунка, поэтому чёрная
-    обводка внутри самого пальца остаётся на месте.
-    """
-    w, h = im.size
-    px = im.load()
-    seen = [[False] * h for _ in range(w)]
-    stack = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
-    while stack:
-        x, y = stack.pop()
-        if x < 0 or y < 0 or x >= w or y >= h or seen[x][y]:
-            continue
-        r, g, b, a = px[x, y]
-        if a > 0 and max(r, g, b) > 40:
-            continue
-        seen[x][y] = True
-        px[x, y] = (0, 0, 0, 0)
-        stack += [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
-    return im
-
-
-def _outline(im, px, color):
-    """Обвести рисунок по силуэту.
-
-    Палец зелёный, и висит он рядом с зелёной головой Нормальдо — без обводки
-    рука сливается с лицом ровно в тот момент, когда она и должна подсказывать.
-    Цвет тот же жёлтый, что у выкриков: подсказка остаётся из одного набора.
-    """
-    a = im.split()[3].point(lambda v: 255 if v > 40 else 0)
-    ring = _grow(a, px)
-    out = Image.new('RGBA', im.size, (0, 0, 0, 0))
-    out.paste(color, (0, 0), ring)
-    out.alpha_composite(im)
-    return out
+def _anchor(im, bb):
+    """Верх и середина МАНЖЕТЫ — точка, которая при тапе стоит на месте."""
+    top = bb[1]
+    band = im.crop((bb[0], top, bb[2], top + max(1, int((bb[3] - top) * CUFF_BAND))))
+    cb = band.split()[3].point(lambda v: 255 if v >= ALPHA_MIN else 0).getbbox()
+    return (bb[0] + (cb[0] + cb[2]) / 2.0, top)
 
 
 def bake_fingers():
-    src = _drop_black_bg(Image.open(LEGACY / '3.0x' / 'finger.png').convert('RGBA'))
-    src = src.crop(src.split()[3].getbbox())
-    pad = max(src.size) // 12
-    box = Image.new('RGBA', (src.width + pad * 2, src.height + pad * 2), (0, 0, 0, 0))
-    box.alpha_composite(src, (pad, pad))
-    src = _outline(box, pad // 2, EDGE)
-    # Палец в старом проекте смотрит ВВЕРХ — он был указателем на кнопку сверху.
-    # Тапают вниз, поэтому кадр переворачивается: подушечка ведёт движение.
-    src = src.transpose(Image.FLIP_TOP_BOTTOM)
-    src = src.crop(src.split()[3].getbbox())
-    w, h = src.size
-    pad = h // 5
-    up = Image.new('RGBA', (w, h + pad), (0, 0, 0, 0))
-    up.alpha_composite(src, (0, 0))
-    up.save(OUT / 'finger_1.png')
+    sheet = Image.open(SRC / 'fingers_sheet.png').convert('RGBA')
+    W, H = sheet.size
+    quads = {
+        'l1': (0, 0, SPLIT_X, SPLIT_Y),
+        'r1': (SPLIT_X, 0, W, SPLIT_Y),
+        'l2': (0, SPLIT_Y, SPLIT_X, H),
+        'r2': (SPLIT_X, SPLIT_Y, W, H),
+    }
+    frames = {}
+    for key, box in quads.items():
+        bb = _bbox(sheet, box)
+        frames[key] = (bb, _anchor(sheet, bb))
 
-    # Нижняя точка: кисть подсажена и сплюснута — палец «уперся».
-    squash = src.resize((int(w * 1.06), int(h * 0.90)), Image.LANCZOS)
-    down = Image.new('RGBA', (w, h + pad), (0, 0, 0, 0))
-    down.alpha_composite(squash, ((w - squash.width) // 2, pad))
-    # Колечко удара под подушечкой — она теперь внизу кадра.
-    d = ImageDraw.Draw(down)
-    cx = w // 2
-    cy = pad + squash.height - int(h * 0.02)
-    r = int(w * 0.34)
-    d.ellipse((cx - r, cy - r // 3, cx + r, cy + r // 3),
-              outline=EDGE, width=max(2, w // 40))
-    down.save(OUT / 'finger_2.png')
-    return up.size
+    # Холст один на все кадры: он обязан вместить самый широкий и самый высокий
+    # кадр относительно якоря, иначе молнии обрежутся именно на прижатом кадре.
+    left = max(a[0] - bb[0] for bb, a in frames.values())
+    right = max(bb[2] - a[0] for bb, a in frames.values())
+    up = max(a[1] - bb[1] for bb, a in frames.values())
+    down = max(bb[3] - a[1] for bb, a in frames.values())
+    # Якорь стоит в ANCHOR холста — добираем поля до этой пропорции.
+    w = int(max(left, right) * 2)
+    h = int(max(down / (1.0 - ANCHOR[1]), up / ANCHOR[1]))
+    ax, ay = int(w * ANCHOR[0]), int(h * ANCHOR[1])
+
+    sizes = {}
+    for key, (bb, a) in frames.items():
+        canvas = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+        canvas.alpha_composite(sheet.crop(bb),
+                               (int(ax - (a[0] - bb[0])), int(ay - (a[1] - bb[1]))))
+        canvas.save(OUT / ('finger_%s.png' % key))
+        sizes[key] = canvas.size
+    return w, h
+
+
+def bake_tap():
+    tap = Image.open(SRC / 'tap.png').convert('RGBA')
+    tap = tap.crop(tap.split()[3].getbbox())
+    tap.save(OUT / 'tap.png')
+    return tap.size
 
 
 if __name__ == '__main__':
     print('tap.png     ', bake_tap())
-    print('finger_1/2  ', bake_fingers())
+    print('finger_*    ', bake_fingers())

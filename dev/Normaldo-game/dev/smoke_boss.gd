@@ -280,6 +280,9 @@ func _test_always_ends(boss: Node, normaldo: Node) -> void:
 # Подсказка мини-игры — КАРТИНКА «TAP!» и два тапающих пальца по бокам, а не
 # слово, набранное шрифтом. Ломается это молча: достаточно вернуть Label, и на
 # экране снова появится отладочного вида подпись — тесты механики не заметят.
+#
+# Узел общий с пицца-пати (scripts/tap_prompt.gd), поэтому проверка одна на обе
+# мини-игры: пицца-пати достаточно поставить тот же узел.
 func _test_prompt(boss: Node) -> void:
 	await _begin(boss, 1.0)
 	boss.call("_show_prompt")
@@ -288,6 +291,8 @@ func _test_prompt(boss: Node) -> void:
 	_check(is_instance_valid(root), "подсказка собралась")
 	if not is_instance_valid(root):
 		return
+	_check(root.get_script() == boss.TAP_PROMPT,
+		"подсказка — общий кирпич tap_prompt.gd, а не своя копия")
 
 	var labels : Array = []
 	var sprites : Array = []
@@ -302,7 +307,7 @@ func _test_prompt(boss: Node) -> void:
 	var tap : Sprite2D = null
 	var fingers : Array = []
 	for s in sprites:
-		if (s as Sprite2D).texture == boss.TAP_TEX:
+		if (s as Sprite2D).texture == root.TAP_TEX:
 			tap = s
 		else:
 			fingers.append(s)
@@ -312,29 +317,38 @@ func _test_prompt(boss: Node) -> void:
 		var x0 : float = (fingers[0] as Sprite2D).position.x
 		var x1 : float = (fingers[1] as Sprite2D).position.x
 		_check(x0 * x1 < 0.0, "пальцы по РАЗНЫЕ стороны: %.0f и %.0f" % [x0, x1])
+		# Левый и правый нарисованы ОТДЕЛЬНО, а не зеркалятся: у них по-разному
+		# лежит большой палец. Зеркальный спрайт вместо своего кадра — молчаливая
+		# потеря половины авторской раскладки.
+		_check((fingers[0] as Sprite2D).texture != (fingers[1] as Sprite2D).texture,
+			"у левого и правого пальца СВОИ кадры")
+		for f in fingers:
+			_check((f as Sprite2D).scale.x > 0.0,
+				"палец не зеркалится масштабом: ×%.2f" % (f as Sprite2D).scale.x)
 
 	# Полный цикл тапа: палец обязан и уехать вниз, и сменить кадр на прижатый.
 	# Кадр без движения — это мигание, движение без кадра — качание.
-	var f : Sprite2D = fingers[0]
-	var y0 : float = f.position.y
+	var f0 : Sprite2D = fingers[0]
+	var up : Texture2D = f0.texture
+	var y0 : float = f0.position.y
 	var low : float = y0
 	var pressed := false
 	var t0 : float = Time.get_ticks_msec() / 1000.0
-	var cycle : float = float(boss.FINGER_DOWN_T) + float(boss.FINGER_HOLD_T) \
-		+ float(boss.FINGER_UP_T) + float(boss.FINGER_REST_T)
+	var cycle : float = float(root.DOWN_T) + float(root.HOLD_T) \
+		+ float(root.UP_T) + float(root.REST_T)
 	while Time.get_ticks_msec() / 1000.0 - t0 < cycle * 1.6:
-		low = maxf(low, f.position.y)
-		if f.texture == boss.FINGER_DOWN:
+		low = maxf(low, f0.position.y)
+		if f0.texture != up:
 			pressed = true
 		await process_frame
-	_check(low - y0 > float(boss.FINGER_DROP) * 0.7,
-		"палец уходит вниз на %.0f px при ходе %.0f" % [low - y0, boss.FINGER_DROP])
+	_check(low - y0 > float(root.DROP) * 0.7,
+		"палец уходит вниз на %.0f px при ходе %.0f" % [low - y0, root.DROP])
 	_check(pressed, "в нижней точке кадр меняется на прижатый")
 
 	# Проверка БЕЗ ожидания кадра: мини-игра простаивает, и на следующем же
 	# `_process` она честно покажет подсказку заново.
 	boss.call("_hide_prompt")
-	_check(boss.get("_finger_taps").is_empty(), "твины пальцев погашены вместе с подсказкой")
+	_check(root.get("_taps").is_empty(), "твины пальцев погашены вместе с подсказкой")
 	boss.call("_end_minigame")
 	await _await_idle(boss)
 

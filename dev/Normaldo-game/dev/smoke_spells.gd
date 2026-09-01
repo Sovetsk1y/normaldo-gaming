@@ -33,6 +33,8 @@ func _initialize() -> void:
 	await _test_dracula_ghost()
 	print("── Очки: электрический рывок ──")
 	await _test_glasses_pose()
+	print("── Очки: рывок собирает добычу ──")
+	await _test_glasses_loot()
 	print("── Классика: доллары в глазах ──")
 	await _test_cash_face()
 	print("── Дракула: крылья ──")
@@ -51,6 +53,8 @@ func _initialize() -> void:
 	await _test_human_feast()
 	print("── Спайдер: нить цвета паутины ──")
 	await _test_web_color()
+	print("── Бэтмен: батаранг рикошетит ──")
+	await _test_batarang_bounce()
 	print("── Маг: предмет → мэджик бокс ──")
 	await _test_wizard_box()
 	print("── Выкрики на резист и на удар ──")
@@ -111,6 +115,31 @@ func _rock(spawner: Node, pos: Vector2) -> Area2D:
 func _count_group(node: Node, group: String) -> int:
 	return get_root().get_tree().get_nodes_in_group(group).size()
 
+# Проверка, которую незачем печатать двадцать раз подряд: серия выстрелов ловит
+# один и тот же контракт, а в отчёте от этого только шум.
+var _once : Dictionary = {}
+
+func _check_once(key: String, ok: bool, what: String) -> void:
+	if _once.has(key) and ok:
+		return
+	if not ok and _once.get(key, true) == false:
+		return
+	_once[key] = ok
+	_check(ok, what)
+
+# Спрайты летящих снарядов: сам снаряд — Area2D в спавнере/сцене, картинка у
+# него ребёнком.
+const PROJ_SCRIPT := preload("res://scripts/skill_projectile.gd")
+
+func _projectile_sprites(root: Node, out: Array) -> Array:
+	if root is Area2D and root.get_script() == PROJ_SCRIPT:
+		for c in root.get_children():
+			if c is Sprite2D:
+				out.append(c)
+	for c in root.get_children():
+		_projectile_sprites(c, out)
+	return out
+
 # Спрайты, которые скин кладёт НЕ в себя, а рядом — надпись пирата летит в
 # родителе, чтобы не наследовать масштаб головы.
 func _sprites_with(root: Node, tex: Texture2D, out: Array) -> Array:
@@ -121,6 +150,43 @@ func _sprites_with(root: Node, tex: Texture2D, out: Array) -> Array:
 	return out
 
 # ── Тесты ─────────────────────────────────────────────────────────────────────
+
+# Батаранг РИКОШЕТИТ: разбил предмет — довернул к ближайшему следующему, и так
+# три раза. Четыре цели за каст.
+#
+# Проверяется цепочка целиком, а не «снаряд не исчез»: доворот легко сломать
+# так, что снаряд летит дальше СВОИМ курсом и цепляет соседей случайно — на
+# редкой раскладке предметов это выглядит как рикошет, а на обычной спелл снова
+# ломает одну штуку.
+func _test_batarang_bounce() -> void:
+	var e : Dictionary = await _boot("batman", 1)
+	var n : Node = e["n"]
+	var sp : Node = e["sp"]
+	var start : Vector2 = (n as Node2D).position
+
+	# Цели ЛЕСЕНКОЙ: по прямой их не пройти, только доворотами.
+	var chain : Array = [
+		_rock(sp, start + Vector2(120.0,  0.0)),
+		_rock(sp, start + Vector2(190.0, 90.0)),
+		_rock(sp, start + Vector2(300.0, 60.0)),
+		_rock(sp, start + Vector2(360.0, -40.0)),
+	]
+	# И одна далеко в стороне — до неё цепочка дотянуться не должна.
+	var far : Area2D = _rock(sp, start + Vector2(120.0, -300.0))
+	await process_frame
+
+	n.call("_try_fire_ability", start + Vector2(300.0, 0.0))
+	await _wait(2.0)
+
+	var broken := 0
+	for r in chain:
+		if not is_instance_valid(r):
+			broken += 1
+	_check(broken == 4, "цепочка из четырёх целей разбита: %d из 4" % broken)
+	_check(is_instance_valid(far), "дальняя цель в стороне не задета")
+	_check(int(n.BAT_BOUNCES) == 3, "доворотов ровно три: %d" % n.BAT_BOUNCES)
+	(e["game"] as Node).queue_free()
+	await process_frame
 
 # Главное обещание спелла: во что попал — то стало ДОЛЛАРОМ. Не пиццей: у
 # «Трансформуса» мага монетка бросается, и если тем же обработчиком обслужить
@@ -297,6 +363,51 @@ func _test_glasses_pose() -> void:
 	_check(spr.texture == normal, "и голова вернулась обычной")
 	(e["game"] as Node).queue_free()
 	await process_frame
+
+# Рывок СОБИРАЕТ пиццу и доллары по линии полёта — ради этого его и целят.
+# Собирается развёрткой по отрезку, а не касанием: голову тащит тюин по пятнадцать
+# пикселей за кадр физики, и пиццу между двумя опросами движок просто не видит.
+func _test_glasses_loot() -> void:
+	var e : Dictionary = await _boot("glasses", 1)
+	var n : Node = e["n"]
+	var sp : Node = e["sp"]
+	var start : Vector2 = (n as Node2D).global_position
+	var tap   : Vector2 = start + Vector2(300.0, 0.0)
+
+	# Три пиццы РОВНО НА ЛИНИИ рывка и одна далеко в стороне.
+	var on_line : Array = []
+	for k in 3:
+		on_line.append(_loot(sp, start + Vector2(80.0 * (k + 1), 0.0), true))
+	var aside : Node = _loot(sp, start + Vector2(150.0, 220.0), true)
+	var buck  : Node = _loot(sp, start + Vector2(240.0, 0.0), false)
+	await process_frame
+
+	var pizzas0 : int = int(n.get("_total_pizza_count"))
+	n.call("_try_fire_ability", tap)
+	await _wait(1.1)
+
+	var eaten := 0
+	for it in on_line:
+		if not is_instance_valid(it):
+			eaten += 1
+	_check(eaten == 3, "все три пиццы с линии рывка собраны: %d из 3" % eaten)
+	_check(int(n.get("_total_pizza_count")) - pizzas0 >= 3,
+		"и засчитаны в забег: +%d" % [int(n.get("_total_pizza_count")) - pizzas0])
+	_check(not is_instance_valid(buck), "доллар с линии тоже собран")
+	_check(is_instance_valid(aside), "пицца в стороне от линии осталась на месте")
+	(e["game"] as Node).queue_free()
+	await process_frame
+
+# Пицца или доллар в заданной точке — тем же кирпичом, что и в забеге.
+func _loot(spawner: Node, pos: Vector2, pizza: bool) -> Node:
+	var tex : Texture2D = spawner.PIZZA_TEX if pizza else spawner.DOLLAR_TEX
+	var it : Node2D = spawner.call("_make_item", tex, 0.10, 0.0, 0, true, false, false,
+		"" if pizza else "dollar")
+	if not pizza:
+		it.item_group = "dollar"
+	it.position = pos
+	spawner.add_child(it)
+	return it
 
 # Кадр «доллары в глазах» — реакция на ПОПАДАНИЕ, а не на каст. Разница
 # принципиальная: промахнулся мимо предмета — денег не появилось, и лицо
@@ -609,6 +720,47 @@ func _test_wizard_box() -> void:
 	var e : Dictionary = await _boot("wizard", 1)
 	var n : Node = e["n"]
 	var sp : Node = e["sp"]
+
+	# В полёте ОДНА звезда из трёх, и она крутится. Лист с тремя снарядами
+	# улетал целиком: на экране были все три сразу и каждая втрое мельче.
+	var seen : Dictionary = {}
+	for _i in 24:
+		n.call("_try_fire_ability", (n as Node2D).position + Vector2(300.0, 0.0))
+		await process_frame
+		var flying : Array = []
+		_projectile_sprites((n as Node).get_parent(), flying)
+		for spr in flying:
+			var t : Texture2D = (spr as Sprite2D).texture
+			_check_once("star_one",
+				n.WIZARD_STARS.has(t), "в полёте одна нарезанная звезда, а не лист")
+			seen[t] = true
+		n.set("_skill_cd", 0.0)
+		n.set("_active_charges", 1)
+		await _wait(0.05)
+	_check(seen.size() == 3, "за серию выстрелов встретились все три звезды: %d" % seen.size())
+
+	# Крутится — иначе звезда летит боком и читается как приклеенная картинка.
+	# Ждём, пока долетят и истекут снаряды серии выше: иначе в кадр попадает
+	# ЧУЖОЙ снаряд, он тут же исчезает по времени жизни, и «поворот не менялся»
+	# означает не «не крутится», а «нечего было мерить».
+	await _wait(2.6)
+	n.set("_skill_cd", 0.0)
+	n.set("_active_charges", 1)
+	n.call("_try_fire_ability", (n as Node2D).position + Vector2(300.0, 0.0))
+	await process_frame
+	var spin : Array = []
+	_projectile_sprites((n as Node).get_parent(), spin)
+	_check(not spin.is_empty(), "снаряд мага нашёлся в полёте")
+	var rot0 : float = (spin[0] as Sprite2D).rotation if not spin.is_empty() else 0.0
+	await _wait(0.2)
+	var rot1 : float = (spin[0] as Sprite2D).rotation \
+		if not spin.is_empty() and is_instance_valid(spin[0]) else rot0
+	_check(absf(rot1 - rot0) > 0.5, "звезда крутится в полёте: %.2f → %.2f рад" % [rot0, rot1])
+	sp.call("clear_items")
+	n.set("_skill_cd", 0.0)
+	n.set("_active_charges", 1)
+	await _wait(0.4)
+
 	var boxes_before : int = _count_group(e["game"], "magic_box")
 	var rock := _rock(sp, (n as Node2D).position + Vector2(120.0, 0.0))
 	var rock_pos : Vector2 = (rock as Node2D).global_position

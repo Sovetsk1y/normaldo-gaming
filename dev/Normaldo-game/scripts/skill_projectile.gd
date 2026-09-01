@@ -62,7 +62,45 @@ func _on_area_entered(area: Area2D) -> void:
 	if hit_handler.is_valid():
 		consumed = bool(hit_handler.call(area))
 	if consumed:
+		if bounces > 0:
+			bounces -= 1
+			_bounce()
+			return
 		queue_free()
+
+# ── Рикошет ──────────────────────────────────────────────────────────────────
+# Батаранг Бэтмена не гаснет на первой цели: разбил предмет — ДОВЕРНУЛ к
+# ближайшему следующему и полетел в него, и так `bounces` раз.
+#
+# Именно доворот к цели, а не отражение по нормали. Отражённый снаряд улетает
+# куда попало, и цепочка из трёх получалась бы только случайно — а игроку
+# обещаны три цели, значит снаряд обязан искать их сам.
+#
+# Цели, по которым уже попали, исключены (`_hit`): без этого снаряд у первой же
+# разбитой цели начинал крутиться вокруг её обломков, пока не истечёт время.
+var bounces : int = 0
+
+# Времени жизни после доворота — не меньше этого: снаряд, доживающий последние
+# кадры, доворачивал к цели и гас на полпути, и рикошет читался как промах.
+const BOUNCE_LIFE : float = 0.9
+
+func _bounce() -> void:
+	var best : Node2D = null
+	var best_d : float = INF
+	for g in scan_groups:
+		for n in get_tree().get_nodes_in_group(g):
+			if not (n is Node2D) or not is_instance_valid(n):
+				continue
+			if _hit.has(n.get_instance_id()):
+				continue
+			var d : float = global_position.distance_to((n as Node2D).global_position)
+			if d < best_d:
+				best_d = d
+				best = n
+	life = maxf(life, BOUNCE_LIFE)
+	if best == null:
+		return          # некуда доворачивать — летим дальше своим курсом
+	velocity = global_position.direction_to(best.global_position) * velocity.length()
 
 func _process(delta: float) -> void:
 	if frames.size() > 1 and _spr is Sprite2D:

@@ -169,6 +169,20 @@ func _initialize() -> void:
 			await process_frame
 			tn += 1.0 / 60.0
 
+	# Пицца-пати: пачка паркуется справа, над ней висит подсказка TAP!.
+	if argv.size() > 5 and String(argv[5]) == "party":
+		var party : Node = game.get_node_or_null("PizzaParty")
+		party.call("dev_send_pizza_pack")
+		# Ждём, пока пачка доедет и встанет: подсказка садится ОТ НЕЁ, и снятый
+		# раньше кадр показал бы её над пустым местом.
+		for _i in 260:
+			await process_frame
+		await RenderingServer.frame_post_draw
+		get_root().get_texture().get_image().save_png("%s/%s.png" % [out, name])
+		print("saved ", name)
+		quit(0)
+		return
+
 	if argv.size() > 5 and String(argv[5]).begins_with("boss"):
 		var boss : Node = game.get_node_or_null("FatBoss")
 		var bar : float = 1.0

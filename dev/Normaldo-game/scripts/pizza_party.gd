@@ -33,6 +33,13 @@ const FIRECRACKER := preload("res://assets/audio/firecracker.mp3")
 const HARD_TRACK  := preload("res://assets/audio/hard_track.mp3")
 const UI_FONT     := preload("res://assets/fonts/RussoOne-Regular.ttf")
 
+# Подсказка «тапай» — общий кирпич: картинка TAP! и два тапающих пальца по
+# бокам. Тот же узел стоит в ЖИРОБОССЕ, см. scripts/tap_prompt.gd
+const TAP_PROMPT  := preload("res://scripts/tap_prompt.gd")
+const TAP_W       : float = 155.0    # ширина «TAP!» на экране
+const TAP_TOP     : float = 30.0     # снизу от полосы интерфейса
+const TAP_EDGE    : float = 12.0     # и не подходит к краю экрана ближе этого
+
 # ── Tunables (designer-facing) ────────────────────────────────────────────────
 @export var enabled        : bool  = true
 # Пицца-пати — средняя мини-игра, вводится второй (с ~2-й минуты). Гейт по
@@ -98,8 +105,7 @@ var _bar_w    : float = 0.0
 var _spit_sfx : AudioStreamPlayer = null   # SFX: pack spit (none yet)
 
 var _ui       : CanvasLayer = null         # holds the blinking ТАПАЙ prompt
-var _tap_lbl  : Label = null
-var _tap_tw   : Tween = null
+var _tap_lbl  : Node2D = null      # подсказка TAP! (scripts/tap_prompt.gd)
 var _move_lbl : Label = null               # mirrored "ДВИГАЙ" prompt (left side)
 var _move_tw  : Tween = null
 var _move_ref : Vector2 = Vector2.ZERO     # Normaldo pos when the prompt appeared
@@ -568,7 +574,14 @@ func _update_pack_fx(delta: float) -> void:
 	# Keep the blinking ТАПАЙ centred above the pack (no camera → world == screen).
 	if is_instance_valid(_tap_lbl) and is_instance_valid(_pack):
 		var half_h := PACK_CLOSED.get_height() * PACK_SCALE * 0.5
-		_tap_lbl.position = _pack.position - Vector2(110.0, half_h + 76.0)
+		# Подсказка висит над пачкой, но не вылезает за экран: пачка паркуется у
+		# самого правого края, и правый палец уезжал за кадр целиком.
+		var vp := get_viewport_rect().size
+		var hw : float = float(_tap_lbl.call("half_width")) + TAP_EDGE
+		var hh : float = float(_tap_lbl.call("half_height")) + TAP_EDGE
+		_tap_lbl.position = Vector2(
+			clampf(_pack.position.x, hw, vp.x - hw),
+			maxf(_pack.position.y - half_h - hh, hh + TAP_TOP))
 
 # ── Blinking ТАПАЙ prompt over the pack ───────────────────────────────────────
 
@@ -577,24 +590,9 @@ func _build_tap_prompt() -> void:
 	_ui = CanvasLayer.new()
 	_ui.layer = 50
 	add_child(_ui)
-	_tap_lbl = Label.new()
-	_tap_lbl.add_theme_font_override("font", UI_FONT)
-	_tap_lbl.add_theme_font_size_override("font_size", 44)
-	_tap_lbl.add_theme_color_override("font_color", Color(1.0, 0.12, 0.06))
-	_tap_lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0))
-	_tap_lbl.add_theme_constant_override("outline_size", 6)
-	_tap_lbl.text                 = "ТАПАЙ"
-	_tap_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_tap_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	_tap_lbl.size                 = Vector2(220.0, 60.0)
-	_tap_lbl.pivot_offset         = Vector2(110.0, 30.0)
+	_tap_lbl = TAP_PROMPT.new()
 	_ui.add_child(_tap_lbl)
-	_tap_tw = _tap_lbl.create_tween().set_loops()
-	_tap_tw.tween_property(_tap_lbl, "scale", Vector2(1.18, 1.18), 0.30) \
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	_tap_tw.parallel().tween_property(_tap_lbl, "modulate:a", 0.5, 0.30)
-	_tap_tw.tween_property(_tap_lbl, "scale", Vector2.ONE, 0.30)
-	_tap_tw.parallel().tween_property(_tap_lbl, "modulate:a", 1.0, 0.30)
+	_tap_lbl.call("setup", TAP_W)
 
 	# "ДВИГАЙ" prompt on the LEFT (reads normally). Removed on first move.
 	var vp := get_viewport_rect().size
@@ -637,9 +635,8 @@ func _dismiss_move_prompt() -> void:
 			lbl.queue_free())
 
 func _clear_ui() -> void:
-	if _tap_tw and _tap_tw.is_valid():
-		_tap_tw.kill()
-	_tap_tw = null
+	if is_instance_valid(_tap_lbl):
+		_tap_lbl.call("stop")
 	if _move_tw and _move_tw.is_valid():
 		_move_tw.kill()
 	_move_tw = null

@@ -1089,6 +1089,7 @@ func _physics_process(delta: float) -> void:
 
 	_update_web_line()
 	_update_dash_trail()
+	_sweep_dash_loot()
 	_tick_skill_cd(delta)
 
 	# Eat animation timer
@@ -1844,6 +1845,16 @@ func _show_spell_pose(frame_t: float = SPELL_POSE_TIME) -> void:
 # Ободок — копия того же спрайта чуть крупнее, покрашенная в цвет скина и
 # положенная ПОД оригинал. Дёшево, работает на любой раскадровке (кадры
 # подменяются у обоих сразу) и не требует шейдера.
+# Магические звёзды мага: три РАЗНЫХ снаряда, по одному на каст.
+# Режет их из авторского листа dev/tools/bake_wizard_stars.py.
+const WIZARD_STARS : Array = [
+	preload("res://assets/skills/wizard/star1.png"),
+	preload("res://assets/skills/wizard/star2.png"),
+	preload("res://assets/skills/wizard/star3.png"),
+]
+const WIZARD_STAR_PX   : float = 56.0
+const WIZARD_STAR_SPIN : float = 9.0    # рад/с — звезда крутится в полёте
+
 const PROJ_BIRD_PX : float = 66.0
 const PROJ_BAT_PX  : float = 74.0
 const RIM_GROW     : float = 1.30
@@ -2075,18 +2086,29 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 			var bat := _make_anim_sprite("res://assets/skills/batman/", "batarang", 6, PROJ_BAT_PX)
 			_add_rim(bat, Color(0.45, 0.80, 1.00))
 			bat.add_child(_make_skill_trail(Color(0.40, 0.75, 1.00), -dir))
-			var pb := _spawn_skill_projectile(dir, 560.0, bat, 28.0,
-				_RYAG_HIT_GROUPS, _break_once_handler(), 0.0)
+			# Батаранг РИКОШЕТИТ: разбил предмет — довернул к ближайшему
+			# следующему, и так три раза. Один разбитый предмет за каст — это
+			# спелл уровня «камень», а батаранг у Бэтмена и в кино возвращается
+			# и цепляет цепочку.
+			var pb := _spawn_skill_projectile(dir, BAT_SPEED, bat, 28.0,
+				_RYAG_HIT_GROUPS, _break_once_handler(), 0.0, BAT_LIFE)
+			_arm_bounce(pb, BAT_BOUNCES)
 			_arm_frames(pb, bat, 18.0)
 			_play_skill_sfx(SkinSkills.DODGE)
 		"wand_shot":
 			# Маг: магический шар, 4 кадра пульсации. Во что попал — то стало
 			# МЭДЖИК БОКСОМ: спелл не ломает предмет и не выдаёт добычу, а
 			# превращает угрозу в ставку.
-			var ball := _make_anim_sprite("res://assets/skills/wizard/", "magicball", 4, 44.0)
+			#
+			# Звезда КАЖДЫЙ РАЗ одна из трёх и она КРУТИТСЯ. В архиве три разных
+			# снаряда лежат на одном листе, и лист улетал целиком — на экране
+			# летели все три сразу, каждая втрое мельче задуманного, потому что
+			# масштаб считался по ширине листа. Лист разрезан
+			# (dev/tools/bake_wizard_stars.py), здесь выбирается одна.
+			var star : Texture2D = WIZARD_STARS[randi() % WIZARD_STARS.size()]
+			var ball := _make_sprite(star, WIZARD_STAR_PX)
 			var pw := _spawn_skill_projectile(dir, 520.0, ball, 26.0,
-				_RYAG_HIT_GROUPS, _to_magic_box_handler(), 0.0)
-			_arm_frames(pw, ball, 16.0)
+				_RYAG_HIT_GROUPS, _to_magic_box_handler(), WIZARD_STAR_SPIN)
 			_play_oneshot(_SFX_GLITTER, -6.0)
 		"web_pull":
 			# Спайдер: паутина цепляет предмет и ТЯНЕТ его к себе, а не ломает —
@@ -2196,6 +2218,18 @@ func _pirate_flair() -> void:
 	tw.chain().tween_callback(spr.queue_free)
 
 # Передать кадры анимации уже созданному снаряду.
+# Сколько раз батаранг доворачивает к следующей цели. Три отскока — это ЧЕТЫРЕ
+# разбитых предмета за каст, и это осознанно много: спелл Бэтмена долго был
+# «камнем, который ломает одну штуку», и от легендарного скина такое не читается.
+const BAT_BOUNCES : int   = 3
+const BAT_SPEED   : float = 560.0
+# Время жизни с запасом на всю цепочку: снаряд гас на втором довороте.
+const BAT_LIFE    : float = 3.4
+
+func _arm_bounce(proj: Node2D, n: int) -> void:
+	if proj != null:
+		proj.set("bounces", n)
+
 func _arm_frames(proj: Node2D, spr: Sprite2D, fps: float) -> void:
 	if proj == null or spr == null or not spr.has_meta("frames"):
 		return
@@ -2442,6 +2476,7 @@ func _cast_electric_dash(target: Vector2) -> void:
 	_dash_active = true
 	_invincible  = true
 	_dash_from   = global_position
+	_dash_prev   = global_position
 	_dash_trail  = _make_dash_trail()
 	_show_floating_text("ЗЗЗАП!", DASH_COL)
 	_play_skill_sfx(SkinSkills.DODGE)
@@ -2547,6 +2582,40 @@ func _update_dash_trail() -> void:
 	if not _dash_active:
 		return
 	_dash_trail.points = PackedVector2Array([_dash_from, global_position])
+
+# Сбор добычи ПО ЛИНИИ рывка, а не по касанию.
+#
+# Голову за рывок тащит тюин через полэкрана за четверть секунды — это по
+# полтора десятка пикселей за кадр физики. Предмет размером с пиццу движок между
+# кадрами просто не увидит: `area_entered` срабатывает по ПЕРЕСЕЧЕНИЮ в момент
+# опроса, а между двумя опросами голова успевает перепрыгнуть предмет целиком.
+# Обещание «рывок собирает всё по пути» держится только развёрткой: каждый кадр
+# берём ОТРЕЗОК, пройденный головой, и собираем всё, что к нему ближе радиуса.
+#
+# Радиус чуть больше хитбокса: линия рывка — это заявка «лечу сюда», и промах в
+# пять пикселей по пицце, которую игрок явно вёл, читается как баг.
+const DASH_PICK_R : float = 46.0
+
+var _dash_prev : Vector2 = Vector2.ZERO
+
+func _sweep_dash_loot() -> void:
+	if not _dash_active:
+		return
+	var a := _dash_prev
+	var b := global_position
+	_dash_prev = b
+	for g in ["pizza", "dollar"]:
+		for node in get_tree().get_nodes_in_group(g):
+			if not (node is Node2D) or not is_instance_valid(node):
+				continue
+			var p : Vector2 = (node as Node2D).global_position
+			if Geometry2D.get_closest_point_to_segment(p, a, b).distance_to(p) > DASH_PICK_R:
+				continue
+			if g == "pizza":
+				_eat_pizza()
+			else:
+				_collect_dollar()
+			node.queue_free()
 
 func _fade_dash_trail() -> void:
 	if not is_instance_valid(_dash_trail):
@@ -3432,11 +3501,22 @@ func _classify_hit_group(area: Area2D) -> String:
 func _on_area_entered(area: Area2D) -> void:
 	if _dead: return
 
-	# Электрический рывок Очков проходит НАСКВОЗЬ — и через плохое, и через
-	# хорошее. Пропускать только удары значило бы сделать из рывка щит, а
-	# подбирать на лету — способ фармить; ни то, ни другое не «пролетел
-	# насквозь».
+	# Электрический рывок Очков проходит НАСКВОЗЬ через всё, что бьёт: ни удара,
+	# ни замедления, ни эффектов. А вот пиццу и доллары по пути он СОБИРАЕТ —
+	# это и есть смысл целиться рывком, а не просто уходить от удара: игрок
+	# выбирает линию, на которой больше добычи.
+	#
+	# Собирается только добыча-мелочь. Пачка, мешок, магнит, мутаген, автомат и
+	# прочее, что ЗАПУСКАЕТ событие, сквозь рывок не берётся: подобранный на
+	# лету мутаген влетал бы в мини-игру прямо посреди рывка, а рывок в это время
+	# ещё тащит голову тюином.
 	if _dash_active:
+		if area.is_in_group("pizza"):
+			_eat_pizza()
+			area.queue_free()
+		elif area.is_in_group("dollar"):
+			_collect_dollar()
+			area.queue_free()
 		return
 
 	if area.is_in_group("mutagen"):
