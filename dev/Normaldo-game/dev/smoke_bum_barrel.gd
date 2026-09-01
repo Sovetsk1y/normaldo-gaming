@@ -12,7 +12,7 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 27
+const EXPECTED_CHECKS : int = 28
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -94,17 +94,20 @@ func _initialize() -> void:
 		_finish()
 		return
 
-	# РАЗМЕР. Бомж обязан быть ровно таким же, как рядовой бомж из потока: от
-	# обычного предмета он отличается не размером, а тем, что умеет отыграть сцену
-	# и кинуть пса. Сравнивается с НАСТОЯЩИМ бомжом, а не с числом в комментарии —
-	# поменяется размер потока, поменяется и здесь.
+	# РАЗМЕР. Бомж с бочкой ЗАМЕТНО КРУПНЕЕ рядового бомжа из потока: он
+	# единственный, кто тормозит и отыгрывает сцену, и по нему надо с первого
+	# взгляда понять, что эту линию сейчас займут всерьёз. В одном росте со своими
+	# же собратьями из волны он терялся, и подготовка — торможение, тычок,
+	# падающая бочка — начиналась раньше, чем игрок замечал, что перед ним не
+	# рядовой предмет. Сравнивается с НАСТОЯЩИМ бомжом, а не с числом в
+	# комментарии: поменяется размер потока — поменяется и порог здесь.
 	var ref : Node2D = load("res://scenes/homeless.tscn").instantiate()
 	sp.add_child(ref)
 	await process_frame
 	var ref_px : float = _drawn_h(ref.get_node("Sprite2D"))
 	var bum_px : float = _drawn_h(bum)
-	_check(absf(bum_px - ref_px) < 6.0,
-		"бомж такой же, как рядовой из потока: %.0f против %.0f" % [bum_px, ref_px])
+	_check(bum_px > ref_px * 1.2,
+		"бомж крупнее рядового из потока: %.0f против %.0f" % [bum_px, ref_px])
 	ref.queue_free()
 
 	# Бочка — размером с обычную бочку из потока, то есть НЕ НИЖЕ бомжа. Отзыв был
@@ -137,6 +140,29 @@ func _initialize() -> void:
 		if int(b.get("damage")) < 1:
 			dmg_ok = false
 	_check(dmg_ok, "и оба бьют на урон")
+
+	# ПОТОЛОК РОСТУ — ЛЕЙН. Сет-пис занимает свою линию целиком, но по СОСЕДНЕЙ
+	# голова обязана проходить: иначе «уйти с линии» перестаёт быть ответом, и
+	# бомж превращается в стену на два лейна. Считается по живым числам —
+	# половина самого высокого хитбокса плюс радиус головы против расстояния
+	# между линиями, — а не по константам из скрипта: константы можно поднять и
+	# не заметить, что проход закрылся.
+	var tallest : float = 0.0
+	for b in boxes:
+		for c in (b as Node).get_children():
+			var sh = (c as CollisionShape2D).shape if c is CollisionShape2D else null
+			if sh is RectangleShape2D:
+				tallest = maxf(tallest, (sh as RectangleShape2D).size.y)
+			elif sh is CircleShape2D:
+				tallest = maxf(tallest, (sh as CircleShape2D).radius * 2.0)
+	var head_r : float = 32.0
+	var ncs := n.get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if ncs != null and ncs.shape is CircleShape2D:
+		head_r = (ncs.shape as CircleShape2D).radius
+	var lane_h : float = vp.y / 5.0
+	_check(tallest * 0.5 + head_r < lane_h,
+		"по соседней линии голова проходит: %.0f + %.0f против %.0f"
+			% [tallest * 0.5, head_r, lane_h])
 
 	# Сначала — обычный предмет потока: летит с той же скоростью, ничего не
 	# отыгрывает. Именно на фоне этого читается последующее торможение.

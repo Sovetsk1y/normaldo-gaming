@@ -21,6 +21,8 @@ extends Area2D
 #
 # См. /Концепция/Эффекты и бонусы.md
 
+const ItemAura := preload("res://scripts/item_aura.gd")
+
 const TEX : Dictionary = {
 	"hourglass":    preload("res://assets/items/hourglass.png"),
 	"casey_mask":   preload("res://assets/items/casey_mask.png"),
@@ -84,25 +86,7 @@ func _ready() -> void:
 	_spin = kind in SPINS
 
 func _build_glow() -> void:
-	var col : Color = AURA.get(kind, Color(1, 1, 1))
-	var grad := Gradient.new()
-	grad.set_color(0, Color(col.r, col.g, col.b, 0.75))
-	grad.set_color(1, Color(col.r, col.g, col.b, 0.0))
-	var gt := GradientTexture2D.new()
-	gt.gradient  = grad
-	gt.fill      = GradientTexture2D.FILL_RADIAL
-	gt.fill_from = Vector2(0.5, 0.5)
-	gt.fill_to   = Vector2(0.5, 0.0)
-	gt.width     = 96
-	gt.height    = 96
-
-	var mat := CanvasItemMaterial.new()
-	mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
-
-	_glow = Sprite2D.new()
-	_glow.texture  = gt
-	_glow.material = mat
-	_glow.z_index  = 0
+	_glow = ItemAura.make(AURA.get(kind, Color(1, 1, 1)))
 	add_child(_glow)
 
 func _process(delta: float) -> void:
@@ -115,6 +99,4 @@ func _process(delta: float) -> void:
 	var p := 0.5 + 0.5 * sin(_pulse_t)
 	if _spin:
 		_sprite.rotation += delta * 2.2
-	if is_instance_valid(_glow):
-		_glow.scale    = Vector2.ONE * lerpf(0.85, 1.25, p)
-		_glow.modulate = Color(1.0, 1.0, 1.0, lerpf(0.55, 1.0, p))
+	ItemAura.pulse(_glow, p)

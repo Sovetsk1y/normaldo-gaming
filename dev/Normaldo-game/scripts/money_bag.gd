@@ -7,23 +7,40 @@ const ITEM_SCENE := preload("res://scenes/item.tscn")
 
 const DOLLAR_COUNT := 8
 const DOLLAR_SCALE := 0.36
-const BAG_SCALE    := 0.36
+
+# Мешок — САМЫЙ КРУПНЫЙ ресурс в потоке, и это его единственная реклама. Он
+# стоит на линии один и обещает восемь долларов сразу; чтобы за ним имело смысл
+# лететь через полэкрана, его надо УВИДЕТЬ раньше, чем он поравняется с
+# головой.
+#
+# Раньше здесь стоял голый scale 0.36 по кадру 90×83 — то есть 32 пикселя
+# рисунка, меньше банана (52) и вдвое меньше предмета-эффекта (58). Джекпот
+# выглядел мелочью. Теперь размер считает ItemSizing по РИСУНКУ, как у всех
+# остальных предметов, и берётся он в полтора базовых.
+const BAG_PX : float = 84.0
 
 @export var speed: float = 250.0
 
 var _burst_done : bool  = false
 var _pulse_t    : float = 0.0
+# Базовый масштаб, вокруг которого дышит пульс. Держим числом, а не пересчётом
+# каждый кадр: пульс умножает именно его.
+var _bag_scale  : float = 1.0
 
 @onready var _sprite: Sprite2D = $Sprite2D
 
 func _ready() -> void:
 	_sprite.texture  = BAG_TEX
-	_sprite.scale    = Vector2.ONE * BAG_SCALE
+	_bag_scale       = ItemSizing.content_scale(BAG_TEX, BAG_PX)
+	_sprite.scale    = Vector2.ONE * _bag_scale
 	collision_layer  = 2
 	collision_mask   = 0
 	add_to_group("money_bag")
 	var circle       := CircleShape2D.new()
-	circle.radius     = 30.0
+	# Зона подбора едет за рисунком: у мешка это ресурс, и промахнуться мимо
+	# нарисованного из-за того, что круг остался от прежнего размера, — худший
+	# вид несправедливости.
+	circle.radius     = BAG_PX * 0.46
 	$CollisionShape2D.shape = circle
 
 func _process(delta: float) -> void:
@@ -34,7 +51,7 @@ func _process(delta: float) -> void:
 		queue_free()
 		return
 	_pulse_t      += delta * 3.5
-	_sprite.scale  = Vector2.ONE * BAG_SCALE * (1.0 + sin(_pulse_t) * 0.12)
+	_sprite.scale  = Vector2.ONE * _bag_scale * (1.0 + sin(_pulse_t) * 0.12)
 
 func burst(mult: int = 1) -> void:
 	if _burst_done:

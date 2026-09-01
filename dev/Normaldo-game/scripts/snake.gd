@@ -2,6 +2,16 @@ extends Area2D
 
 const RATTLE_SOUND := preload("res://assets/audio/snake_rattle.mp3")
 const SNAKE_TEX    := preload("res://assets/items/snake2.png")
+const ItemAura     := preload("res://scripts/item_aura.gd")
+
+# Кобра — единственная угроза, которая не бьёт насмерть, а ЗАМЕДЛЯЕТ, и на общем
+# фоне летящего мусора она из-за этого терялась: тёмная, оливковая, размером с
+# банан. Свечение — её метка «этот кусает по-своему», и оно того же цвета, что
+# и сама змея: тело у неё оливково-зелёное (замер по рисунку — 83,83,52 и
+# 136,105,36), поэтому и ореол ядовито-зелёный, а не абстрактно-салатовый. Чужой
+# цвет читался бы как подобранный эффект-предмет, а не как своя аура твари.
+const AURA_COLOR : Color = Color(0.55, 0.82, 0.25)
+const AURA_PX    : float = 104.0
 
 @export var speed        : float = 250.0
 @export var damage       : int   = 1
@@ -19,7 +29,9 @@ static var _shared_frames : SpriteFrames
 static var _rattle_player : AudioStreamPlayer = null
 static var _alive_count   : int = 0
 
-var _anim : AnimatedSprite2D
+var _anim    : AnimatedSprite2D
+var _glow    : Sprite2D = null
+var _pulse_t : float    = 0.0
 
 func _enter_tree() -> void:
 	_alive_count += 1
@@ -37,6 +49,10 @@ func _ready() -> void:
 	$CollisionShape2D.shape = circle
 	add_to_group("obstacle")
 	add_to_group("snake")
+
+	# Аура — ПЕРВЫМ ребёнком, чтобы светилась ПОД змеёй, а не поверх неё.
+	_glow = ItemAura.make(AURA_COLOR, AURA_PX)
+	add_child(_glow)
 
 	# Статичный спрайт (snake2) — заменил анимацию кобры.
 	var spr := Sprite2D.new()
@@ -63,3 +79,6 @@ func _process(delta: float) -> void:
 	position.x -= speed * delta
 	if position.x < -200.0:
 		queue_free()
+		return
+	_pulse_t += delta * 4.0
+	ItemAura.pulse(_glow, 0.5 + 0.5 * sin(_pulse_t), AURA_PX)

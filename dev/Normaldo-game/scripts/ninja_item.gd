@@ -356,7 +356,7 @@ func _spawn_cloud(at: Vector2, target: Node2D) -> void:
 	if not is_instance_valid(node):
 		return
 	node.add_to_group("smoke")
-	node.call("setup", spr, target, SMOKE_LIFE)
+	node.call("setup", spr, target, SMOKE_LIFE, speed)
 
 func _play_sfx(stream: AudioStream) -> void:
 	var host := get_parent()

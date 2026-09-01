@@ -15,6 +15,16 @@ const JUMP_SFX  := preload("res://assets/audio/thief_jump.mp3")    # рывок 
 @export var speed : float = 250.0
 var damage : int = 1
 
+# Вор — ЧЕЛОВЕК, и рядом с бомжом (61 px рисунка) он должен читаться человеком,
+# а не банкой колы. Прежний размер брался по КАДРУ (74 от 441), а кадры у него
+# с большими полями: рисунка выходило 52×62 — ровно банан.
+#
+# Меряется по РИСУНКУ и по ДЛИННОЙ стороне, но масштаб считается ОДИН — по
+# первому кадру — и ставится обоим. Нормировать каждый кадр отдельно нельзя:
+# во втором он в рывке, руки-ноги врозь (435 px против 312), и вор ужимался бы
+# ровно в момент прыжка, то есть тогда, когда на него и смотрят.
+const THIEF_PX : float = 82.0
+
 const FIRST_DELAY : float = 0.3     # прежде чем начать первое наведение
 const TURN_TIME   : float = 0.5     # время наведения на цель
 const JUMP_MULT   : float = 2.2     # скорость рывка × speed (не слишком быстро)
@@ -43,12 +53,13 @@ func _ready() -> void:
 	_spr = Sprite2D.new()
 	_spr.texture        = TEX1
 	_spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	var tsz := TEX1.get_size()
-	_spr.scale = Vector2.ONE * (74.0 / maxf(tsz.x, tsz.y))
+	_spr.scale = Vector2.ONE * ItemSizing.content_scale(TEX1, THIEF_PX)
 	add_child(_spr)
 	var cs := CollisionShape2D.new()
 	var c  := CircleShape2D.new()
-	c.radius = 30.0
+	# Зона удара — по рисунку, а не по прежнему числу: вор бьёт на 1, и биться
+	# он обязан там, где нарисован.
+	c.radius = THIEF_PX * 0.40
 	cs.shape = c
 	add_child(cs)
 	_normaldo = _find_normaldo()

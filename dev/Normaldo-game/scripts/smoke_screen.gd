@@ -26,23 +26,35 @@ const FADE_OUT : float = 0.45
 var _target : Node2D = null
 var _sprite : Sprite2D = null
 var _dying  : bool = false
+# Скорость потока предметов. Дым — часть этого потока, а не наклейка на стекле:
+# он всегда уезжает влево ровно как всё остальное, даже когда завешивать уже
+# нечего (шашка ушла в пустой лейн или предмет под ней сломали). Первая версия
+# без этой скорости просто висела в точке падения — и читалась как грязь на
+# экране, а не как облако в кадре.
+var speed : float = 0.0
 
-# `target` — предмет, который завешиваем. Без него (шашка улетела в пустоту)
-# облако просто повисит на месте и растает.
-func setup(sprite: Sprite2D, target: Node2D, life: float) -> void:
+# `target` — предмет, который завешиваем. Пока он жив, облако сидит на нём;
+# дальше едет своим ходом и тает.
+func setup(sprite: Sprite2D, target: Node2D, life: float, item_speed: float = 0.0) -> void:
 	_sprite = sprite
 	_target = target
+	speed   = item_speed
 	add_child(sprite)
 	var tw := sprite.create_tween()
 	tw.tween_property(sprite, "modulate:a", 0.92, FADE_IN)
 	tw.tween_interval(life)
 	tw.tween_callback(_dissolve)
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	# Едем влево ВСЕГДА, в том числе пока растворяемся: облако, замершее на
+	# полсекунды фейда, выдаёт себя ничуть не меньше, чем висящее целиком.
+	position.x -= speed * delta
 	if _dying:
 		return
 	if _target != null and not is_instance_valid(_target):
-		# Предмет сломали или он ушёл за край — закрывать больше нечего.
+		# Предмет сломали или он ушёл за край — закрывать больше нечего, но
+		# уезжать облако продолжает.
+		_target = null
 		_dissolve()
 		return
 	if is_instance_valid(_target):

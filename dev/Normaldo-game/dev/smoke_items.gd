@@ -129,6 +129,29 @@ func _test_ninja_kinds() -> void:
 				break
 	_check(covering >= 1, "и завешивает предметы: накрыто %d из %d" % [covering, smoke.size()])
 
+	# ДЫМ ЕДЕТ ВЛЕВО вместе с потоком. Проверяется самый честный случай — облако
+	# БЕЗ цели (шашка ушла в пустой лейн): облако с целью ездит за ней и потому
+	# ничего не доказывает. Раньше беспризорное облако висело в точке падения всю
+	# свою жизнь и читалось как грязь на стекле, а не как дым в кадре.
+	var lone := Node2D.new()
+	lone.set_script(load("res://scripts/smoke_screen.gd"))
+	lone.position = Vector2(vp.x * 0.60, vp.y * 0.5)
+	sp.add_child(lone)
+	var puff := Sprite2D.new()
+	puff.texture = load("res://assets/bosses/ninja_foot/smoke.png")
+	lone.call("setup", puff, null, 6.0, 250.0)
+	var x0 : float = lone.position.x
+	var ms : int   = Time.get_ticks_msec()
+	await _tick(0.5)
+	# Меряем ПРОЙДЕННОЕ ВРЕМЯ, а не число кадров: дым едет по delta, а тест
+	# считает кадрами, и на просевшей частоте фиксированный порог врал бы.
+	var dt : float = float(Time.get_ticks_msec() - ms) / 1000.0
+	var moved : float = x0 - lone.position.x
+	_check(moved > 250.0 * dt * 0.6,
+		"дым без цели уезжает влево с потоком: %.0f px за %.2f c" % [moved, dt])
+	lone.queue_free()
+	await process_frame
+
 	# И облако не висит вечно: иначе лейн превращается в стену до конца забега.
 	# Ждём СОБЫТИЯ, а не отсчитываем секунды: облако тает по таймеру реального
 	# времени, а счётчик теста считает кадры, и стоит игре просесть по частоте —

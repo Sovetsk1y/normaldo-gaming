@@ -30,6 +30,8 @@ func _initialize() -> void:
 	await _test_sizes(reg, save)
 	print("── Лицо Кусса ──")
 	_test_kuss(reg)
+	print("── Голова сидит на хитбоксе ──")
+	await _test_head_on_hitbox(reg, save)
 	print("── ЖИРОБОСС ──")
 	await _test_boss(reg, save)
 	print("── Карточки наград ──")
@@ -294,6 +296,72 @@ func _test_kuss(reg: Node) -> void:
 	# И остаётся в разумном разбросе вокруг классической головы (91 px).
 	_check(faces[0] > 60.0 and faces[faces.size() - 1] < 120.0,
 		"лицо в пределах классической головы: %s" % [_px(faces)])
+
+# Нарисованная голова обязана сидеть НА ХИТБОКСЕ — у каждого скина и каждого
+# жира. Ради этого и заведены смещения в SkinMetrics.
+#
+# Ломалось это молча и надолго: посадка считалась обеими координатами, но
+# ВЕРТИКАЛЬ тут же обнулялась — «покачивание всё равно владеет y». В итоге на
+# хитбокс садился центр КАДРА, а не головы, и у скинов, где голова заметно выше
+# центра рисунка, круг оказывался под подбородком. У Кусса на третьем жире это
+# больше половины радиуса: удары шли по пузу, а игрок видел, что пролетел мимо.
+#
+# Проверяется РЕЗУЛЬТАТ на живом узле, а не формула: только так ловится
+# обнуление, сделанное где-то дальше по цепочке.
+func _test_head_on_hitbox(reg: Node, save: Node) -> void:
+	var met  : Node = get_root().get_node_or_null("SkinMetrics")
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var n   : Node = game.get_node_or_null("Normaldo")
+	var spr : Sprite2D = n.get_node("Sprite2D")
+	var r   : float = 32.0
+	var cs  := n.get_node_or_null("CollisionShape2D") as CollisionShape2D
+	if cs != null and cs.shape is CircleShape2D:
+		r = (cs.shape as CircleShape2D).radius
+
+	var bad : Array = []
+	for s in reg.SKINS:
+		var id := String(s["id"])
+		save.active_skin = id
+		save.skin_level  = 10
+		n.call("reload_skin")
+		await process_frame
+		for fat in 4:
+			n.set("fat_state", fat)
+			n.call("_apply_skin_to_sprite")
+			# ЖДЁМ СОБЫТИЯ — что вертикаль ПРИТЁРЛАСЬ к посадке, — а не отсчитываем
+			# кадры. Лерп головы живёт в `_physics_process`, то есть идёт по
+			# РЕАЛЬНОМУ времени: в headless кадры прокручиваются за микросекунды, и
+			# фиксированные «20 кадров» — это иногда двадцать шагов физики, а иногда
+			# ни одного. Тест от этого мигал: то зелёный, то «съехал» случайный
+			# скин на полсотни пикселей.
+			#
+			# Порог — 3.5 px: в меню голова покачивается с амплитудой 3 вокруг
+			# посадки и в точку не приходит никогда.
+			var home : Vector2 = n.get("_head_home")
+			var wait := 0
+			while wait < 600 and absf(spr.position.y - home.y) > 3.5:
+				await process_frame
+				wait += 1
+			var tex : Texture2D = spr.texture
+			if tex == null:
+				continue
+			var sz  : Vector2 = tex.get_size()
+			var off : Vector2 = met.call("offset_for", id, fat)
+			var bs  : Vector2 = n.get("_base_scale")
+			# Центр НАРИСОВАННОЙ головы в координатах узла.
+			var c : Vector2 = spr.position \
+				+ Vector2(off.x * sz.x * bs.x, off.y * sz.y * bs.y)
+			# У классики в кадре одна голова, и её посадка правится вручную
+			# (см. normaldo._apply_head_offset) — горизонталь у неё своя.
+			var d : float = absf(c.y) if id == "classic" else c.length()
+			if d > r * 0.5:
+				bad.append("%s/%d %.0f px" % [id, fat + 1, d])
+	_check(bad.is_empty(),
+		"голова на хитбоксе (радиус %.0f) у всех скинов и жиров, съехали: %s" % [r, bad])
+	game.queue_free()
+	await process_frame
 
 func _px(a: Array) -> String:
 	var out : Array = []
