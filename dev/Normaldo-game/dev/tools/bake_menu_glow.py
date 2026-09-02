@@ -14,16 +14,28 @@ pixels. PIL GaussianBlur(radius=N) treats N as sigma.
 from PIL import Image, ImageFilter
 from pathlib import Path
 
-DIR = Path('/Users/proc/Developer/normaldo-gaming/dev/Normaldo-game/assets/ui/menu')
+# Путь считается ОТ САМОГО СКРИПТА. Раньше здесь стоял абсолютный путь с машины
+# автора — на любой другой скрипт просто не находил файлов и молча пёк ноль
+# картинок.
+ROOT = Path(__file__).resolve().parents[2]
+DIR = ROOT / 'assets' / 'ui' / 'menu'
 # Figma blur 25 in viewport-pixels (960×430) → ~11 in canvas-pixels, but the
 # user wanted the halo trimmed to ~1/3 of that for a tighter, less hazy look.
+#
+# СИГМА ЗАДАНА В ЕДИНИЦАХ ЗАМЕРА (кадр 64), а не в пикселях файла: чипы теперь
+# печатаются в четырёх пикселях на единицу, и постоянная сигма дала бы вчетверо
+# более узкий ореол — на экране он превратился бы в тонкую кайму. Радиус
+# умножается на плотность конкретного файла, и ореол остаётся тем же.
 SIGMA = 4.0
+UNIT = 64
 TINT = (0x28, 0x44, 0x3B, 255)   # #28443B
 # Multiplier on blurred alpha. Lower = weaker halo. Halved from the original
 # 1.6 by user request — current 0.8 gives a noticeably softer glow.
 ALPHA_GAIN = 0.8
 
-PATTERNS = ('btn_*.png', 'chapter*_mode_btn.png', 'endless_mode_btn.png')
+# Только чипы режима. Старые `btn_*.png` — иконки прошлого меню, их заменили
+# самостоятельные спрайты в `icons/`, и печь для них ореолы больше некуда.
+PATTERNS = ('chapter*_mode_btn.png', 'endless_mode_btn.png')
 files = []
 for p in PATTERNS:
     files.extend(DIR.glob(p))
@@ -32,7 +44,8 @@ for png in sorted(set(files)):
         continue
     img = Image.open(png).convert('RGBA')
     alpha = img.split()[3]
-    blurred = alpha.filter(ImageFilter.GaussianBlur(radius=SIGMA))
+    density = max(1, img.width // UNIT) if img.width >= UNIT else 1
+    blurred = alpha.filter(ImageFilter.GaussianBlur(radius=SIGMA * density))
     # Lift alpha so the halo isn't washed out.
     blurred = blurred.point(lambda p: min(255, int(p * ALPHA_GAIN)))
     glow = Image.new('RGBA', img.size, TINT)

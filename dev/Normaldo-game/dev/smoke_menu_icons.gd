@@ -27,13 +27,16 @@ extends SceneTree
 # Плотность здесь и проверяется: пересобрать набор обратно в 55 можно одним
 # неверным K в скрипте, а на глаз в 55-пиксельных файлах разницы не видно.
 #
-# СЛОТЫ — исключение и стоят единицей: это готовая картинка автора, оригинала
-# крупнее у нас нет. Как только он пришлёт — строку править вместе с набором.
+# СЛОТЫ пришли готовой картинкой в 55×55, и рисунка крупнее у нас нет. Но
+# ПОДЛОЖКА у них не нарисованная, а та же самая, что мы печём формулой, — её
+# плотность даётся даром. Рисунок снимается с авторской подложки и садится на
+# свежую (`bake_menu_icon.py --ready`), поэтому и здесь стоит четвёрка: кольцо
+# и ореол обязаны быть такими же ровными, как у остальных пяти.
 const ICONS : Dictionary = {
 	"res://assets/ui/menu/icons/settings.png":    4,   # НАСТРОЙКИ
 	"res://assets/ui/menu/icons/book.png":        4,   # КНИГА УЧИТЕЛЯ
 	"res://assets/ui/menu/icons/skins.png":       4,   # СКИНЫ
-	"res://assets/ui/menu/icons/slots.png":       1,   # СЛОТЫ — авторская, эталон
+	"res://assets/ui/menu/icons/slots.png":       4,   # СЛОТЫ — авторский рисунок
 	"res://assets/ui/menu/icons/quests.png":      4,   # ЗАДАНИЯ
 	"res://assets/ui/menu/icons/leaderboard.png": 4,   # ЛИДЕРЫ
 }
@@ -61,7 +64,7 @@ const RING_MIN : float = 0.25
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 24
+const EXPECTED_CHECKS : int = 28
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -70,6 +73,23 @@ func _check(ok: bool, what: String) -> void:
 	else:
 		_fails += 1
 		print("  FAIL ", what)
+
+# Чип выбора режима — не иконка, у него своя подложка (зелёная плашка), и в
+# наборе он не участвует. Но болезнь у него была та же, и лечение то же:
+# `bake_mode_btn.py` печатает его в 4× от авторского кадра 64×64.
+#
+# Проверяется ещё и то, что чип и его ОРЕОЛ одной плотности. Окно ореола в
+# текстуре hud.gd считает по плотности САМОГО ЧИПА, и разойдись они — halo
+# вырезался бы не оттуда и уехал бы вбок; на глаз это выглядит как «свечение
+# сползло», и искать причину пришлось бы в коде, где её нет.
+const MODE_CHIPS : Array = [
+	["res://assets/ui/menu/chapter1_mode_btn.png",
+	 "res://assets/ui/menu/chapter1_mode_btn_glow.png"],
+	["res://assets/ui/menu/endless_mode_btn.png",
+	 "res://assets/ui/menu/endless_mode_btn_glow.png"],
+]
+const MODE_UNIT : int = 64
+const MODE_K    : int = 4
 
 func _initialize() -> void:
 	print("── Шайба иконок меню ──")
@@ -94,7 +114,26 @@ func _initialize() -> void:
 			"%s: плотность %d× при обязательных %d×" % [nm, k, int(ICONS[path])])
 		_check_glow(img, nm, k)
 		_check_ring(img, nm, k)
+	print("── Чип выбора режима ──")
+	_test_mode_chips()
 	_finish()
+
+func _test_mode_chips() -> void:
+	for pair in MODE_CHIPS:
+		var chip : Texture2D = load(pair[0])
+		var halo : Texture2D = load(pair[1])
+		var nm : String = String(pair[0]).get_file()
+		if chip == null or halo == null:
+			_check(false, "%s: нет файла чипа или ореола" % nm)
+			continue
+		var w : int = chip.get_width()
+		var k : int = w / MODE_UNIT
+		_check(w == chip.get_height() and k >= MODE_K and w == MODE_UNIT * k,
+			"%s: кадр %d×%d — это %d× от авторского %d×%d"
+				% [nm, w, chip.get_height(), k, MODE_UNIT, MODE_UNIT])
+		_check(halo.get_width() == w and halo.get_height() == chip.get_height(),
+			"%s: ореол той же плотности, что и чип: %d против %d"
+				% [nm, halo.get_width(), w])
 
 func _check_glow(img: Image, nm: String, k: int) -> void:
 	var rings : Dictionary = {}

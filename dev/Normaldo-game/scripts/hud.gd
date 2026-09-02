@@ -2071,6 +2071,13 @@ func _build_menu_mode_btn(vp: Vector2) -> void:
 	const GLOW_PAD : float = MENU_GLOW_PAD
 	const SRC_X : float = 11.0    # x within source PNG
 	const SRC_Y : float = 8.0     # min y across both sprites
+	# ПЛОТНОСТЬ файла: сколько его пикселей приходится на единицу замера выше.
+	# Замер снят с авторского кадра 64×64, а печатается чип в 256 (см.
+	# `dev/tools/bake_mode_btn.py`) — все ОКНА В ИСХОДНИКЕ поэтому умножаются на
+	# K, а всё экранное считается по-прежнему в координатах полотна и не
+	# меняется. Число берётся из самой текстуры: перепечатают чип в другой
+	# плотности — окна поедут за ней сами.
+	var src_k : float = maxf(1.0, MODE_BTN_CHAPTER1.get_width() / 64.0)
 
 	var icon_w_vp : float = ICON_W * scale_x
 	var icon_h_vp : float = ICON_H * scale_y
@@ -2094,7 +2101,8 @@ func _build_menu_mode_btn(vp: Vector2) -> void:
 	var glow_off_y : float = glow_y0 - SRC_Y
 
 	_mode_btn_glow_atlas = AtlasTexture.new()
-	_mode_btn_glow_atlas.region = Rect2(glow_x0, glow_y0, glow_w_src, glow_h_src)
+	_mode_btn_glow_atlas.region = Rect2(glow_x0 * src_k, glow_y0 * src_k,
+		glow_w_src * src_k, glow_h_src * src_k)
 	_mode_btn_glow_rect = TextureRect.new()
 	_mode_btn_glow_rect.texture             = _mode_btn_glow_atlas
 	_mode_btn_glow_rect.stretch_mode        = TextureRect.STRETCH_SCALE
@@ -2107,7 +2115,8 @@ func _build_menu_mode_btn(vp: Vector2) -> void:
 	visual_root.add_child(_mode_btn_glow_rect)
 
 	_mode_btn_icon_atlas = AtlasTexture.new()
-	_mode_btn_icon_atlas.region = Rect2(SRC_X, SRC_Y, ICON_W, ICON_H)
+	_mode_btn_icon_atlas.region = Rect2(SRC_X * src_k, SRC_Y * src_k,
+		ICON_W * src_k, ICON_H * src_k)
 	_mode_btn_icon_rect = TextureRect.new()
 	_mode_btn_icon_rect.texture             = _mode_btn_icon_atlas
 	_mode_btn_icon_rect.stretch_mode        = TextureRect.STRETCH_SCALE

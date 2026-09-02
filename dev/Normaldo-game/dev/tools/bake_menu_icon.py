@@ -37,9 +37,20 @@ K=4, файлом 220×220, и вот почему.
 Пиксель файла больше не равен пикселю экрана ни при каком K, и nearest на
 дробном масштабе — это и есть те самые квадраты.
 
+ГОТОВЫЕ ИКОНКИ (слоты). У них рисунка отдельным файлом нет — есть только
+готовая картинка автора в 55×55, и разрешения в ней больше не станет. Но подложка
+у неё НЕ нарисованная, а та же самая, что мы печём, — и вот её пересобрать в K=4
+можно: круг, кольцо и ореол считаются формулой, им плотность даётся даром.
+
+Поэтому для таких иконок есть режим `--ready`: рисунок СНИМАЕТСЯ с авторской
+подложки (`strip_plate`), увеличивается и садится на свежую подложку в K=4.
+Кольцо и ореол — самая заметная часть квадратности, это большие гладкие дуги, —
+становятся ровными; сам рисунок резче не станет, но и хуже не будет.
+
 Использование:
     python3 dev/tools/bake_menu_icon.py <исходник.png> <результат.png>
     python3 dev/tools/bake_menu_icon.py --all      # пересобрать весь набор
+    python3 dev/tools/bake_menu_icon.py --ready <готовая.png> <результат.png>
 """
 import sys
 from pathlib import Path
@@ -89,6 +100,11 @@ SET = {
 # `d` — расстояние в пикселях ФАЙЛА, а узлы замера — в единицах авторской
 # иконки. Кривая одна и та же, растянутая по радиусу в K раз: при K=4 то же
 # свечение просто описано вчетверо подробнее.
+# Готовые иконки автора: рисунка отдельным файлом нет, пересаживаем с подложки
+# на подложку прямо в самом файле (см. `replate`).
+READY = ['slots.png']
+
+
 def _glow_alpha(d: float) -> int:
     for i in range(len(GLOW_FALLOFF) - 1):
         r0, a0 = GLOW_FALLOFF[i]
@@ -165,10 +181,83 @@ def bake(src: Path, out: Path, outline: int = 0) -> None:
     print(f'{out.name}: {src.name} → {art.size[0]}×{art.size[1]} на шайбе {SIZE}×{SIZE}')
 
 
+# ── Готовая иконка: снять рисунок с подложки и пересадить на свежую ─────────
+# Рисунок отделяется ВЫЧИТАНИЕМ: авторская иконка — это рисунок, положенный на
+# ту же самую подложку, и всё, что от подложки отличается, и есть рисунок.
+#
+# Порог мягкий, а не «равно/не равно»: у авторского кольца своё сглаживание, оно
+# расходится с нашим на единицы, и жёсткое сравнение вытащило бы вместе с
+# рисунком кайму мусора по всему кольцу. Расхождение переводится в АЛЬФУ — мелкие
+# отличия (то самое сглаживание) уходят почти в ноль, крупные (белые кости,
+# жёлтая корона) остаются целиком, а края рисунка получают ту же мягкость, что
+# была у автора.
+#
+# Сравниваются цвета УМНОЖЕННЫМИ НА АЛЬФУ: заливка подложки — чёрная на 191, и
+# чёрный контур рисунка поверх неё отличается только альфой. В обычном RGB такой
+# контур неотличим от подложки и вырезался бы дырой.
+DIFF_LO = 24.0    # ниже — считаем совпадением с подложкой
+DIFF_HI = 120.0   # выше — считаем рисунком целиком
+
+
+def _premul(c):
+    return (c[0] * c[3] // 255, c[1] * c[3] // 255, c[2] * c[3] // 255, c[3])
+
+
+def strip_plate(icon: Image.Image, plate: Image.Image) -> Image.Image:
+    art = Image.new('RGBA', icon.size, (0, 0, 0, 0))
+    src, base, dst = icon.load(), plate.load(), art.load()
+    for y in range(icon.height):
+        for x in range(icon.width):
+            c, b = src[x, y], base[x, y]
+            pc, pb = _premul(c), _premul(b)
+            d = max(abs(pc[i] - pb[i]) for i in range(4))
+            k = min(1.0, max(0.0, (d - DIFF_LO) / (DIFF_HI - DIFF_LO)))
+            if k > 0.0:
+                dst[x, y] = (c[0], c[1], c[2], int(round(c[3] * k)))
+    return art
+
+
+def replate(src: Path, out: Path) -> None:
+    icon = Image.open(src).convert('RGBA')
+    unit = icon.width          # плотность, в которой пришла авторская иконка
+    if icon.width != icon.height:
+        raise SystemExit(f'{src.name}: кадр не квадратный')
+    # Подложка автора — в ЕГО плотности, наша — в нашей.
+    art = strip_plate(icon, _plate_at(unit))
+    # Рисунок увеличивается LANCZOS, а не «по пикселям»: он и так показывается
+    # крупнее, чем нарисован, и ступеньки от NEAREST — это ровно та квадратность,
+    # от которой всё затевалось. Подложка при этом остаётся идеальной: она не
+    # увеличена, а посчитана заново.
+    art = art.resize((SIZE, SIZE), Image.LANCZOS)
+    icon4 = make_plate()
+    icon4.alpha_composite(art)
+    icon4.save(out)
+    print(f'{out.name}: рисунок снят с авторской подложки {unit}×{unit} '
+          f'и пересажен на свежую {SIZE}×{SIZE}')
+
+
+# Подложка в ПРОИЗВОЛЬНОЙ плотности — нужна, чтобы вычесть авторскую (K=1) при
+# любом нашем K. Считается той же формулой, что и боевая: другой способ рисовать
+# круг означал бы, что вычитаем мы не то, что автор нарисовал.
+def _plate_at(size: int) -> Image.Image:
+    global K, SIZE, CENTER, R_FILL, R_RING, ART_PX
+    keep = (K, SIZE, CENTER, R_FILL, R_RING, ART_PX)
+    k = size / 55
+    K, SIZE = k, size
+    CENTER, R_FILL, R_RING, ART_PX = 27.0 * k, 15.5 * k, 17.5 * k, 34.0 * k
+    plate = make_plate()
+    K, SIZE, CENTER, R_FILL, R_RING, ART_PX = keep
+    return plate
+
+
 if __name__ == '__main__':
     if len(sys.argv) == 2 and sys.argv[1] == '--all':
         for dst, (src, outline) in SET.items():
             bake(SRC_DIR / src, OUT_DIR / dst, outline)
+        for dst in READY:
+            replate(OUT_DIR / dst, OUT_DIR / dst)
+    elif len(sys.argv) == 4 and sys.argv[1] == '--ready':
+        replate(Path(sys.argv[2]), Path(sys.argv[3]))
     elif len(sys.argv) in (3, 4):
         bake(Path(sys.argv[1]), Path(sys.argv[2]),
              int(sys.argv[3]) if len(sys.argv) == 4 else 0)
