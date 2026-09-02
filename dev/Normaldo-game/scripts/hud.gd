@@ -1764,7 +1764,18 @@ func _build_menu_icon_btn(
 	icon.custom_minimum_size = Vector2.ZERO
 	icon.size                = Vector2(icon_w, icon_h)
 	icon.position            = Vector2.ZERO
-	icon.texture_filter      = CanvasItem.TEXTURE_FILTER_NEAREST
+	# ЛИНЕЙНЫЙ фильтр, а не nearest, и это парная правка к плотности иконок
+	# (`dev/tools/bake_menu_icon.py`, K=4). Пиксель файла здесь не равен пикселю
+	# экрана НИ ПРИ КАКОЙ плотности: размер кнопки задан в координатах полотна
+	# 430×192, экран у каждого свой, и масштаб выходит дробным всегда.
+	#
+	# Nearest на дробном масштабе — это и есть «иконки заквадратились»: при
+	# файле в 55 px и кадре в 190 экранных (телефон 2400×1080, режим
+	# `canvas_items`) каждый пиксель рисунка становился квадратом в 3–4 пикселя,
+	# причём неровным — 3.45 не целое число, и круглая шайба шла ступеньками
+	# разной высоты. Файл в 220 px убрал раздув, но масштаб остался дробным, и
+	# nearest теперь так же рвал бы иконку на уменьшении.
+	icon.texture_filter      = CanvasItem.TEXTURE_FILTER_LINEAR
 	icon.mouse_filter        = Control.MOUSE_FILTER_IGNORE
 	visual_root.add_child(icon)
 
@@ -2104,7 +2115,10 @@ func _build_menu_mode_btn(vp: Vector2) -> void:
 	_mode_btn_icon_rect.custom_minimum_size = Vector2.ZERO
 	_mode_btn_icon_rect.size                = Vector2(icon_w_vp, icon_h_vp)
 	_mode_btn_icon_rect.position            = Vector2.ZERO
-	_mode_btn_icon_rect.texture_filter      = CanvasItem.TEXTURE_FILTER_NEAREST
+	# Тот же линейный фильтр, что у иконок меню и что у СОБСТВЕННОГО свечения
+	# этой же кнопки строкой выше: чип рисуется на дробном масштабе, и nearest
+	# резал его на квадраты, пока ореол вокруг оставался гладким.
+	_mode_btn_icon_rect.texture_filter      = CanvasItem.TEXTURE_FILTER_LINEAR
 	_mode_btn_icon_rect.mouse_filter        = Control.MOUSE_FILTER_IGNORE
 	visual_root.add_child(_mode_btn_icon_rect)
 

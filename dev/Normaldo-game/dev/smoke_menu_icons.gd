@@ -19,16 +19,28 @@ extends SceneTree
 # книгу вместо ореола. Больше половины кольца рисунок не закрывает никогда —
 # медиана поэтому и держится.
 
-const ICONS : Array = [
-	"res://assets/ui/menu/icons/settings.png",     # НАСТРОЙКИ
-	"res://assets/ui/menu/icons/book.png",         # КНИГА УЧИТЕЛЯ
-	"res://assets/ui/menu/icons/skins.png",        # СКИНЫ
-	"res://assets/ui/menu/icons/slots.png",        # СЛОТЫ — авторская, эталон
-	"res://assets/ui/menu/icons/quests.png",       # ЗАДАНИЯ
-	"res://assets/ui/menu/icons/leaderboard.png",  # ЛИДЕРЫ
-]
+# Иконка → минимальная ПЛОТНОСТЬ (сколько пикселей файла на единицу замера).
+#
+# Пять печёт `bake_menu_icon.py` из оригиналов автора в 500 px, и печёт он их в
+# ЧЕТЫРЁХ пикселях на единицу: на телефоне кадр иконки выходит около 190 px, и
+# файл в 55 раздувался бы втрое — это и читалось как «иконки заквадратились».
+# Плотность здесь и проверяется: пересобрать набор обратно в 55 можно одним
+# неверным K в скрипте, а на глаз в 55-пиксельных файлах разницы не видно.
+#
+# СЛОТЫ — исключение и стоят единицей: это готовая картинка автора, оригинала
+# крупнее у нас нет. Как только он пришлёт — строку править вместе с набором.
+const ICONS : Dictionary = {
+	"res://assets/ui/menu/icons/settings.png":    4,   # НАСТРОЙКИ
+	"res://assets/ui/menu/icons/book.png":        4,   # КНИГА УЧИТЕЛЯ
+	"res://assets/ui/menu/icons/skins.png":       4,   # СКИНЫ
+	"res://assets/ui/menu/icons/slots.png":       1,   # СЛОТЫ — авторская, эталон
+	"res://assets/ui/menu/icons/quests.png":      4,   # ЗАДАНИЯ
+	"res://assets/ui/menu/icons/leaderboard.png": 4,   # ЛИДЕРЫ
+}
 
-# Замер по авторской иконке слотов. Кадр 55×55, центр (27, 27).
+# Замер по авторской иконке слотов. Кадр 55×55, центр (27, 27) — В ЕДИНИЦАХ
+# ЗАМЕРА. Всё, что ниже, умножается на плотность конкретного файла: геометрия
+# шайбы у набора одна, отличается только то, сколькими пикселями она описана.
 const FRAME  : int   = 55
 const CENTER : float = 27.0
 # Спад ореола: расстояние от центра → альфа. С восемнадцатого пикселя не
@@ -49,7 +61,7 @@ const RING_MIN : float = 0.25
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 18
+const EXPECTED_CHECKS : int = 24
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -68,19 +80,32 @@ func _initialize() -> void:
 			_check(false, "%s: нет файла" % nm)
 			continue
 		var img : Image = tex.get_image()
-		_check(img.get_width() == FRAME and img.get_height() == FRAME,
-			"%s: кадр %d×%d" % [nm, img.get_width(), img.get_height()])
-		_check_glow(img, nm)
-		_check_ring(img, nm)
+		var w : int = img.get_width()
+		var k : int = w / FRAME
+		# Кадр обязан быть ЦЕЛЫМ числом замеров: дробная плотность означает, что
+		# шайбу пересчитали не по замеру, а на глаз, и в ряду она встанет чуть
+		# другой.
+		var square : bool = w == img.get_height() and k >= 1 and w == FRAME * k
+		_check(square, "%s: кадр %d×%d — это %d× от замера 55×55"
+			% [nm, w, img.get_height(), k])
+		if not square:
+			continue
+		_check(k >= int(ICONS[path]),
+			"%s: плотность %d× при обязательных %d×" % [nm, k, int(ICONS[path])])
+		_check_glow(img, nm, k)
+		_check_ring(img, nm, k)
 	_finish()
 
-func _check_glow(img: Image, nm: String) -> void:
+func _check_glow(img: Image, nm: String, k: int) -> void:
 	var rings : Dictionary = {}
 	for r in GLOW_PROFILE.keys():
 		rings[r] = []
 	for y in range(img.get_height()):
 		for x in range(img.get_width()):
-			var r : int = int(round(Vector2(x - CENTER, y - CENTER).length()))
+			# Расстояние переводится В ЕДИНИЦЫ ЗАМЕРА: кривая спада одна на любую
+			# плотность, вчетверо более плотный файл просто описывает её подробнее.
+			var d : float = Vector2(x - CENTER * float(k), y - CENTER * float(k)).length()
+			var r : int = int(round(d / float(k)))
 			if rings.has(r):
 				(rings[r] as Array).append(int(round(img.get_pixel(x, y).a * 255.0)))
 	var worst : int = -1
@@ -95,12 +120,13 @@ func _check_glow(img: Image, nm: String) -> void:
 		"%s: ореол той же плотности (худшее расхождение %d/255 на радиусе %d)"
 			% [nm, worst, worst_r])
 
-func _check_ring(img: Image, nm: String) -> void:
+func _check_ring(img: Image, nm: String, k: int) -> void:
 	var tot : int = 0
 	var hit : int = 0
 	for y in range(img.get_height()):
 		for x in range(img.get_width()):
-			var r : float = Vector2(x - CENTER, y - CENTER).length()
+			var r : float = Vector2(x - CENTER * float(k), y - CENTER * float(k)).length() \
+				/ float(k)
 			if r < RING_IN or r > RING_OUT:
 				continue
 			tot += 1
