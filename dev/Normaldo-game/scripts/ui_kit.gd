@@ -140,3 +140,36 @@ static func panel(parent: Node, pos: Vector2, size: Vector2, fill: Color,
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(p)
 	return p
+
+# ── Зона тапа в списке, который скроллится ────────────────────────────────────
+# Строка списка на телефоне не может быть Button: кнопка срабатывает на
+# ОТПУСКАНИИ, в том числе после протяжки, и берёт касание себе — а именно этим
+# касанием список и листается. Симптом всегда один: «экран не скроллится», хотя
+# ScrollContainer на месте и `scroll_deadzone` выставлен.
+#
+# Здесь строка — обычный Control на MOUSE_FILTER_PASS: событие доходит и до
+# него, и до ленты. Тап засчитывается, только если палец сдвинулся меньше порога;
+# всё, что дальше, — это прокрутка, и она достаётся контейнеру.
+const TAP_SLOP : float = 12.0
+
+static func tap_zone(parent: Node, pos: Vector2, size: Vector2,
+		on_tap: Callable) -> Control:
+	var zone := Control.new()
+	zone.mouse_filter = Control.MOUSE_FILTER_PASS
+	place(parent, zone, pos, size)
+	var drag := { "x": 0.0, "y": 0.0, "down": false }
+	zone.gui_input.connect(func(ev: InputEvent) -> void:
+		if ev is InputEventScreenTouch or ev is InputEventMouseButton:
+			if ev.pressed:
+				drag["down"] = true
+				drag["x"] = 0.0
+				drag["y"] = 0.0
+			elif bool(drag["down"]):
+				drag["down"] = false
+				if absf(float(drag["x"])) < TAP_SLOP \
+						and absf(float(drag["y"])) < TAP_SLOP:
+					on_tap.call()
+		elif bool(drag["down"]) and (ev is InputEventScreenDrag or ev is InputEventMouseMotion):
+			drag["x"] = float(drag["x"]) + ev.relative.x
+			drag["y"] = float(drag["y"]) + ev.relative.y)
+	return zone

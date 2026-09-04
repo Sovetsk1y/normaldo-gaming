@@ -69,7 +69,62 @@ func _initialize() -> void:
 	await _test_screens()
 	print("── Инструментарий свёрнут ──")
 	await _test_toolbox()
+	print("── Заглушки в каталоге ──")
+	_test_placeholder_art()
 	_finish()
+
+# Заглушка в каталоге — это картинка, скопированная у соседа, пока настоящей
+# нет. Найти её глазами нельзя: страница собирается, рисунок показывается,
+# всё «работает» — просто у сейфа нарисован камень.
+#
+# Ловится это единственным способом: два РАЗНЫХ существа не могут иметь
+# БАЙТ В БАЙТ одинаковый рисунок. Совпали — значит один из них ждёт своего.
+# Записи, у которых рисунок ЗАИМСТВОВАН осознанно и ждёт своего. Список —
+# не поблажка тесту, а счёт к художнику: пока строка здесь, картинка не своя.
+#
+#   safe — сейф нарисован камнем. Настоящего спрайта сейфа в проекте нет ни в
+#          одном виде, включая архивы старой версии; запрошен у автора.
+const AWAITING_ART : Array = ["safe"]
+
+func _test_placeholder_art() -> void:
+	var cat : Node = get_root().get_node_or_null("/root/Bestiary")
+	if cat == null:
+		_check(false, "каталог не поднялся — проверять нечего")
+		return
+	var by_hash : Dictionary = {}
+	var dups    : Array = []
+	var known   : Array = []
+	for e in (cat.ENTRIES as Array):
+		var eid  := String((e as Dictionary).get("id", ""))
+		var path := String((e as Dictionary).get("icon", ""))
+		if path == "" or not FileAccess.file_exists(path):
+			continue
+		var h := FileAccess.get_md5(path)
+		if by_hash.has(h):
+			if AWAITING_ART.has(eid):
+				known.append("%s (%s)" % [eid, path])
+			else:
+				dups.append("%s: %s = %s" % [eid, by_hash[h], path])
+		else:
+			by_hash[h] = path
+	_check(dups.is_empty(),
+		"новых заглушек в каталоге нет: %s" % [dups])
+	# Не проверка, а НАПОМИНАНИЕ: печатается на каждом прогоне, чтобы долг был
+	# виден и не потерялся между релизами.
+	if not known.is_empty():
+		print("  ЖДЁТ РИСУНКА: ", known)
+	# И обратное: строка, которой в списке больше не место, обязана уйти —
+	# иначе список превращается в кладбище и перестаёт что-либо значить.
+	var stale : Array = []
+	for eid in AWAITING_ART:
+		var still := false
+		for k in known:
+			if String(k).begins_with(eid + " "):
+				still = true
+		if not still:
+			stale.append(eid)
+	_check(stale.is_empty(),
+		"в списке ожидающих рисунка нет лишних строк: %s" % [stale])
 
 # Второй рубильник — `DevFlags.TOOLBOX`. Он снимает с экрана ВЕСЬ дев-инструмент,
 # кроме двух вещей, которыми пользуются каждый день: выпадашки боссов в забеге и

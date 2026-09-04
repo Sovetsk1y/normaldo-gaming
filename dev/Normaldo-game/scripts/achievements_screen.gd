@@ -308,6 +308,15 @@ func _initial_chapter() -> int:
 			return ci
 	return int(vis[0])
 
+# Очистка списка перед пересборкой. Не просто queue_free: освобождение
+# отложено до конца кадра, и до тех пор старая строка ДЕРЖИТ СВОЁ ИМЯ — новая с
+# тем же именем получает от Godot суффикс, и поиск по имени находит покойника.
+# remove_child снимает узел с дерева сразу, освобождение идёт своим чередом.
+func _clear(node: Node) -> void:
+	for c in node.get_children():
+		node.remove_child(c)
+		c.queue_free()
+
 func _make_scroll(rect: Rect2) -> ScrollContainer:
 	var sc := ScrollContainer.new()
 	sc.position               = rect.position
@@ -417,8 +426,7 @@ func _build_cat_overall() -> void:
 		0.0 if pr.y == 0 else float(pr.x) / float(pr.y), CLR_ACCENT)
 
 func _build_cat_spine() -> void:
-	for c in _spine_body.get_children():
-		c.queue_free()
+	_clear(_spine_body)
 	var rect : Rect2 = _lay["ch_list"]
 	var rows := _cat_entries()
 	_sel_entry = clampi(_sel_entry, 0, maxi(0, rows.size() - 1))
@@ -455,15 +463,15 @@ func _build_cat_row(pos: Vector2, size: Vector2, idx: int, e: Dictionary) -> voi
 	UiKit.place(_spine_body, lbl,
 		pos + Vector2(size.y + 2.0, 0.0), Vector2(size.x - size.y - 6.0, size.y))
 
-	var btn := Button.new()
-	btn.flat       = true
-	btn.focus_mode = Control.FOCUS_NONE
+	# Не Button, а зона тапа: кнопка забирает касание себе, и на телефоне левый
+	# список каталога переставал листаться — каждое движение пальца попадало в
+	# строку. См. UiKit.tap_zone.
 	var cap := idx
-	btn.pressed.connect(func():
+	var zone := UiKit.tap_zone(_spine_body, pos, size, func() -> void:
 		_play_click()
 		_sel_entry = cap
 		_rebuild_content())
-	UiKit.place(_spine_body, btn, pos, size)
+	zone.name = "CatRow%d" % idx
 
 # ── Каталог: страница записи ─────────────────────────────────────────────────
 func _build_cat_page() -> void:
@@ -568,8 +576,7 @@ func _bar(root: Node, pos: Vector2, w: float, h: float, frac: float, col: Color)
 
 # ── Корешок: список глав ─────────────────────────────────────────────────────
 func _build_spine(vis: Array) -> void:
-	for c in _spine_body.get_children():
-		c.queue_free()
+	_clear(_spine_body)
 	var rect : Rect2 = _lay["ch_list"]
 	var w : float = rect.size.x
 	# Главы растягиваются на высоту корешка: пять глав не должны оставлять под
@@ -664,13 +671,10 @@ func _build_chapter_row(pos: Vector2, size: Vector2, ch_idx: int) -> void:
 		_spine_body.add_child(dot)
 		_pulse_forever(dot)
 
-	var btn := Button.new()
-	btn.flat       = true
-	btn.focus_mode = Control.FOCUS_NONE
-	btn.size       = size
-	btn.position   = pos
-	btn.pressed.connect(_on_select_chapter.bind(ch_idx))
-	_spine_body.add_child(btn)
+	# Как и в каталоге — зона тапа, а не Button: корешок лежит в ScrollContainer,
+	# и кнопка во всю строку забирает касание, которым список листается.
+	UiKit.tap_zone(_spine_body, pos, size,
+		func() -> void: _on_select_chapter(ch_idx)).name = "ChRow%d" % ch_idx
 
 func _on_select_chapter(ch_idx: int) -> void:
 	if ch_idx == _sel_chapter:

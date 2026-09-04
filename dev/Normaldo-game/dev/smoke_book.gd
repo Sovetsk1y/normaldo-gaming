@@ -47,6 +47,8 @@ func _initialize() -> void:
 	await _test_claim(hud, qm, save)
 	print("── Каталог: вкладки ──")
 	await _test_catalog(hud)
+	print("── Левый список листается ──")
+	await _test_spine_scrolls(hud)
 	print("── Закрытие ──")
 	await _test_close(hud, qm)
 
@@ -114,6 +116,101 @@ func _test_catalog(hud: Node) -> void:
 	_check(String(scr.get("_tab")) == "", "и обратно к главам")
 	_check(scr.get("_sel_chapter") >= 0, "глава при этом выбрана")
 	await _close(scr)
+
+# Левый список каталога на телефоне НЕ ЛИСТАЛСЯ: строка была Button во всю
+# ширину, а кнопка забирает касание себе — то самое, которым список и
+# прокручивается. `scroll_deadzone` на контейнере этого не спасал.
+#
+# Проверяется поэтому не «строка нажимается», а ДВА свойства сразу: тап выбирает,
+# а ПРОТЯЖКА не выбирает — и значит достаётся ленте.
+func _test_spine_scrolls(hud: Node) -> void:
+	var cat : Node = get_root().get_node_or_null("/root/Bestiary")
+	var save : Node = get_root().get_node_or_null("SaveData")
+	if cat == null:
+		return
+	save.set("seen_entries", {})
+	var scr : Node = await _open(hud)
+	scr.call("_on_tab", cat.S_ENEMY)
+	await process_frame
+
+	var body : Control = scr.get("_spine_body")
+	var btns : Array = []
+	_buttons(body, btns)
+	_check(btns.is_empty(),
+		"в строках левого списка нет кнопок: %d" % btns.size())
+
+	var row2 : Control = _row(body, "CatRow2")
+	_check(row2 != null, "у строк есть зоны тапа")
+	if row2 == null:
+		await _close(scr)
+		return
+	_check(int(row2.mouse_filter) == int(Control.MOUSE_FILTER_PASS),
+		"и они ПРОПУСКАЮТ касание дальше — иначе лента его не увидит")
+
+	scr.set("_sel_entry", 0)
+	scr.call("_rebuild_content")
+	# ДВА кадра, а не один: пересборка списка зовёт queue_free на старых строках,
+	# и до конца кадра они ещё в дереве. Новая строка с тем же именем получает от
+	# Godot суффикс, поиск по точному имени находит СТАРУЮ — и она умирает прямо
+	# посреди проверки.
+	await process_frame
+	await process_frame
+	body = scr.get("_spine_body")
+	row2 = _row(body, "CatRow2")
+
+	# Протяжка — это прокрутка, а не выбор.
+	_drag(row2, -60.0)
+	await process_frame
+	_check(int(scr.get("_sel_entry")) == 0,
+		"протяжка по строке запись не выбирает: %d" % int(scr.get("_sel_entry")))
+
+	# Тап — выбор.
+	_tap(row2)
+	await process_frame
+	_check(int(scr.get("_sel_entry")) == 2,
+		"а тап выбирает: %d" % int(scr.get("_sel_entry")))
+
+	# Корешок глав собран тем же кирпичом: кнопки там тоже больше нет.
+	scr.call("_on_tab", "")
+	await process_frame
+	var ch_btns : Array = []
+	_buttons(scr.get("_spine_body"), ch_btns)
+	_check(ch_btns.is_empty(), "и в корешке глав кнопок нет: %d" % ch_btns.size())
+	await _close(scr)
+
+# Строка списка по имени. Ищем по НАЧАЛУ имени и берём живую: пересборка
+# добавляет новую строку раньше, чем освобождается старая, и Godot приписывает
+# новой суффикс.
+func _row(body: Node, prefix: String) -> Control:
+	for c in body.get_children():
+		if not (c is Control) or c.is_queued_for_deletion():
+			continue
+		if String(c.name).begins_with(prefix):
+			return c as Control
+	return null
+
+func _tap(ctrl: Control) -> void:
+	if ctrl == null:
+		return
+	var down := InputEventScreenTouch.new()
+	down.pressed = true
+	ctrl.gui_input.emit(down)
+	var up := InputEventScreenTouch.new()
+	up.pressed = false
+	ctrl.gui_input.emit(up)
+
+func _drag(ctrl: Control, dy: float) -> void:
+	if ctrl == null:
+		return
+	var down := InputEventScreenTouch.new()
+	down.pressed = true
+	ctrl.gui_input.emit(down)
+	var mv := InputEventScreenDrag.new()
+	mv.relative = Vector2(0.0, dy)
+	ctrl.gui_input.emit(mv)
+	var up := InputEventScreenTouch.new()
+	up.pressed = false
+	ctrl.gui_input.emit(up)
 
 # ── Хелперы ───────────────────────────────────────────────────────────────────
 
