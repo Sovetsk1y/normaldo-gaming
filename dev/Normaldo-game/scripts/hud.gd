@@ -1153,14 +1153,9 @@ func _build_player_cell(vp: Vector2) -> void:
 	_player_cell_root.add_child(av_holder)
 	_player_avatar_rect = _head_icon_rect(av_holder)
 
-	# Tap-area for avatar (overlapping the rect)
-	var avatar_btn := Button.new()
-	avatar_btn.flat       = true
-	avatar_btn.focus_mode = Control.FOCUS_NONE
-	avatar_btn.size       = Vector2(AV_SZ, AV_SZ)
-	avatar_btn.position   = Vector2(PAD, (CELL_H - AV_SZ) * 0.5)
-	avatar_btn.pressed.connect(_show_avatar_picker)
-	_player_cell_root.add_child(avatar_btn)
+	# АВАТАР НЕ ВЫБИРАЕТСЯ. Он показывает АКТИВНЫЙ СКИН — то есть уже сделанный
+	# выбор, и второй выбор поверх первого превращал картинку в ложь: в таблице
+	# лидеров стоит одна голова, а бегает другая. Кнопки здесь больше нет.
 
 	# Nickname
 	var name_x := PAD + AV_SZ + 10.0
@@ -6246,6 +6241,12 @@ var _settings_layer : CanvasLayer = null
 # меню паузы, сколько z_index ему ни ставь.
 const PAUSE_LAYER    : int = 120
 const SETTINGS_LAYER : int = 130
+# Диалоги с подтверждением («изменить имя», «восстановить аккаунт») открываются
+# ИЗ экрана настроек и обязаны лечь поверх него. Своего слоя у них не было: они
+# висели прямо на HUD с z_index 100 — а z_index упорядочивает только внутри
+# одного слоя, и настройки на слое 130 накрывали их целиком. Со стороны это
+# выглядело как «кнопка не работает»: диалог открывался, но за экраном.
+const DIALOG_LAYER   : int = 140
 
 func _modal_layer(idx: int) -> CanvasLayer:
 	var cl := CanvasLayer.new()
@@ -6253,6 +6254,19 @@ func _modal_layer(idx: int) -> CanvasLayer:
 	cl.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(cl)
 	return cl
+
+# Корень диалога на своём слое. Слой уходит следом за корнем: диалоги закрывают
+# себя сами (queue_free), и без этого после каждого открытия оставался бы
+# пустой CanvasLayer.
+func _dialog_root() -> Node2D:
+	var lay := _modal_layer(DIALOG_LAYER)
+	var root := Node2D.new()
+	root.process_mode = Node.PROCESS_MODE_ALWAYS
+	lay.add_child(root)
+	root.tree_exited.connect(func() -> void:
+		if is_instance_valid(lay):
+			lay.queue_free(), CONNECT_ONE_SHOT)
+	return root
 
 func _open_pause_menu() -> void:
 	if is_instance_valid(_pause_overlay):
@@ -9654,205 +9668,16 @@ func _show_quest_complete_toast(slot: int, title: String, desc: String) -> void:
 			_toast_node = null
 	)
 
-# ─── Avatar picker / Rename / Settings modals ───────────────────────────────
+# ─── Диалоги: имя и восстановление аккаунта ─────────────────────────────────
+# ВЫБОРА АВАТАРА БОЛЬШЕ НЕТ. Аватар показывает АКТИВНЫЙ СКИН — то есть уже
+# сделанный выбор, и второй выбор поверх первого превращал картинку в ложь: в
+# таблице лидеров стоит одна голова, а бегает другая. Экран выбора вместе с его
+# сеткой голов по жирам убран целиком.
 
-func _show_avatar_picker() -> void:
-	var vp := get_viewport().get_visible_rect().size
-	var root := Node2D.new()
-	root.z_index = 100   # поверх экрана настроек (95) и паузы (90)
-	root.process_mode = Node.PROCESS_MODE_ALWAYS
-	add_child(root)
-
-	var dim := ColorRect.new()
-	dim.color    = Color(0.0, 0.0, 0.0, 0.78)
-	dim.size     = vp
-	root.add_child(dim)
-	var dim_btn := Button.new()
-	dim_btn.flat       = true
-	dim_btn.focus_mode = Control.FOCUS_NONE
-	dim_btn.size       = vp
-	dim_btn.pressed.connect(root.queue_free)
-	root.add_child(dim_btn)
-
-	var panel_w := minf(vp.x - 40.0, 720.0)
-	var panel_h := minf(vp.y - 40.0, 380.0)
-	var panel_x := (vp.x - panel_w) * 0.5
-	var panel_y := (vp.y - panel_h) * 0.5
-
-	# Скруглённая подложка — та же, что у экрана настроек, из которого диалог и
-	# открывается. См. /Концепция/Экран настроек.md
-	var panel := Panel.new()
-	panel.add_theme_stylebox_override("panel", UiKit.rounded(
-		Color(0.07, 0.07, 0.10, 0.98), 12, Color(0.42, 0.48, 0.62, 0.90), 2))
-	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	UiKit.place(root, panel, Vector2(panel_x, panel_y), Vector2(panel_w, panel_h))
-
-	var stripe := ColorRect.new()
-	stripe.color    = Color(0.55, 0.85, 1.0, 0.85)
-	stripe.size     = Vector2(panel_w, 2.0)
-	stripe.position = Vector2(panel_x, panel_y)
-	root.add_child(stripe)
-
-	var title := Label.new()
-	title.add_theme_font_override("font", UI_FONT)
-	title.add_theme_font_size_override("font_size", 16)
-	title.text                 = "ВЫБОР АВАТАРА"
-	title.modulate             = Color(0.55, 0.85, 1.0)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.size                 = Vector2(panel_w, 24.0)
-	title.position             = Vector2(panel_x, panel_y + 8.0)
-	root.add_child(title)
-
-	# Close (X)
-	var close_lbl := Label.new()
-	close_lbl.add_theme_font_override("font", UI_FONT)
-	close_lbl.add_theme_font_size_override("font_size", 16)
-	close_lbl.text                 = "X"
-	close_lbl.modulate             = Color(1.0, 0.45, 0.45)
-	close_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	close_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	close_lbl.size                 = Vector2(28.0, 22.0)
-	close_lbl.position             = Vector2(panel_x + panel_w - 32.0, panel_y + 6.0)
-	close_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	root.add_child(close_lbl)
-	var close_btn := Button.new()
-	close_btn.flat       = true
-	close_btn.focus_mode = Control.FOCUS_NONE
-	close_btn.size       = Vector2(36.0, 30.0)
-	close_btn.position   = Vector2(panel_x + panel_w - 38.0, panel_y + 2.0)
-	close_btn.pressed.connect(root.queue_free)
-	root.add_child(close_btn)
-
-	# Scroll area with skin rows
-	const ROW_H : float = 76.0
-	var content_y := panel_y + 36.0
-	var content_h := panel_h - 36.0 - 40.0  # header + hint footer
-	var scroll := ScrollContainer.new()
-	scroll.position = Vector2(panel_x + 8.0, content_y)
-	scroll.size     = Vector2(panel_w - 16.0, content_h)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	root.add_child(scroll)
-
-	var content := Control.new()
-	scroll.add_child(content)
-	var inner_w := panel_w - 16.0
-	var cy := 0.0
-
-	var current_info := _current_avatar()
-	for skin_def in SkinRegistry.SKINS:
-		var sid : String = skin_def["id"]
-		if not SaveData.owns_skin(sid):
-			continue
-		var max_fat := _max_fat_state_for_skin(sid)
-		_build_skin_avatar_row(content, cy, inner_w, skin_def, max_fat,
-			current_info, root)
-		cy += ROW_H
-	content.custom_minimum_size = Vector2(inner_w, cy + 8.0)
-
-	# Hint footer
-	var hint := Label.new()
-	hint.add_theme_font_override("font", UI_FONT)
-	hint.add_theme_font_size_override("font_size", 10)
-	hint.text                 = "Аватары открываются вместе со скинами и их уровнями. Купи скин в магазине, прокачай его пиццей — появятся новые аватары."
-	hint.modulate             = Color(0.65, 0.65, 0.60, 0.90)
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	hint.autowrap_mode        = TextServer.AUTOWRAP_WORD
-	hint.size                 = Vector2(panel_w - 24.0, 36.0)
-	hint.position             = Vector2(panel_x + 12.0, panel_y + panel_h - 40.0)
-	hint.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	root.add_child(hint)
-
-func _build_skin_avatar_row(parent: Control, cy: float, w: float,
-		skin_def: Dictionary, max_fat: int, current_info: Dictionary,
-		modal_root: Node) -> void:
-	var sid    : String = skin_def["id"]
-	var s_name : String = skin_def.get("name_ru", sid)
-	var row := Node2D.new()
-	row.position = Vector2(0.0, cy)
-	parent.add_child(row)
-
-	# Skin label
-	var lbl := Label.new()
-	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 11)
-	lbl.text                 = s_name
-	lbl.modulate             = Color(0.85, 0.85, 0.80)
-	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.size                 = Vector2(120.0, 60.0)
-	lbl.position             = Vector2(8.0, 8.0)
-	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	row.add_child(lbl)
-
-	# 4 fat-state thumbnails
-	const TH_SZ  : float = 56.0
-	const TH_GAP : float = 8.0
-	var tx := 132.0
-	for fat in 4:
-		var locked  := fat > max_fat
-		var current = (sid == current_info.skin_id) and (fat == int(current_info.fat))
-
-		var bg := ColorRect.new()
-		bg.color    = Color(0.05, 0.05, 0.08, 0.85)
-		bg.size     = Vector2(TH_SZ, TH_SZ)
-		bg.position = Vector2(tx, 8.0)
-		row.add_child(bg)
-
-		if current:
-			var stripe := ColorRect.new()
-			stripe.color    = Color(0.55, 0.85, 1.0, 0.95)
-			stripe.size     = Vector2(TH_SZ, 2.0)
-			stripe.position = Vector2(tx, 8.0)
-			row.add_child(stripe)
-			var stripe_b := ColorRect.new()
-			stripe_b.color    = Color(0.55, 0.85, 1.0, 0.95)
-			stripe_b.size     = Vector2(TH_SZ, 2.0)
-			stripe_b.position = Vector2(tx, 8.0 + TH_SZ - 2.0)
-			row.add_child(stripe_b)
-
-		var rect := _skin_head_icon(sid, fat, TH_SZ - 6.0)
-		rect.position      = Vector2(tx + 3.0, 11.0)
-		if locked:
-			rect.modulate  = Color(0.30, 0.30, 0.35, 0.90)
-		row.add_child(rect)
-
-		if locked:
-			var lk := Label.new()
-			lk.add_theme_font_override("font", UI_FONT)
-			lk.add_theme_font_size_override("font_size", 14)
-			lk.text                 = "🔒"
-			lk.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			lk.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-			lk.size                 = Vector2(TH_SZ, TH_SZ)
-			lk.position             = Vector2(tx, 8.0)
-			lk.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-			row.add_child(lk)
-		else:
-			var btn := Button.new()
-			btn.flat       = true
-			btn.focus_mode = Control.FOCUS_NONE
-			btn.size       = Vector2(TH_SZ, TH_SZ)
-			btn.position   = Vector2(tx, 8.0)
-			var captured_sid := sid
-			var captured_fat := fat
-			btn.pressed.connect(func():
-				SaveData.chosen_avatar_skin = captured_sid
-				SaveData.chosen_avatar_fat  = captured_fat
-				SaveData._save()
-				_refresh_player_cell()
-				modal_root.queue_free()
-				# Sync to server so the leaderboard row updates too.
-				LeaderboardClient.update_avatar(captured_sid, captured_fat)
-			)
-			row.add_child(btn)
-		tx += TH_SZ + TH_GAP
 
 func _show_rename_modal() -> void:
 	var vp := get_viewport().get_visible_rect().size
-	var root := Node2D.new()
-	root.z_index = 100   # поверх экрана настроек (95) и паузы (90)
-	root.process_mode = Node.PROCESS_MODE_ALWAYS
-	add_child(root)
+	var root := _dialog_root()
 
 	var dim := ColorRect.new()
 	dim.color    = Color(0.0, 0.0, 0.0, 0.78)
@@ -10304,10 +10129,7 @@ func _toggle_notif_category(key: String) -> void:
 
 func _show_restore_modal() -> void:
 	var vp := get_viewport().get_visible_rect().size
-	var root := Node2D.new()
-	root.z_index = 100   # поверх экрана настроек (95) и паузы (90)
-	root.process_mode = Node.PROCESS_MODE_ALWAYS
-	add_child(root)
+	var root := _dialog_root()
 
 	var dim := ColorRect.new()
 	dim.color = Color(0.0, 0.0, 0.0, 0.82)

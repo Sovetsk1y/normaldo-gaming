@@ -42,6 +42,8 @@ func _initialize() -> void:
 	await _test_profile_account(hud, save)
 	print("── Открытие и закрытие ──")
 	await _test_open_close(hud)
+	print("── Диалоги поверх настроек ──")
+	await _test_dialogs_on_top(hud)
 
 	print("")
 	if _fails == 0:
@@ -246,6 +248,56 @@ func _test_profile_account(hud: Node, save: Node) -> void:
 	_check(_count(atxt, "*") == 0, "и не замаскирован звёздочками")
 	_check(_count(atxt, "ВОССТАНОВИТЬ АККАУНТ") == 1, "кнопка восстановления на месте")
 	await _close(scr)
+
+# Диалоги «изменить имя» и «восстановить аккаунт» открываются ИЗ настроек и
+# обязаны лечь ПОВЕРХ них. Своего слоя у них не было: они висели прямо на HUD с
+# z_index 100 — а z_index упорядочивает только внутри одного слоя, и настройки
+# на слое 130 накрывали их целиком. Со стороны это выглядело как «кнопка не
+# работает».
+#
+# Проверяется поэтому не «диалог создался», а НОМЕР СЛОЯ: он и решает, что видно.
+func _test_dialogs_on_top(hud: Node) -> void:
+	_check(not hud.has_method("_show_avatar_picker"),
+		"выбора аватара больше нет: аватар — это активный скин, а не второй выбор")
+
+	hud.call("_show_settings_modal")
+	for _i in 6:
+		await process_frame
+	var set_layer : int = -1
+	for c in hud.get_children():
+		if c is CanvasLayer and int((c as CanvasLayer).layer) == int(hud.SETTINGS_LAYER):
+			set_layer = int((c as CanvasLayer).layer)
+	_check(set_layer > 0, "экран настроек открылся на своём слое: %d" % set_layer)
+
+	for name in ["_show_rename_modal", "_show_restore_modal"]:
+		hud.call(name)
+		for _i in 3:
+			await process_frame
+		var top : int = -1
+		for c in hud.get_children():
+			if c is CanvasLayer and int((c as CanvasLayer).layer) > set_layer:
+				top = maxi(top, int((c as CanvasLayer).layer))
+		_check(top > set_layer,
+			"%s лёг ПОВЕРХ настроек: слой %d против %d" % [name, top, set_layer])
+		# И уходит вместе со своим слоем: иначе после каждого открытия остаётся
+		# пустой CanvasLayer, и через десяток заходов их десяток.
+		for c in hud.get_children():
+			if c is CanvasLayer and int((c as CanvasLayer).layer) == top:
+				for d in c.get_children():
+					d.queue_free()
+		for _i in 4:
+			await process_frame
+		var left := 0
+		for c in hud.get_children():
+			if c is CanvasLayer and int((c as CanvasLayer).layer) == top:
+				left += 1
+		_check(left == 0, "%s закрылся вместе со своим слоем" % name)
+
+	var scr : Node = hud.get("_settings_screen")
+	if is_instance_valid(scr):
+		scr.call("_on_close")
+	for _i in 6:
+		await process_frame
 
 func _test_open_close(hud: Node) -> void:
 	# Экран открывается через тот же вход, что и у игрока, и не двоится.

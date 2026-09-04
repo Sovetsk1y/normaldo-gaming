@@ -581,6 +581,11 @@ func _step_chip(pos: Vector2, sign_txt: String, key: String, delta: int) -> void
 # ── Раздел «Профиль» ─────────────────────────────────────────────────────────
 # Имя, аватар и код восстановления жили в трёх разных местах, и ни одно не
 # называлось «профиль». Здесь собраны первые два.
+#
+# Аватар ПОКАЗЫВАЕТСЯ, но не выбирается: он и есть активный скин — уже сделанный
+# выбор. Отдельный экран выбора поверх него превращал картинку в ложь (в таблице
+# лидеров одна голова, бегает другая) и убран целиком. Подписи «нажми» под
+# аватаром больше нет по той же причине.
 func _page_profile(w: float) -> float:
 	const AV : float = 64.0
 	var av_info : Dictionary = _hud.call("_current_avatar")
@@ -590,24 +595,6 @@ func _page_profile(w: float) -> float:
 		String(av_info["skin_id"]), int(av_info["fat"]), AV - 10.0)
 	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	UiKit.place(_page_body, holder, Vector2(5.0, 11.0), Vector2(AV - 10.0, AV - 10.0))
-
-	var av_btn := Button.new()
-	av_btn.flat       = true
-	av_btn.focus_mode = Control.FOCUS_NONE
-	av_btn.pressed.connect(func():
-		if _hud and _hud.has_method("_play_btn_sfx"):
-			_hud._play_btn_sfx()
-		_hud.call("_show_avatar_picker"))
-	UiKit.place(_page_body, av_btn, Vector2(0.0, 6.0), Vector2(AV, AV))
-
-	var hint := Label.new()
-	hint.add_theme_font_override("font", UI_FONT)
-	hint.add_theme_font_size_override("font_size", 9)
-	hint.text                 = "нажми"
-	hint.modulate             = Color(0.66, 0.68, 0.74)
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	UiKit.place(_page_body, hint, Vector2(0.0, 6.0 + AV + 2.0), Vector2(AV, 12.0))
 
 	var nx : float = AV + 16.0
 	var cap := Label.new()
