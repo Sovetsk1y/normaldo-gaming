@@ -3726,4 +3726,13 @@ func _handle_obstacle(area: Area2D) -> void:
 	if area.has_meta("invert_duration"):
 		apply_invert(float(area.get_meta("invert_duration")))
 		_show_floating_text("ПРОКЛЯТИЕ!", Color(0.55, 1.00, 0.45))
+	# СЕЙФ ВСКРЫВАЕТСЯ УДАРОМ: урон уже нанесён строкой выше, а теперь он
+	# перелетает на голову и высыпает деньги (см. safe.gd). Убирает он себя сам —
+	# падением, — поэтому _kill_item ему не нужен.
+	#
+	# Только здесь, в ветке настоящего удара: резист выше уже вернулся, и денег
+	# там нет намеренно.
+	if area.has_method("crack_open"):
+		area.call("crack_open", self)
+		return
 	_kill_item(area)

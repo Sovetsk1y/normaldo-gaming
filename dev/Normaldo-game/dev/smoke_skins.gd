@@ -614,7 +614,7 @@ func _test_web(save: Node) -> void:
 	# Препятствие: ЛОМАЕТСЯ, и снаряд летит дальше (обработчик возвращает false).
 	var rock := Area2D.new()
 	rock.set_script(preload("res://scripts/hazard_item.gd"))
-	rock.set("kind", "safe")
+	rock.set("kind", "helm")
 	rock.set("speed", 250.0)
 	rock.position = Vector2(500.0, 200.0)
 	spawner.add_child(rock)

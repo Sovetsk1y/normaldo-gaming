@@ -105,10 +105,12 @@ func _wait(sec: float) -> void:
 		t += 1.0 / 60.0
 
 # Предмет-препятствие рядом с головой, чтобы снаряд гарантированно в него попал.
+# Штурвал, а не сейф: сейф с некоторых пор сам себя вскрывает и высыпает деньги
+# (см. safe.gd), и мишенью «просто препятствие» быть перестал.
 func _rock(spawner: Node, pos: Vector2) -> Area2D:
 	var rock := Area2D.new()
 	rock.set_script(preload("res://scripts/hazard_item.gd"))
-	rock.set("kind", "safe")
+	rock.set("kind", "helm")
 	rock.set("speed", 0.0)
 	rock.position = pos
 	spawner.add_child(rock)

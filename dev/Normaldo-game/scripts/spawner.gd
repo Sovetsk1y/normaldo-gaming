@@ -781,6 +781,7 @@ func _spawn_level_hazard(kind: String, y: float, vp_w: float, speed: float) -> v
 		"cone":         _spawn_cone(vp_w, speed)
 		"glove":        _spawn_glove(y, vp_w)
 		"police_car":   _spawn_police_car(y, vp_w, speed)
+		"safe":         _spawn_safe(y, vp_w, speed)
 		"girl":         _spawn_girl(y, vp_w, speed)
 		"molotov":      _spawn_molotov_single(y, vp_w, speed)
 		# Всё остальное — предметы `hazard_item.gd`: они названы в раскладке
@@ -793,6 +794,19 @@ func _spawn_level_hazard(kind: String, y: float, vp_w: float, speed: float) -> v
 				_spawn_hazard(kind, y, vp_w, speed)
 			else:
 				_spawn_hazard(_pick_hazard(), y, vp_w, speed)
+
+# Сейф — не рядовая угроза, а СДЕЛКА: бьёт на 2 и тем же ударом вскрывается,
+# высыпая доллары (см. safe.gd). Своим скриптом, а не строкой в hazard_item:
+# у него своя хореография — перелёт на голову, раскрытие, россыпь и падение.
+const SAFE_SCRIPT := preload("res://scripts/safe.gd")
+
+func _spawn_safe(y: float, vp_w: float, speed: float) -> void:
+	var node := Area2D.new()
+	node.set_script(SAFE_SCRIPT)
+	node.set("speed", speed)
+	node.position = Vector2(vp_w + 90.0, y)
+	_mark_base_span(y)
+	add_child(node)
 
 # Полицейская машина — не предмет, а СОБЫТИЕ: идёт по двум линиям, быстрее
 # потока, пашет всё на своём пути и разбивается у игрока, вываливая двух копов.
@@ -834,6 +848,12 @@ func _pick_hazard() -> String:
 	return pool[randi() % pool.size()]
 
 func _spawn_hazard(kind: String, y: float, vp_w: float, speed: float) -> void:
+	# Сейф — свой скрипт, и попасть сюда он может из общего пула угроз
+	# (`_pick_hazard`), а не только из раскладки уровня. Развилка здесь одна на
+	# все входы: иначе в игре завёлся бы второй, «тихий» сейф без выплаты.
+	if kind == "safe":
+		_spawn_safe(y, vp_w, speed)
+		return
 	var node := Area2D.new()
 	node.set_script(HAZARD_ITEM_SCRIPT)
 	node.set("kind", kind)

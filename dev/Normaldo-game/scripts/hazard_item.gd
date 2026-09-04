@@ -1,9 +1,10 @@
 extends Area2D
 
 # ── Предметы под резисты скинов ───────────────────────────────────────────────
-# Семь угроз, к которым лестница скинов выдаёт резисты, но которых в игре не
-# существовало: сейф, коктейль, коп, яд, птица, штурвал, шаман. Пока их не было,
-# семь наград 4–10 уровней были пустыми обещаниями.
+# Угрозы, к которым лестница скинов выдаёт резисты, но которых в игре не
+# существовало: коктейль, коп, яд, птица, штурвал, шаман (и сейф, уехавший
+# отсюда в свой файл). Пока их не было, семь наград 4–10 уровней были пустыми
+# обещаниями.
 #
 # Один скрипт на всех — как у effect_item.gd. Различаются они спрайтом, уроном,
 # СПОСОБОМ ПОЛЁТА и побочным эффектом, и всё это лежит в KINDS таблицей: заводить
@@ -21,7 +22,6 @@ extends Area2D
 # См. /Концепция/Уровни/1-Канализация.md
 
 const TEX : Dictionary = {
-	"safe":     preload("res://assets/items/safe.png"),
 	"cocktail": preload("res://assets/items/cocktail.png"),
 	"cop":      preload("res://assets/items/cop.png"),
 	"poison":   preload("res://assets/items/poison.png"),
@@ -52,10 +52,11 @@ const HIT_SFX  := preload("res://assets/audio/hit.mp3")
 const CAST_SFX := preload("res://assets/audio/magic_poof.mp3")
 
 # px — экранный размер; speed_mult — доля от скорости потока.
+# СЕЙФА ЗДЕСЬ НЕТ. Он перестал быть строкой таблицы, когда у него появилась
+# своя хореография — перелёт на голову, раскрытие, россыпь долларов и падение
+# (см. safe.gd). Оставить его и тут значило бы завести ВТОРОЙ сейф, тихий и
+# бесплатный, который вылетал бы из общего пула угроз наравне с настоящим.
 const KINDS : Dictionary = {
-	# Сейф — самый тяжёлый предмет в игре: медленный, крупный, 2 урона.
-	# Медленный намеренно: его видно издалека, но объехать мешает размер.
-	"safe":     { "px": 78.0, "dmg": 2, "speed_mult": 0.78, "move": "straight" },
 	# Коктейль — замедляющий, урона не наносит (как банан и пиво).
 	"cocktail": { "px": 50.0, "dmg": 0, "speed_mult": 1.0,  "move": "straight", "slow": 4.0 },
 	# Коп — бьёт на 1 и ВЫЗЫВАЕТ ПОДМОГУ: раз в COP_CALL_PERIOD роняет наручники.
@@ -96,7 +97,7 @@ const HANDCUFF_DROP_SPEED_MULT : float = 1.25
 const THROW_EXTRA : float = 90.0
 
 @export var speed : float = 250.0
-@export var kind  : String = "safe"
+@export var kind  : String = "helm"
 
 var damage : int = 1
 
@@ -111,7 +112,7 @@ var _falling : bool       = false
 var _fall_vel: Vector2    = Vector2.ZERO
 
 func _ready() -> void:
-	_cfg    = KINDS.get(kind, KINDS["safe"])
+	_cfg    = KINDS.get(kind, KINDS["helm"])
 	damage  = int(_cfg.get("dmg", 1))
 	speed  *= float(_cfg.get("speed_mult", 1.0))
 	_base_y = position.y
@@ -130,7 +131,7 @@ func _ready() -> void:
 		set_meta("invert_duration", float(_cfg["invert"]))
 
 	_sprite = Sprite2D.new()
-	_sprite.texture = TEX.get(kind, TEX["safe"])
+	_sprite.texture = TEX.get(kind, TEX["helm"])
 	ItemSizing.fit_sprite_content(_sprite, float(_cfg.get("px", 56.0)))
 	add_child(_sprite)
 

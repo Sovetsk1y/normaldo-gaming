@@ -46,6 +46,8 @@ func _initialize() -> void:
 	await _test_police_car()
 	print("── Рыжий и седой бомж ──")
 	await _test_bum_variety()
+	print("── Сейф вскрывается ударом ──")
+	await _test_safe_crack()
 
 	print("")
 	if _fails == 0:
@@ -319,6 +321,97 @@ func _test_money_bag_glyph() -> void:
 		if is_instance_valid(got[i]) and (got[i] as Node2D).position.x < before[i] - 1.0:
 			moved += 1
 	_check(moved == got.size(), "поехали влево все %d из %d" % [moved, got.size()])
+
+	game.queue_free()
+	await process_frame
+
+# Сейф — единственный предмет, за удар о который ПЛАТЯТ: бьёт на 2 и тем же
+# ударом вскрывается, высыпая доллары. Ломается это по частям и молча: урон
+# может остаться без выплаты (и сейф снова станет самым дорогим способом
+# потерять жир), выплата — без урона (и он станет бесплатным банкоматом), а сам
+# он может залипнуть на голове навсегда.
+#
+# Проверяется поэтому весь такт: цена, товар, и то, что сейф после этого
+# ОТВАЛИВАЕТСЯ.
+func _test_safe_crack() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var sp : Node = game.get_node_or_null("Spawner")
+	var n  : Node2D = game.get_node_or_null("Normaldo")
+	sp.call("clear_items")
+	sp.set_process(false)
+	get_root().get_tree().paused = false
+	var vp : Vector2 = get_root().get_visible_rect().size
+
+	# Сейф в игре ОДИН: строки в таблице угроз у него больше нет, иначе рядом с
+	# настоящим летал бы второй — тихий и бесплатный.
+	var hz = load("res://scripts/hazard_item.gd")
+	_check(not (hz.KINDS as Dictionary).has("safe"),
+		"сейфа нет среди рядовых угроз — он свой скрипт")
+
+	sp.call("_spawn_safe", vp.y * 0.5, vp.x, 250.0)
+	await process_frame
+	var safe : Node2D = null
+	for c in sp.get_children():
+		if c.is_in_group("safe"):
+			safe = c
+	_check(safe != null, "сейф появился")
+	if safe == null:
+		game.queue_free()
+		return
+	# Группа `safe` — то, по чему его узнаёт резист скина; `obstacle` — ветка
+	# удара. Потеряй он любую, и он либо перестанет бить, либо перестанет
+	# резаться.
+	_check(safe.is_in_group("obstacle"), "и лежит в обычной ветке удара")
+	_check(int(safe.get("damage")) == 2, "бьёт на два: %d" % int(safe.get("damage")))
+
+	# Настоящий удар головой: жир падает И деньги высыпаются.
+	var save : Node = get_root().get_node_or_null("SaveData")
+	save.active_skin = "classic"       # без резистов: проверяем цену, а не защиту
+	save.skin_level  = 1
+	n.call("reload_skin")
+	n.call("_build_skin_runtime")
+	# Ставим полный жир: на нулевом удар в два просто убивает, и «сколько стоил
+	# сейф» проверить уже нечем.
+	n.set("fat_state", 3)
+	n.call("_apply_skin_to_sprite")
+	await process_frame
+	var fat0 : int = int(n.get("fat_state"))
+	safe.position = n.position
+	await _tick(0.3)
+	_check(int(n.get("fat_state")) < fat0 or bool(n.get("_dead")),
+		"удар о сейф стоит жира: %d → %d" % [fat0, int(n.get("fat_state"))])
+
+	# Деньги: считаем НАКОПИТЕЛЬНО, по номерам узлов. Одновременно на экране их
+	# столько не бывает — доллары летят влево прямо в голову и собираются на
+	# ходу, так что «сколько сейчас лежит» меряет не выплату, а скорость еды.
+	var want : int = int(load("res://scripts/safe.gd").COIN_COUNT)
+	var seen_coins : Dictionary = {}
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 6000:
+		get_root().get_tree().paused = false
+		await process_frame
+		for c in sp.get_children():
+			if c.is_in_group("dollar") or c.is_in_group("money_bag"):
+				seen_coins[c.get_instance_id()] = true
+		if seen_coins.size() >= want:
+			break
+	_check(seen_coins.size() >= want,
+		"и высыпает пачку: %d штук" % seen_coins.size())
+
+	# И ОТВАЛИВАЕТСЯ: пустой сейф не остаётся висеть на голове.
+	var t1 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t1 < 5000:
+		get_root().get_tree().paused = false
+		await process_frame
+		if not is_instance_valid(safe) or bool(safe.get("_falling")):
+			break
+	_check(not is_instance_valid(safe) or bool(safe.get("_falling")),
+		"пустой сейф отваливается и падает")
+	if is_instance_valid(safe):
+		_check(int(safe.get("collision_layer")) == 0,
+			"и по дороге вниз уже не бьёт")
 
 	game.queue_free()
 	await process_frame
@@ -753,7 +846,9 @@ func _test_hazards() -> void:
 	host.add_child(spawner)
 	await process_frame
 
-	var kinds := ["safe", "cocktail", "cop", "poison", "bird", "helm", "shaman"]
+	# Сейфа в списке нет: у него свой скрипт и своя проверка — он давно не
+	# «строка в таблице угроз».
+	var kinds := ["cocktail", "cop", "poison", "bird", "helm", "shaman"]
 	var made : Array = []
 	for k in kinds:
 		var n := Area2D.new()
@@ -774,20 +869,25 @@ func _test_hazards() -> void:
 		var cls := n.is_in_group("slowing") if kinds[i] == "cocktail" else n.is_in_group("obstacle")
 		_check(own and cls, "«%s» в своей группе и в правильном классе" % kinds[i])
 
-	# Побочные эффекты приходят метаданными.
-	_check(made[1].has_meta("slow_duration"), "коктейль замедляет")
-	_check(made[3].has_meta("slow_duration"), "яд травит")
-	_check(made[6].has_meta("invert_duration"), "шаман разворачивает управление")
-	_check(int(made[0].get("damage")) == 2, "сейф бьёт на 2")
+	# Побочные эффекты приходят метаданными. Ищем ПО ИМЕНИ, а не по номеру в
+	# списке: номера жили тут раньше и разъехались на первой же правке списка —
+	# «яд травит» падало на исправном яде, потому что из списка уехал сейф.
+	var by_kind : Dictionary = {}
+	for i in kinds.size():
+		by_kind[kinds[i]] = made[i]
+	_check(by_kind["cocktail"].has_meta("slow_duration"), "коктейль замедляет")
+	_check(by_kind["poison"].has_meta("slow_duration"), "яд травит")
+	_check(by_kind["shaman"].has_meta("invert_duration"), "шаман разворачивает управление")
 
 	# Птица идёт синусоидой — проверяем ДО долгого ожидания, она улетает быстрее
 	# всех остальных и успевает освободиться.
-	var by := float(made[4].position.y)
+	var bird : Area2D = by_kind["bird"]
+	var by := float(bird.position.y)
 	var t0 := 0.0
 	while t0 < 0.5:
 		await process_frame
 		t0 += 1.0 / 60.0
-	_check(is_instance_valid(made[4]) and absf(float(made[4].position.y) - by) > 1.0,
+	_check(is_instance_valid(bird) and absf(float(bird.position.y) - by) > 1.0,
 		"птица летит по синусоиде")
 
 	# Коп зовёт подмогу: через период на поле появляются наручники.

@@ -79,7 +79,7 @@ func _initialize() -> void:
 	if mode in ["dollar", "cash", "power", "web"]:
 		var rock := Area2D.new()
 		rock.set_script(preload("res://scripts/hazard_item.gd"))
-		rock.set("kind", "safe")
+		rock.set("kind", "helm")
 		rock.set("speed", 0.0)
 		# Мишень паутине ставится ДАЛЬШЕ: нить снимается на попадании, а снять
 		# надо её саму — значит снаряду нужно время в полёте.
