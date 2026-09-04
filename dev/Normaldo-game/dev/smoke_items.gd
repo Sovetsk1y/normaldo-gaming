@@ -567,7 +567,17 @@ func _test_police_car() -> void:
 			box = c
 	var h : float = 0.0 if box == null else float((box.shape as RectangleShape2D).size.y)
 	_check(h > lane_h * 1.0 and h < lane_h * 2.0,
-		"перекрывает две линии, но не впритык: %.0f при лейне %.0f" % [h, lane_h])
+		"достаёт до обеих линий пары: %.0f при лейне %.0f" % [h, lane_h])
+	# Размер — тот же, что у машины на финале хозяина клуба: в глазах игрока это
+	# одна и та же машина, а не две разного роста.
+	var spr : Sprite2D = null
+	for c in car.get_children():
+		if c is Sprite2D:
+			spr = c
+	var body_w : float = 0.0 if spr == null \
+		else float(ItemSizing.content_rect(spr.texture).size.x) * spr.scale.x
+	_check(absf(body_w - float(load("res://scripts/club_boss.gd").CAR_PX)) < 2.0,
+		"и ростом с боссовую: %.0f при %.0f" % [body_w, float(load("res://scripts/club_boss.gd").CAR_PX)])
 	_check(float(car.get("speed")) > 250.0,
 		"идёт быстрее потока: %.0f против 250" % float(car.get("speed")))
 

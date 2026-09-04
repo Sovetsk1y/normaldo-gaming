@@ -30,10 +30,15 @@ const CAR_TEX  := preload("res://assets/items/police_car.png")
 const COP_HAZARD := preload("res://scripts/hazard_item.gd")
 const CRASH_SFX  := preload("res://assets/audio/hit.mp3")
 
-# Занимает ДВЕ линии из пяти, но не впритык: 1.86 вместо 2.0 оставляет по
-# полкорпуса воздуха сверху и снизу, иначе машина визуально сливается с
-# соседними линиями и «щель рядом» перестаёт читаться.
-const LANES_TALL  : float = 1.86
+# Размер — ТОТ ЖЕ, что у машины на финале хозяина клуба (`club_boss.CAR_PX`):
+# 300 px по длинной стороне, то есть 300×140 на экране. Так это одна и та же
+# машина в глазах игрока, а не две разного роста.
+#
+# Мерили её сначала по ВЫСОТЕ — «две линии из пяти», 160 px, — и получалось 343
+# в длину: заметно крупнее той, что приезжает за боссом. Двух линий она при этом
+# всё равно достаёт: хитбокс в 109 px при лейне 86 перекрывает обе, между
+# центрами которых она идёт.
+const CAR_PX : float = 300.0
 const SPEED_MULT  : float = 1.75
 # Где она разбивается — доля ширины экрана. Нормальдо стоит примерно на 0.23,
 # поэтому 0.30: авария происходит У НЕГО ПЕРЕД НОСОМ, а не за спиной, где её
@@ -65,17 +70,12 @@ func _ready() -> void:
 	monitoring      = true
 	area_entered.connect(_on_area)
 
-	var vp := get_viewport_rect().size
-	var lane_h : float = vp.y / float(maxi(1, lanes_total))
-
 	_sprite = Sprite2D.new()
 	_sprite.texture = CAR_TEX
 	# Лист нарисован вверх колёсами (мигалка внизу, крыша сверху) — отражаем:
 	# машина перевёрнутая, но не вверх ногами.
 	_sprite.flip_v  = true
-	# Меряем по ВЫСОТЕ, а не по длинной стороне: «две линии» — это про высоту, и
-	# длина корпуса обязана следовать за ней, а не наоборот.
-	_sprite.scale   = Vector2.ONE * _height_scale(lane_h * LANES_TALL)
+	ItemSizing.fit_sprite_content(_sprite, CAR_PX)
 	add_child(_sprite)
 
 	var rect := RectangleShape2D.new()
@@ -87,10 +87,6 @@ func _ready() -> void:
 	var cs := CollisionShape2D.new()
 	cs.shape   = rect
 	add_child(cs)
-
-func _height_scale(target_h: float) -> float:
-	var h : float = float(ItemSizing.content_rect(CAR_TEX).size.y)
-	return target_h / maxf(1.0, h)
 
 func _process(delta: float) -> void:
 	if _crashed:
