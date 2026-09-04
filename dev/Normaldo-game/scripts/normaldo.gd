@@ -276,11 +276,6 @@ const _ITEM_SCENE        := preload("res://scenes/item.tscn")
 const _PIZZA_TEX         := preload("res://assets/items/pizza.png")
 const _DOLLAR_TEX        := preload("res://assets/items/dollar.png")
 const _RESIST_SFX        := preload("res://assets/audio/resist.mp3")
-# На предмете остаётся ПАУТИНА, а не руки. Раньше сюда был подставлен
-# big_shot.png — а это пара ладоней Спайди, и на залепленной бочке вырастали
-# две красные руки неизвестно чьи. Паутина — последний кадр раскадровки, там
-# она раскрыта полностью.
-const _WEB_BIG_TEX       := preload("res://assets/skills/spider_man/web8.png")
 const _WEB_HANDS_TEX     := preload("res://assets/skills/spider_man/big_shot.png")
 # Кулак Викинга и перчатка Тайсона лежат в assets/skills/<скин>/ и рисуются
 # прямо в позе каста (stateN_spell). Отдельными спрайтами их больше не спавним —
@@ -2125,11 +2120,12 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 				_RYAG_HIT_GROUPS, _to_magic_box_handler(), WIZARD_STAR_SPIN)
 			_play_oneshot(_SFX_GLITTER, -6.0)
 		"web_pull":
-			# Спайдер: паутина цепляет предмет и ТЯНЕТ его к себе, а не ломает —
-			# в этом вся разница с остальными дальними спеллами.
+			# Спайдер: паутина ПРОБИВАЕТ линию, ломая всё плохое, и гаснет на
+			# первом хорошем, утащив его к голове. Один каст — расчищенная
+			# дорожка и добыча в конце.
 			var web := _make_anim_sprite("res://assets/skills/spider_man/", "web", 8, WEB_SHOT_PX)
 			var ps := _spawn_skill_projectile(dir, 600.0, web, 28.0,
-				["obstacle", "pizza", "dollar"], _pull_handler(), 0.0)
+				WEB_BAD_GROUPS + WEB_GOOD_GROUPS, _web_handler(), 0.0)
 			_arm_frames(ps, web, 20.0)
 			_attach_web_line(ps)
 			_play_skill_sfx(SkinSkills.DODGE)
@@ -2267,30 +2263,36 @@ func _throw_shovel(dir: Vector2) -> void:
 	_spawn_skill_projectile(dir, 540.0, sh, 26.0, _RYAG_HIT_GROUPS, _break_once_handler(), 11.0)
 	_play_skill_sfx(SkinSkills.DODGE)
 
-# Паутина работает по-разному в зависимости от того, во что попала:
+# Паутина ПРОБИВАЕТ линию: ломает всё плохое, что встретила, и гаснет на первом
+# ХОРОШЕМ, утащив его к голове. Один каст — расчищенная дорожка и добыча в конце
+# неё; в этом весь спелл, и в этом же его отличие от остальных дальних.
 #
-#   ДОБЫЧА (пицца, доллар, бонус) — подтягивается к голове. Это и есть
-#     «притягивание паутиной»: собрать то, до чего не дотянуться.
-#   ПРЕПЯТСТВИЕ — ломать его паутина не должна, она липкая, а не режущая.
-#     Паутина ОСТАЁТСЯ на предмете и тормозит его, давая время объехать.
+# Прежняя версия гасла на ПЕРВОМ предмете любого рода, а препятствие не ломала, а
+# заклеивала и замедляла. Играло это так: чаще всего паутина втыкалась в ближайшую
+# бочку, обклеивала её и кончалась, ничего не изменив, — «липкая, а не режущая»
+# было верно про паутину и неверно про спелл. Обещание «Спайди расчищает путь»
+# теперь выполняется буквально.
 #
-# Разделение важно: иначе спелл с откатом 2 секунды просто уничтожал бы любую
-# угрозу и обесценивал весь остальной набор скинов.
-const WEB_SLOW_FACTOR   : float = 0.35   # во столько раз замедляется предмет
-const WEB_STICK_TIME    : float = 3.0    # сколько держится паутина
+# Плохое и хорошее — по ГРУППАМ, и плохое проверяется первым: наручники и чёрный
+# туз лежат и в своей группе, и в «obstacle», и они именно угроза.
+const WEB_BAD_GROUPS : Array = ["obstacle", "slowing", "fire", "bomb", "molotov"]
+const WEB_GOOD_GROUPS : Array = ["pizza", "pizza_pack", "dollar", "money_bag",
+	"magnet", "magic_box", "casey_mask", "magic_hat", "cola", "hourglass",
+	"casino_chip", "mutagen"]
 
-func _pull_handler() -> Callable:
+func _web_handler() -> Callable:
 	return func(node: Node) -> bool:
 		if not is_instance_valid(node) or not (node is Node2D):
 			return false
 		var n := node as Node2D
-		if n.is_in_group("obstacle") or n.is_in_group("slowing"):
-			_web_stick(n)
-		else:
-			_web_pull(n)
-		return true
+		for g in WEB_BAD_GROUPS:
+			if n.is_in_group(g):
+				_vfx_resist_break(n.global_position)
+				_kill_item(n)
+				return false     # ломаем и летим дальше
+		_web_pull(n)
+		return true              # первое хорошее — забрали и погасли
 
-# Липкая паутина на препятствии: большой спрайт поверх предмета + замедление.
 # ── Паутина Спайдера ─────────────────────────────────────────────────────────
 const WEB_SHOT_PX : float = 72.0   # было 50: снаряд терялся на фоне
 
@@ -2358,37 +2360,6 @@ func _drop_web(spr: Sprite2D) -> void:
 	tw.tween_property(spr, "rotation", spr.rotation + 1.4, 0.75)
 	tw.tween_property(spr, "modulate:a", 0.0, 0.3).set_delay(0.45)
 	tw.chain().tween_callback(spr.queue_free)
-
-func _web_stick(n: Node2D) -> void:
-	if n.has_meta("webbed"):
-		return
-	n.set_meta("webbed", true)
-	var spr := Sprite2D.new()
-	spr.texture        = _WEB_BIG_TEX
-	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	spr.z_index        = 5
-	# Считаем от РАЗМЕРА ПРЕДМЕТА, а не фиксированным числом: предметы теперь
-	# бывают ×1…×3 (см. ItemSizing), и одна паутина на всех смотрелась бы то
-	# нашлёпкой, то марлей.
-	var px : float = ItemSizing.BASE_PX * 1.9
-	spr.scale = Vector2.ONE * ItemSizing.fit_scale(_WEB_BIG_TEX, px)
-	spr.modulate = Color(1, 1, 1, 0.0)
-	n.add_child(spr)
-	var tin := spr.create_tween()
-	tin.tween_property(spr, "modulate:a", 0.95, 0.10)
-
-	if n.get("speed") != null:
-		var was : float = float(n.speed)
-		n.speed = was * WEB_SLOW_FACTOR
-		get_tree().create_timer(WEB_STICK_TIME).timeout.connect(func() -> void:
-			if not is_instance_valid(n):
-				return
-			if n.get("speed") != null:
-				n.speed = was
-			n.remove_meta("webbed")
-			_drop_web(spr))
-	_play_skill_sfx(SkinSkills.DODGE)
-
 func _web_pull(n: Node2D) -> void:
 	if n.has_method("set_process"):
 		n.set_process(false)

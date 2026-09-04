@@ -150,8 +150,8 @@ const DATA : Dictionary = {
 	"spider_man": {
 		"skills": [], "resists": [],
 		"ability": { "type": SPELL, "id": "web_pull", "combat": RANGED, "cd": 2.0,
-			"label": "ПРИТЯГИВАНИЕ ПАУТИНОЙ", "projectile": "web",
-			"desc": "Паутина цепляет предмет и тянет его к тебе" },
+			"label": "РАСЧИСТКА", "projectile": "web",
+			"desc": "Паутина ломает всё плохое на линии и утаскивает первую добычу" },
 		"unique": { "id": "spider_sense", "label": "ПОВЫШЕННАЯ ЛОВКОСТЬ", "short": "Л",
 			"desc": "Паук слушается мгновенно — увороты даются легко на любом жире" },
 	},

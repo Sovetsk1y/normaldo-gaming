@@ -593,9 +593,12 @@ func _test_casts(reg: Node, save: Node) -> void:
 
 	game.queue_free()
 
-# Паутина обязана вести себя по-разному: добычу тянет к себе, препятствие
-# облепляет и тормозит. Если перепутать — спелл с откатом 2 c будет уничтожать
-# любую угрозу и обесценит остальные скины.
+# Паутина обязана вести себя по-разному: угрозу ЛОМАЕТ и летит дальше, добычу
+# тянет к себе и гаснет. Перепутать легко, и на экране разницы не видно —
+# ломается всё равно что-то.
+#
+# Порядок каста целиком проверяет `dev/smoke_spells.gd`; здесь — две половины по
+# отдельности, вызовом изнутри.
 func _test_web(save: Node) -> void:
 	var game : Node = load("res://scenes/game.tscn").instantiate()
 	get_root().add_child(game)
@@ -608,7 +611,7 @@ func _test_web(save: Node) -> void:
 	normaldo.reload_skin()
 	await process_frame
 
-	# Препятствие: липнет и тормозит, но НЕ ломается.
+	# Препятствие: ЛОМАЕТСЯ, и снаряд летит дальше (обработчик возвращает false).
 	var rock := Area2D.new()
 	rock.set_script(preload("res://scripts/hazard_item.gd"))
 	rock.set("kind", "safe")
@@ -616,13 +619,13 @@ func _test_web(save: Node) -> void:
 	rock.position = Vector2(500.0, 200.0)
 	spawner.add_child(rock)
 	await process_frame
-	var speed_before : float = float(rock.get("speed"))
-	normaldo.call("_web_stick", rock)
+	var handler : Callable = normaldo.call("_web_handler")
+	var consumed : bool = bool(handler.call(rock))
 	await process_frame
-	_check(is_instance_valid(rock), "препятствие после паутины ЖИВО, а не сломано")
-	_check(float(rock.get("speed")) < speed_before,
-		"препятствие замедлено: %.0f → %.0f" % [speed_before, float(rock.get("speed"))])
-	_check(rock.has_meta("webbed"), "на препятствии висит паутина")
+	# «Сломано» — это `knock_down`: предмет сбит и падает, а не исчезает в кадре.
+	_check(not is_instance_valid(rock) or bool(rock.get("_falling")),
+		"препятствие паутина ЛОМАЕТ")
+	_check(not consumed, "и летит дальше, а не гаснет на нём")
 
 	# Добыча: подтягивается к голове.
 	var pizza := Area2D.new()

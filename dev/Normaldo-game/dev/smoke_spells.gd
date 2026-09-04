@@ -14,7 +14,7 @@ var _checks : int = 0
 
 # Нижняя граница числа проверок. Держать точной незачем — она ловит не «стало на
 # одну меньше», а «не отработало вообще ничего».
-const EXPECTED_CHECKS : int = 80
+const EXPECTED_CHECKS : int = 84
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -53,6 +53,8 @@ func _initialize() -> void:
 	await _test_human_feast()
 	print("── Спайдер: нить цвета паутины ──")
 	await _test_web_color()
+	print("── Спайдер: паутина расчищает линию ──")
+	await _test_web_sweep()
 	print("── Бэтмен: батаранг рикошетит ──")
 	await _test_batarang_bounce()
 	print("── Маг: предмет → мэджик бокс ──")
@@ -706,6 +708,51 @@ func _test_web_color() -> void:
 	_check(mx - mn < 0.10, "нить обесцвечена (разброс каналов %.3f)" % (mx - mn))
 	_check(mx < 0.60, "и не белая (ярчайший канал %.2f)" % mx)
 	_check(mx > 0.30, "но и не чёрная (ярчайший канал %.2f)" % mx)
+
+# Паутина ПРОБИВАЕТ линию: ломает всё плохое и гаснет на первом хорошем, утащив
+# его к голове. Прежняя гасла на первом же предмете любого рода и препятствие не
+# ломала, а заклеивала — чаще всего каст втыкался в ближайшую бочку и кончался
+# ничем.
+#
+# Проверяется именно порядок: угрозы ПЕРЕД добычей должны исчезнуть, добыча —
+# приехать, а угроза ЗА добычей — остаться, иначе «гаснет на первом хорошем»
+# ничего не значит.
+func _test_web_sweep() -> void:
+	var e : Dictionary = await _boot("spider_man", 1)
+	var n : Node2D = e["n"]
+	var sp : Node = e["sp"]
+	var y : float = n.position.y
+
+	var bad1 := _rock(sp, Vector2(n.position.x + 150.0, y))
+	var bad2 := _rock(sp, Vector2(n.position.x + 260.0, y))
+	# Добыча — пицца: её приход видно по счётчику, а не по тому, что узла не
+	# стало. «Не стало» одинаково означает и «съели», и «сломали».
+	var good : Node2D = (load("res://scenes/item.tscn") as PackedScene).instantiate()
+	good.speed      = 0.0
+	good.is_eatable = true
+	good.damage     = 0
+	good.item_group = "pizza"
+	(good.get_node("Sprite2D") as Sprite2D).texture = load("res://assets/items/pizza.png")
+	good.position = Vector2(n.position.x + 370.0, y)
+	sp.add_child(good)
+	var behind := _rock(sp, Vector2(n.position.x + 470.0, y))
+	await process_frame
+
+	var eaten0 : int = int(n.get("_total_pizza_count"))
+	n.set("_skill_cd", 0.0)
+	n.set("_active_charges", 1)
+	n.call("_try_fire_ability", Vector2(n.position.x + 600.0, y))
+	await _wait(1.2)
+
+	_check(not is_instance_valid(bad1) and not is_instance_valid(bad2),
+		"обе угрозы перед добычей сломаны")
+	_check(int(n.get("_total_pizza_count")) > eaten0,
+		"добыча притянута и съедена: %d → %d" % [eaten0, int(n.get("_total_pizza_count"))])
+	_check(is_instance_valid(behind),
+		"угроза ЗА добычей не тронута — паутина погасла на добыче")
+
+	(e["game"] as Node).queue_free()
+	await process_frame
 
 # ── Маг ──────────────────────────────────────────────────────────────────────
 # Раньше шар просто ломал предмет — то же самое, что у Бэтмена и Кусса, только
