@@ -186,8 +186,11 @@ func _run_boss() -> void:
 		if is_instance_valid(bg):
 			bg.start_scrolling()
 
-	_spawn_victory_burst()
-	await get_tree().create_timer(1.2).timeout
+	# САЛЮТА БОЛЬШЕ НЕТ. Частицы по краям экрана — универсальный «ура», который
+	# ничего не даёт и ничем не отличается от такого же «ура» в лудилке.
+	# Победу теперь печатает WIN из долларов (см. hud._on_boss_defeated): его
+	# можно СОБРАТЬ, и уровень кончается тем, ради чего в него шли.
+	await get_tree().create_timer(0.4).timeout
 	defeated.emit()
 	if boss_test_mode and is_instance_valid(_normaldo):
 		var kill_tw := _game_root.create_tween()
@@ -928,33 +931,6 @@ func _impact_burst() -> void:
 	_game_root.add_child(p)
 	p.global_position         = global_position
 	p.finished.connect(p.queue_free)
-
-func _spawn_victory_burst() -> void:
-	var vp := get_viewport_rect()
-	for i in 6:
-		var p                    := CPUParticles2D.new()
-		p.one_shot                = true
-		p.emitting                = true
-		p.amount                  = 32
-		p.lifetime                = 1.3
-		p.explosiveness           = 0.90
-		p.spread                  = 180.0
-		p.gravity                 = Vector2(0, -85)
-		p.initial_velocity_min    = 90.0
-		p.initial_velocity_max    = 270.0
-		p.scale_amount_min        = 5.0
-		p.scale_amount_max        = 13.0
-		var g                    := Gradient.new()
-		g.set_color(0, Color(1.0, 0.92, 0.28, 1.0))
-		g.add_point(0.38, Color(0.28, 0.85, 0.28, 0.90))
-		g.add_point(1.0,  Color(0.08, 0.38, 0.08, 0.00))
-		p.color_ramp              = g
-		_game_root.add_child(p)
-		p.global_position = Vector2(
-			vp.size.x * (0.08 + i * 0.17),
-			vp.size.y * randf_range(0.30, 0.70)
-		)
-		p.finished.connect(p.queue_free)
 
 # ── Utility ───────────────────────────────────────────────────────────────────
 

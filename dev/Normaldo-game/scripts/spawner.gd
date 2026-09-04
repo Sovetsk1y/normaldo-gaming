@@ -335,7 +335,16 @@ const LETTER_GLYPHS : Dictionary = {
 	"A": ["..X..", ".X.X.", "X...X", "X...X", "XXXXX", "X...X", "X...X"],
 	"L": ["X....", "X....", "X....", "X....", "X....", "X....", "XXXXX"],
 	"D": ["XXXX.", "X...X", "X...X", "X...X", "X...X", "X...X", "XXXX."],
+	# W и I в слове NORMALDO не нужны — они для WIN, которое выкладывается
+	# долларами после победы над боссом (см. `lay_word`). Живут здесь же, а не
+	# отдельным словарём: два набора букв разошлись бы на первой же правке
+	# сетки, и на экране завелись бы два шрифта.
+	"W": ["X...X", "X...X", "X...X", "X.X.X", "X.X.X", "XX.XX", "X...X"],
+	"I": ["XXXXX", "..X..", "..X..", "..X..", "..X..", "..X..", "XXXXX"],
 }
+# Пробел между буквами слова, в клетках. Без него WIN слипается в одну кляксу:
+# у W правый столбец занят, у I левый — тоже.
+const WORD_GAP_COLS : float = 1.0
 
 var _letter_idx    : int   = 0
 var _letter_timer  : float = LETTER_PERIOD
@@ -357,6 +366,43 @@ func _tick_letters(delta: float) -> void:
 		_letter_timer = _letter_period()
 		_run_letter()
 
+# Выкладывает СЛОВО за правым краем экрана — по букве из сетки 5×7, целиком из
+# пиццы или целиком из долларов. Возвращает, сколько ждать, пока слово пройдёт
+# мимо игрока.
+#
+# Одной буквой это зовёт оазис NORMALDO, тремя — победа над боссом (WIN из
+# долларов). Общий метод намеренно: обе выкладки — один и тот же приём, и
+# разъехавшись, они разъехались бы и на экране.
+func lay_word(word: String, as_pizza: bool, speed_override: float = -1.0) -> float:
+	var vp    := get_viewport_rect().size
+	var speed : float = speed_override if speed_override > 0.0 else _campaign_item_speed()
+	var cell  : float = vp.y * LETTER_H_FRAC / float(LETTER_ROWS)
+	var top   : float = (vp.y - cell * float(LETTER_ROWS)) * 0.5 + cell * 0.5
+	var left  : float = vp.x + 90.0
+
+	for i in word.length():
+		var glyph : Array = LETTER_GLYPHS.get(word[i], LETTER_GLYPHS["O"])
+		var ox : float = left + float(i) * cell * (float(LETTER_COLS) + WORD_GAP_COLS)
+		for row in LETTER_ROWS:
+			var line : String = glyph[row]
+			for col in LETTER_COLS:
+				if col >= line.length() or line[col] != "X":
+					continue
+				var item : Node = _make_item(
+					PIZZA_TEX if as_pizza else DOLLAR_TEX,
+					0.09 if as_pizza else 0.36,
+					speed, 0, as_pizza, true, as_pizza)
+				if not as_pizza:
+					item.item_group = "dollar"
+				item.position = Vector2(ox + float(col) * cell, top + float(row) * cell)
+				add_child(item)
+
+	# Держим, пока слово не пройдёт мимо игрока. Ждать полного ухода за левый
+	# край незачем: за спиной у Нормальдо поток уже никому не мешает.
+	var width : float = cell * (float(LETTER_COLS) * float(word.length())
+		+ WORD_GAP_COLS * float(maxi(0, word.length() - 1)))
+	return (left + width - 160.0) / maxf(speed, 1.0)
+
 func _run_letter() -> void:
 	var ch : String = LETTER_WORD[_letter_idx]
 	_letter_idx += 1
@@ -366,32 +412,7 @@ func _run_letter() -> void:
 	_frozen          = true
 	_pattern_running = false
 
-	var vp    := get_viewport_rect().size
-	var speed : float = _campaign_item_speed()
-	var cell  : float = vp.y * LETTER_H_FRAC / float(LETTER_ROWS)
-	var top   : float = (vp.y - cell * float(LETTER_ROWS)) * 0.5 + cell * 0.5
-	var as_pizza : bool = randf() < 0.5
-	var glyph : Array = LETTER_GLYPHS.get(ch, LETTER_GLYPHS["O"])
-
-	for row in LETTER_ROWS:
-		var line : String = glyph[row]
-		for col in LETTER_COLS:
-			if col >= line.length() or line[col] != "X":
-				continue
-			var item : Node = _make_item(
-				PIZZA_TEX if as_pizza else DOLLAR_TEX,
-				0.09 if as_pizza else 0.36,
-				speed, 0, as_pizza, true, as_pizza)
-			if not as_pizza:
-				item.item_group = "dollar"
-			item.position = Vector2(vp.x + 90.0 + float(col) * cell,
-				top + float(row) * cell)
-			add_child(item)
-
-	# Держим оазис, пока буква не пройдёт мимо игрока. Ждать полного ухода за
-	# левый край незачем: за спиной у Нормальдо поток уже никому не мешает.
-	var width : float = cell * float(LETTER_COLS)
-	var hold  : float = (vp.x + 90.0 + width - 160.0) / maxf(speed, 1.0)
+	var hold : float = lay_word(ch, randf() < 0.5)
 	await get_tree().create_timer(hold).timeout
 	if not is_inside_tree():
 		return

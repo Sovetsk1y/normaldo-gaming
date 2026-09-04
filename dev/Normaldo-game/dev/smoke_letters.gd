@@ -15,7 +15,7 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 12
+const EXPECTED_CHECKS : int = 20
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -40,7 +40,62 @@ func _initialize() -> void:
 	await _test_one_letter(sp)
 	print("── Слово и босс ──")
 	await _test_word(sp)
+	print("── WIN после босса ──")
+	await _test_win_word(sp)
 	_finish()
+
+# Победа над боссом печатает WIN долларами — тем же приёмом, что и буквы.
+# Салюта на этом месте больше нет: частицы по краям экрана ничего не дают и
+# ничем не отличаются от такого же салюта в лудилке.
+#
+# Проверяется здесь ровно то, чем слово отличается от буквы: три глифа подряд,
+# не слипшиеся, из долларов и во всю высоту.
+func _test_win_word(sp: Node) -> void:
+	sp.call("clear_items")
+	sp.set("_frozen", false)
+	await process_frame
+	var vp : Vector2 = get_root().get_visible_rect().size
+
+	var word : String = "WIN"
+	var miss : Array = []
+	for i in word.length():
+		if not (sp.LETTER_GLYPHS as Dictionary).has(word[i]):
+			miss.append(word[i])
+	_check(miss.is_empty(), "глиф есть у каждой буквы WIN: %s" % str(miss))
+
+	var hold : float = float(sp.call("lay_word", word, false))
+	await process_frame
+	var items : Array = sp.get_children()
+	_check(items.size() > 30, "WIN выложено из предметов: %d" % items.size())
+
+	var dollars := 0
+	for it in items:
+		if it.is_in_group("dollar"):
+			dollars += 1
+	_check(dollars == items.size(),
+		"и целиком из долларов: %d из %d" % [dollars, items.size()])
+
+	# Три буквы, а не одна: слово обязано быть ШИРЕ буквы ровно втрое с
+	# пробелами. Слипшееся WIN читается как клякса.
+	var cell  : float = vp.y * float(sp.LETTER_H_FRAC) / float(sp.LETTER_ROWS)
+	var x0 := INF
+	var x1 := -INF
+	var y0 := INF
+	var y1 := -INF
+	for it in items:
+		x0 = minf(x0, (it as Node2D).position.x)
+		x1 = maxf(x1, (it as Node2D).position.x)
+		y0 = minf(y0, (it as Node2D).position.y)
+		y1 = maxf(y1, (it as Node2D).position.y)
+	var want_w : float = cell * (float(sp.LETTER_COLS) * 3.0 + float(sp.WORD_GAP_COLS) * 2.0 - 1.0)
+	_check(absf((x1 - x0) - want_w) < cell,
+		"ширина в три буквы с пробелами: %.0f при ожидаемых %.0f" % [x1 - x0, want_w])
+	_check(y1 - y0 > vp.y * 0.7,
+		"и во всю высоту: %.0f из %.0f" % [y1 - y0, vp.y])
+	_check(x0 > vp.x, "стартует целиком из-за края: %.0f при экране %.0f" % [x0, vp.x])
+	_check(hold > 1.0, "и ждать его есть сколько: %.1f с" % hold)
+	sp.call("clear_items")
+	await process_frame
 
 # Слово должно быть выложено ЦЕЛИКОМ: буква без глифа молча превратилась бы в
 # пустой оазис — тридцать секунд тишины ни за что.
