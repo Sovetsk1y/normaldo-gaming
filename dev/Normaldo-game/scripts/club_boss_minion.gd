@@ -1,5 +1,7 @@
 extends Area2D
 
+const HumanSway := preload("res://scripts/human_sway.gd")
+
 # ── Вызванный боссом клуба ────────────────────────────────────────────────────
 # Охранник, коп или девочка. Разные они только картинкой, скоростью и стороной,
 # с которой приходят: поведение у всех одно — ИДТИ ПО СВОЕЙ ЛИНИИ И НЕ
@@ -29,6 +31,8 @@ var _dir  : Vector2 = Vector2.LEFT
 var _spr  : Sprite2D = null
 var _bob  : float = 0.0
 var _base_y : float = 0.0
+var _sway_t : float = 0.0
+var _sway_ph: float = 0.0
 
 # Покачивание на ходу. Идущий ровной прямой без единого движения читается как
 # летящая картинка, а не как персонаж; амплитуда маленькая, чтобы не сбивать
@@ -59,6 +63,7 @@ func _ready() -> void:
 		add_to_group("obstacle")
 	add_to_group("club_minion")
 	_base_y = position.y
+	_sway_ph = HumanSway.random_phase()
 	_bob    = randf() * TAU
 
 	_spr = Sprite2D.new()
@@ -82,6 +87,11 @@ func _process(delta: float) -> void:
 	position.x += _dir.x * speed * delta
 	_bob += delta * BOB_RATE
 	position.y = _base_y + sin(_bob) * BOB_AMP
+	# Она тоже человек: покачивается общим кирпичом, как бомж и коп. Своё
+	# «плавание по вертикали» (_bob) при этом остаётся — оно про полёт, а
+	# покачивание про то, что она живая.
+	_sway_t += delta
+	HumanSway.apply(_spr, _sway_t, _sway_ph)
 	var vp := get_viewport_rect().size
 	if position.x < -180.0 or position.x > vp.x + 180.0:
 		queue_free()

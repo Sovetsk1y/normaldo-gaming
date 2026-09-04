@@ -38,6 +38,7 @@ const BUM_TEX : Array = [
 	preload("res://assets/items/homeless2.png"),   # седой
 ]
 const DOG_SCENE := preload("res://scenes/dog.tscn")
+const HumanSway := preload("res://scripts/human_sway.gd")
 const HITBOX_SCRIPT := preload("res://scripts/setpiece_hitbox.gd")
 
 # ── Звук ─────────────────────────────────────────────────────────────────────
@@ -114,6 +115,7 @@ var _phase  : String = "enter"     # enter | act | leave
 var _bum_box    : Area2D = null
 var _barrel_box : Area2D = null
 var _sway_t : float = 0.0
+var _sway_ph: float = 0.0
 var _done   : bool = false
 
 # `normaldo` больше не нужен — собака летит по своей линии, а не в голову, — но
@@ -127,6 +129,7 @@ func _ready() -> void:
 	position = Vector2(vp.x + 120.0, lane_y)
 
 	_bum = Sprite2D.new()
+	_sway_ph     = HumanSway.random_phase()
 	_bum.texture = BUM_TEX[randi() % BUM_TEX.size()]
 	ItemSizing.fit_sprite_content(_bum, BUM_PX)
 	ItemSizing.anchor_sprite(_bum, 0.5, 0.5)
@@ -184,8 +187,10 @@ func _process(delta: float) -> void:
 	_sync_boxes()
 	if _phase == "enter":
 		position.x -= speed * delta
-		_sway_t += delta * 6.0
-		_bum.rotation = sin(_sway_t) * 0.05
+		# Общий кирпич покачивания (human_sway.gd) вместо своей формулы: своя
+		# была той же самой, и разъехалась бы на первой же правке амплитуды.
+		_sway_t += delta
+		HumanSway.apply(_bum, _sway_t, _sway_ph)
 		if _right_edge() < get_viewport_rect().size.x - ENTER_MARGIN:
 			_phase = "act"
 			_run()

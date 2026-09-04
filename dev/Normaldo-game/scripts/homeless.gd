@@ -1,5 +1,7 @@
 extends Area2D
 
+const HumanSway := preload("res://scripts/human_sway.gd")
+
 # ── Homeless ("бомж") — obstacle for the ЖИРОБОСС mini-game ───────────────────
 # homeless1 and homeless2 are TWO DIFFERENT bums (not animation frames). Each
 # spawn picks one at random as a static character, sized like a normal item
@@ -23,6 +25,7 @@ const DEATH_SFX := [
 var damage : int = 1
 
 var _sway_t    : float   = 0.0
+var _sway_ph   : float   = 0.0
 var _falling   : bool    = false
 var _fall_vel  : Vector2 = Vector2.ZERO
 var _fall_spin : float   = 0.0
@@ -30,6 +33,7 @@ var _fall_spin : float   = 0.0
 @onready var _sprite : Sprite2D = $Sprite2D
 
 func _ready() -> void:
+	_sway_ph               = HumanSway.random_phase()
 	_sprite.texture        = TEXTURES[randi() % TEXTURES.size()]
 	_sprite.scale          = Vector2.ONE * 0.2
 	_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -50,8 +54,10 @@ func _process(delta: float) -> void:
 			queue_free()
 		return
 	position.x -= speed * delta
-	_sway_t    += delta * 6.0
-	_sprite.rotation = sin(_sway_t) * 0.05
+	# Покачивание — общий кирпич на всех людей потока (см. human_sway.gd): своё
+	# у каждого разъехалось бы по амплитуде, и одна порода читалась бы тремя.
+	_sway_t += delta
+	HumanSway.apply(_sprite, _sway_t, _sway_ph)
 	if position.x < -200.0:
 		queue_free()
 

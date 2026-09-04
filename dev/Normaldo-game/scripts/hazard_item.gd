@@ -50,6 +50,20 @@ const EFFECT_ITEM := preload("res://scripts/effect_item.gd")
 
 const HIT_SFX  := preload("res://assets/audio/hit.mp3")
 const CAST_SFX := preload("res://assets/audio/magic_poof.mp3")
+const HumanSway := preload("res://scripts/human_sway.gd")
+
+# Крик птицы. Грузится ПО ПУТИ, а не preload'ом: своего звука у птицы в проекте
+# нет ни одного, и подставлять вместо него чужой (свист шляпы, взмах маски)
+# значило бы выдать за птицу то, что птицей не звучит. Появится файл — птица
+# закричит сама, без правки кода.
+const BIRD_SFX_PATH : String = "res://assets/audio/bird.mp3"
+# Кричит РАЗ за пролёт и не сразу: птица, орущая в момент появления за краем
+# экрана, кричит в пустоту — её ещё не видно.
+const BIRD_CRY_AT : float = 0.45
+
+# Кто ЖИВОЙ и потому покачивается на лету (см. human_sway.gd). Сейф и штурвал
+# сюда не входят по очевидной причине.
+const HUMANS : Array = ["cop", "shaman"]
 
 # px — экранный размер; speed_mult — доля от скорости потока.
 # СЕЙФА ЗДЕСЬ НЕТ. Он перестал быть строкой таблицы, когда у него появилась
@@ -63,11 +77,19 @@ const KINDS : Dictionary = {
 	# Из-за этого он опаснее своего урона, и резист к нему у Бэтмена с Джокером
 	# стоит дорого — на 8-м уровне.
 	"cop":      { "px": 66.0, "dmg": 1, "speed_mult": 0.92, "move": "straight" },
-	# Яд — бьёт и травит: урон плюс замедление.
-	"poison":   { "px": 52.0, "dmg": 1, "speed_mult": 1.0,  "move": "straight", "slow": 3.0 },
+	# Яд НЕ БЬЁТ, а травит. Урон у него был, но правило в игре одно: из
+	# замедляющих бьёт только змея — на то она и живая. Взамен яд травит дольше
+	# всех (5 с против 4 у коктейля): иначе он превратился бы в тот же коктейль,
+	# только другой картинкой.
+	#
+	# 68 вместо 52: склянка размером с жетон терялась в потоке, а объехать её
+	# надо ЗАРАНЕЕ — замедление опаснее удара, потому что убивает не оно, а то,
+	# во что влетаешь следом.
+	"poison":   { "px": 68.0, "dmg": 0, "speed_mult": 1.0,  "move": "straight", "slow": 5.0 },
 	# Птица — единственная угроза, летящая по синусоиде: её нельзя объехать по
-	# прямой, надо читать фазу.
-	"bird":     { "px": 54.0, "dmg": 1, "speed_mult": 1.35, "move": "wave" },
+	# прямой, надо читать фазу. 72 вместо 54: фазу надо УСПЕТЬ ПРОЧИТАТЬ, а
+	# читается она по размаху крыльев, и на полсотни пикселей его не видно.
+	"bird":     { "px": 72.0, "dmg": 1, "speed_mult": 1.35, "move": "wave" },
 	# Штурвал — оружие Пирата, обёрнутое против игрока: крутится и летит быстро.
 	"helm":     { "px": 66.0, "dmg": 1, "speed_mult": 1.2,  "move": "spin" },
 	# Шаман — не бьёт больно, а ПРОКЛИНАЕТ: разворачивает управление на 3 с.
@@ -108,6 +130,10 @@ var _wave_t  : float      = 0.0
 var _spin    : float      = 0.0
 var _cop_t   : float      = 0.0
 var _cop_thrown : bool    = false
+var _alive_t : float      = 0.0     # сколько живёт — по нему качается и кричит
+var _sway_ph : float      = 0.0
+var _human   : bool       = false
+var _cried   : bool       = false
 var _falling : bool       = false
 var _fall_vel: Vector2    = Vector2.ZERO
 
@@ -145,6 +171,8 @@ func _ready() -> void:
 		_spin = float(_cfg.get("spin", 5.0))
 	if kind == "campfire":
 		_add_fire()
+	_human   = HUMANS.has(kind)
+	_sway_ph = HumanSway.random_phase()
 
 func _process(delta: float) -> void:
 	if _falling:
@@ -160,6 +188,13 @@ func _process(delta: float) -> void:
 		queue_free()
 		return
 
+	_alive_t += delta
+	if _human:
+		HumanSway.apply(_sprite, _alive_t, _sway_ph)
+	if kind == "bird" and not _cried and _alive_t >= BIRD_CRY_AT:
+		_cried = true
+		_cry()
+
 	match String(_cfg.get("move", "straight")):
 		"wave":
 			_wave_t += delta * WAVE_SPEED
@@ -171,6 +206,24 @@ func _process(delta: float) -> void:
 
 	if kind == "cop":
 		_tick_cop(delta)
+
+# Крик птицы. Молча, если файла ещё нет: отсутствие звука — это тишина, а не
+# ошибка, и сыпать ею в консоль каждую птицу незачем.
+func _cry() -> void:
+	if not ResourceLoader.exists(BIRD_SFX_PATH):
+		return
+	var stream := load(BIRD_SFX_PATH) as AudioStream
+	if stream == null:
+		return
+	var parent := get_parent()
+	if parent == null:
+		return
+	var a := AudioStreamPlayer.new()
+	a.stream    = stream
+	a.volume_db = -6.0
+	parent.add_child(a)
+	a.play()
+	a.finished.connect(a.queue_free)
 
 # Огонь поверх дров. Кадры те же, что горят после молотова, — и это не экономия
 # на рисунке: горящий костёр и горящая лужа обязаны выглядеть одним и тем же

@@ -3668,11 +3668,13 @@ func _on_area_entered(area: Area2D) -> void:
 		area.queue_free()
 	elif area.is_in_group("obstacle") or area.is_in_group("fire"):
 		if _scars_active:
-			# The Casey mask absorbs the impact: break the item, mask falls off.
+			# Маска Кейси поглощает удар: предмет ломается, маска слетает. Сейф в
+			# этом месте тоже ВСКРЫВАЕТСЯ — по нему ударили, а чем именно приняли
+			# удар, ящику всё равно.
 			_last_hit_group = _classify_hit_group(area)
 			_end_scars()
 			_vfx_resist_break(area.global_position)
-			_kill_item(area)
+			_crack_or_kill(area)
 		elif not _invincible:
 			_handle_obstacle(area)
 
@@ -3716,7 +3718,13 @@ func _handle_obstacle(area: Area2D) -> void:
 		return
 
 	var dmg := int(area.get("damage")) if area.get("damage") != null else 1
-	_take_hit(dmg)
+	# НУЛЕВОЙ УРОН — ЭТО НЕ УДАР. Раньше сюда всё равно уходил `_take_hit(0)`, а
+	# он на нулевом жире зовёт `_die()` и в любом случае обнуляет счётчик пиццы:
+	# бутылка и девочка-зазывала, которые по таблице не бьют вовсе, съедали
+	# прогресс к следующему жиру, а на последнем делении просто убивали. Отсюда
+	# и ощущение, что «замедляющие тоже наносят урон».
+	if dmg > 0:
+		_take_hit(dmg)
 	if area.get("slow_on_hit"):
 		apply_slow(float(area.get("slow_duration")))
 	# Предметы вроде яда травят сверх урона, шаман вдобавок разворачивает

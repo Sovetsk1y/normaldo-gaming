@@ -48,6 +48,10 @@ func _initialize() -> void:
 	await _test_bum_variety()
 	print("── Сейф вскрывается ударом ──")
 	await _test_safe_crack()
+	print("── Замедляющие не бьют ──")
+	await _test_slowers_dont_hit()
+	print("── Люди покачиваются ──")
+	await _test_human_sway()
 
 	print("")
 	if _fails == 0:
@@ -111,7 +115,11 @@ func _test_ninja_kinds() -> void:
 		if it == null:
 			continue
 		it.set("speed", 0.0)
-		it.position = Vector2(vp.x * (0.30 + 0.12 * float(i)), vp.y * (0.2 + 0.2 * float(i)))
+		# Мишени СПРАВА от ниндзя: он завешивает то, что игроку ЕЩЁ предстоит
+		# прочитать, а не то, что уже пролетело мимо. Ниндзя паркуется на
+		# PARK_X_RATIO ширины экрана — ставим мишени за ним.
+		it.position = Vector2(vp.x * (float(NINJA.PARK_X_RATIO) + 0.06 + 0.09 * float(i)),
+			vp.y * (0.2 + 0.2 * float(i)))
 		sp.add_child(it)
 		marks.append(it)
 	var yellow : Node2D = _put_ninja(sp, "smoke", vp)
@@ -452,6 +460,152 @@ func _test_safe_crack() -> void:
 			"резист удар отменил: жир %d → %d" % [fat_r, int(n.get("fat_state"))])
 		_check(seen2.size() >= want2,
 			"но сейф всё равно вскрылся: %d штук" % seen2.size())
+
+	# И ЧЕРЕЗ МАСКУ КЕЙСИ. Маска поглощает удар и слетает — но по ящику ударили,
+	# а чем именно приняли удар, ящику всё равно.
+	sp.call("clear_items")
+	await process_frame
+	save.active_skin = "classic"
+	save.skin_level  = 1
+	n.call("reload_skin")
+	n.call("_build_skin_runtime")
+	n.set("fat_state", 3)
+	n.call("_apply_skin_to_sprite")
+	n.call("_begin_scars", 8.0, false)
+	await process_frame
+	_check(bool(n.get("_scars_active")), "маска Кейси надета")
+
+	sp.call("_spawn_safe", vp.y * 0.5, vp.x, 250.0)
+	await process_frame
+	var safe3 : Node2D = null
+	for c in sp.get_children():
+		if c.is_in_group("safe"):
+			safe3 = c
+	if safe3 != null:
+		var fat_m : int = int(n.get("fat_state"))
+		safe3.position = n.position
+		var want3 : int = int(load("res://scripts/safe.gd").COIN_COUNT)
+		var seen3 : Dictionary = {}
+		var t3 := Time.get_ticks_msec()
+		while Time.get_ticks_msec() - t3 < 6000:
+			get_root().get_tree().paused = false
+			await process_frame
+			for c in sp.get_children():
+				if c.is_in_group("dollar") or c.is_in_group("money_bag"):
+					seen3[c.get_instance_id()] = true
+			if seen3.size() >= want3:
+				break
+		_check(int(n.get("fat_state")) == fat_m, "маска удар приняла: жир не упал")
+		_check(seen3.size() >= want3,
+			"и сейф всё равно вскрылся: %d штук" % seen3.size())
+
+	game.queue_free()
+	await process_frame
+
+# ПРАВИЛО: из замедляющих бьёт только змея. Всё остальное, что замедляет, —
+# коктейль, бутылка, банан, пиво, яд, девочка-зазывала — урона не наносит вовсе.
+#
+# «Не наносит» здесь означает БОЛЬШЕ, чем `damage = 0`. Ноль всё равно уходил в
+# `_take_hit`, а тот на нулевом жире зовёт смерть и в любом случае обнуляет
+# счётчик пиццы: бутылка съедала прогресс к следующему жиру, а на последнем
+# делении просто убивала. Отсюда и жалоба «замедляющие тоже наносят урон».
+#
+# Проверяется поэтому и таблица, и поведение на нулевом жире.
+func _test_slowers_dont_hit() -> void:
+	var hz = load("res://scripts/hazard_item.gd")
+	var bad : Array = []
+	for k in (hz.KINDS as Dictionary):
+		var cfg : Dictionary = hz.KINDS[k]
+		if float(cfg.get("slow", 0.0)) > 0.0 and int(cfg.get("dmg", 0)) > 0:
+			bad.append(k)
+	_check(bad.is_empty(), "в таблице угроз замедляющие не бьют: %s" % [bad])
+
+	# Змея — исключение, и оно ЖИВОЕ: она и замедляет, и бьёт.
+	var snake : Node = load("res://scenes/snake.tscn").instantiate()
+	_check(bool(snake.get("slow_on_hit")) and int(snake.get("damage")) > 0,
+		"а змея бьёт и замедляет — она одна такая")
+	snake.free()
+
+	# И поведение: нулевой урон НЕ убивает на пустом жире.
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var sp : Node = game.get_node_or_null("Spawner")
+	var n  : Node2D = game.get_node_or_null("Normaldo")
+	sp.call("clear_items")
+	sp.set_process(false)
+	get_root().get_tree().paused = false
+	var save : Node = get_root().get_node_or_null("SaveData")
+	save.active_skin = "classic"
+	save.skin_level  = 1
+	n.call("reload_skin")
+	n.call("_build_skin_runtime")
+	n.set("fat_state", 0)
+	n.set("_dev_immortal", false)
+	await process_frame
+
+	var vp : Vector2 = get_root().get_visible_rect().size
+	sp.call("_spawn_hazard", "bottle", n.position.y, vp.x, 250.0)
+	await process_frame
+	for c in sp.get_children():
+		if c.get("kind") != null and String(c.get("kind")) == "bottle":
+			(c as Node2D).position = n.position
+	await _tick(0.4)
+	_check(not bool(n.get("_dead")),
+		"бутылка на пустом жире не убивает")
+	_check(float(n.get("_slow_remaining")) > 0.0,
+		"но замедляет: %.1f с" % float(n.get("_slow_remaining")))
+
+	game.queue_free()
+	await process_frame
+
+# Люди в потоке ПОКАЧИВАЮТСЯ. Неподвижная фигура рядом с ползущей змеёй и
+# пляшущим костром читается не как человек, а как картонка с человеком.
+#
+# Проверяется общий кирпич (`human_sway.gd`) и то, что фаза у каждого СВОЯ:
+# синхронная волна бомжей выглядит строем на параде — ровно обратное тому,
+# зачем покачивание вводилось.
+func _test_human_sway() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var sp : Node = game.get_node_or_null("Spawner")
+	sp.call("clear_items")
+	sp.set_process(false)
+	get_root().get_tree().paused = false
+	var vp : Vector2 = get_root().get_visible_rect().size
+
+	for i in 6:
+		sp.call("_spawn_homeless", vp.y * (0.15 + 0.12 * float(i)), vp.x, 250.0)
+	sp.call("_spawn_hazard", "cop", vp.y * 0.5, vp.x, 250.0)
+	sp.call("_spawn_hazard", "shaman", vp.y * 0.7, vp.x, 250.0)
+	await _tick(0.35)
+
+	var rots : Array = []
+	var bums : Array = []
+	for c in sp.get_children():
+		var sc = c.get_script()
+		if sc == null:
+			continue
+		var nm := String(sc.resource_path).get_file().get_basename()
+		if nm == "homeless":
+			bums.append(c)
+		if nm == "homeless" or nm == "hazard_item":
+			for d in c.get_children():
+				if d is Sprite2D:
+					rots.append(float((d as Sprite2D).rotation))
+	var moving := 0
+	for r in rots:
+		if absf(r) > 0.001:
+			moving += 1
+	_check(moving >= 3, "люди в потоке качаются: %d из %d" % [moving, rots.size()])
+
+	# Фазы РАЗНЫЕ: у бомжей из одной волны углы не должны совпадать.
+	var phases : Dictionary = {}
+	for b in bums:
+		phases[snappedf(float(b.get("_sway_ph")), 0.01)] = true
+	_check(phases.size() >= maxi(2, bums.size() - 1),
+		"и у каждого своя фаза: %d разных на %d бомжей" % [phases.size(), bums.size()])
 
 	game.queue_free()
 	await process_frame

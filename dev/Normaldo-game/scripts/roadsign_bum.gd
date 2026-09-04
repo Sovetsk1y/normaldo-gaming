@@ -1,5 +1,7 @@
 extends Area2D
 
+const HumanSway := preload("res://scripts/human_sway.gd")
+
 # Бомж с дорожным знаком: знак (палка + треугольник) крутится вокруг бомжа, имея
 # ЯКОРЬ В НИЗУ ПАЛКИ (у бомжа), треугольник на дальнем конце сметает круг и ЛОМАЕТ
 # любые предметы, которых касается. Сам бомж — обычное препятствие (урон 1, падает
@@ -35,6 +37,9 @@ var _fall_vel  : Vector2 = Vector2.ZERO
 var _fall_spin : float   = 0.0
 var _hit : Dictionary = {}
 var _tip : Area2D = null                 # коллайдер на кончике знака (ловит движок)
+var _body      : Sprite2D = null
+var _sway_t    : float    = 0.0
+var _sway_ph   : float    = 0.0
 
 func _ready() -> void:
 	collision_layer = 2
@@ -42,11 +47,12 @@ func _ready() -> void:
 	add_to_group("obstacle")
 	add_to_group("bum")
 
-	var body := Sprite2D.new()
-	body.texture        = HOMELESS_TEX[randi() % HOMELESS_TEX.size()]
-	body.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	body.scale          = Vector2.ONE * 0.2
-	add_child(body)
+	_body = Sprite2D.new()
+	_body.texture        = HOMELESS_TEX[randi() % HOMELESS_TEX.size()]
+	_body.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_body.scale          = Vector2.ONE * 0.2
+	add_child(_body)
+	_sway_ph = HumanSway.random_phase()
 
 	var cs   := CollisionShape2D.new()
 	var rect := RectangleShape2D.new()
@@ -125,6 +131,10 @@ func _process(delta: float) -> void:
 
 	position.x -= speed * delta
 	_sign.rotation += SIGN_SPIN * delta   # кончик знака (Area2D) крутится вместе с ним
+	# Качается ТЕЛО, а не знак: знак и так крутится своей рукой, и добавь ему
+	# ещё покачивание — получилась бы дрожь, а не жизнь.
+	_sway_t += delta
+	HumanSway.apply(_body, _sway_t, _sway_ph)
 
 	if position.x < -220.0:
 		queue_free()

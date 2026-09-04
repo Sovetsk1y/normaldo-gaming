@@ -1,5 +1,7 @@
 extends Area2D
 
+const HumanSway := preload("res://scripts/human_sway.gd")
+
 # Вор — летит по своей линии; ~0.5 c «наводится» на ближайшую цель ВПЕРЕДИ по ходу
 # движения (ресурс ИЛИ Нормальдо; сзади — никогда), затем меняет спрайт на thief2 и
 # делает рывок. По ресурсу ДОВОДИТСЯ (летит прямо в него, даже если тот едет) →
@@ -41,6 +43,8 @@ var _seek_t     : float = FIRST_DELAY
 var _turn_t     : float = 0.0
 var _normaldo   : Node2D = null
 var _entered    : bool = false      # уже показался на экране (спавнится справа за краем)
+var _sway_t     : float = 0.0
+var _sway_ph    : float = 0.0
 
 func _ready() -> void:
 	collision_layer = 2
@@ -50,6 +54,7 @@ func _ready() -> void:
 	# иммунитет к вору (6-й уровень Бэтмена и Джокера) не срабатывал, и Дракула
 	# не отжирал бандита, хотя бандит тоже человек.
 	add_to_group("thief")
+	_sway_ph = HumanSway.random_phase()
 	_spr = Sprite2D.new()
 	_spr.texture        = TEX1
 	_spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -88,6 +93,11 @@ func _offscreen() -> bool:
 		or position.y < -OFFSCREEN_M or position.y > vp.y + OFFSCREEN_M
 
 func _process(delta: float) -> void:
+	# Покачивание — только пока ЛЕТИТ. В наводке и рывке спрайт разворачивается
+	# к цели (`_aim_rot`), и качать его там значило бы драться с прицелом.
+	if _state == "fly":
+		_sway_t += delta
+		HumanSway.apply(_spr, _sway_t, _sway_ph)
 	# Умираем за экраном ТОЛЬКО после того, как показались (спавнимся справа за краем).
 	if not _entered:
 		if position.x <= get_viewport_rect().size.x:
