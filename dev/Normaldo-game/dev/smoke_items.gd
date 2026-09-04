@@ -44,6 +44,8 @@ func _initialize() -> void:
 	await _test_money_bag_glyph()
 	print("── Тачка копов ──")
 	await _test_police_car()
+	print("── Рыжий и седой бомж ──")
+	await _test_bum_variety()
 
 	print("")
 	if _fails == 0:
@@ -320,6 +322,69 @@ func _test_money_bag_glyph() -> void:
 
 	game.queue_free()
 	await process_frame
+
+# Бомжей ДВА — рыжий и седой, — и они равноправны: это разнообразие, а не два
+# разных врага. Спавнится каждый случайно, и ломается это молча: набор из одного
+# кадра выглядит исправно работающим, просто все бомжи на экране одинаковые.
+#
+# Проверяются все три места, где бомж появляется: одиночный из потока, бомж со
+# знаком и бомж с бочкой. Каждое хранит свой список кадров, и достаточно одному
+# из них разъехаться, чтобы половина бомжей в игре стала одноликой.
+func _test_bum_variety() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var sp : Node = game.get_node_or_null("Spawner")
+	sp.call("clear_items")
+	sp.set_process(false)
+	var vp : Vector2 = get_root().get_visible_rect().size
+
+	# Сорок спавнов на каждый источник: при честной монетке шанс не увидеть
+	# второй кадр — один на пятьсот миллиардов.
+	const TRIES : int = 40
+	var seen_solo : Dictionary = {}
+	for i in TRIES:
+		sp.call("_spawn_homeless", vp.y * 0.5, vp.x, 250.0)
+	var seen_sign : Dictionary = {}
+	for i in TRIES:
+		sp.call("_spawn_scripted", load("res://scripts/roadsign_bum.gd"),
+			vp.y * 0.5, vp.x, 250.0)
+	var seen_barrel : Dictionary = {}
+	for i in TRIES:
+		var bb := Node2D.new()
+		bb.set_script(load("res://scripts/bum_barrel.gd"))
+		bb.call("setup", null, vp.y * 0.5, 250.0)
+		sp.add_child(bb)
+	await process_frame
+
+	for c in sp.get_children():
+		var sc = c.get_script()
+		if sc == null:
+			continue
+		var name := String(sc.resource_path).get_file().get_basename()
+		match name:
+			"homeless":     _collect_tex(c, seen_solo)
+			"roadsign_bum": _collect_tex(c, seen_sign)
+			"bum_barrel":   _collect_tex(c, seen_barrel)
+
+	_check(seen_solo.size() == 2,
+		"одиночный бомж бывает и рыжим, и седым: кадров %d" % seen_solo.size())
+	_check(seen_sign.size() == 2,
+		"бомж со знаком — тоже: кадров %d" % seen_sign.size())
+	_check(seen_barrel.size() == 2,
+		"и бомж с бочкой: кадров %d" % seen_barrel.size())
+
+	game.queue_free()
+	await process_frame
+
+# Все текстуры бомжей внутри узла — у знака и у бочки спрайт тела лежит глубже.
+func _collect_tex(node: Node, out: Dictionary) -> void:
+	if node is Sprite2D and (node as Sprite2D).texture != null:
+		var path := String((node as Sprite2D).texture.resource_path)
+		if path.contains("homeless"):
+			out[path] = true
+	for c in node.get_children():
+		_collect_tex(c, out)
 
 # Тачка копов — не предмет, а событие в три такта: пашет, разбивается, роняет
 # копов. Ломается это молча и по частям: машина, пролетевшая мимо, всё равно
