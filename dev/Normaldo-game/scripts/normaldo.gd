@@ -3672,7 +3672,7 @@ func _on_area_entered(area: Area2D) -> void:
 		if mult > 1:
 			_vfx_particles(SkinSkills.TRANSFORM)
 			_show_floating_text("×2 МЕШОК!", Color(1.0, 0.75, 0.15))
-		area.burst(mult)
+		area.burst(mult, self)
 	elif area.is_in_group("magnet") and _magnet_remaining <= 0.0:
 		_magnet_remaining = 3.0
 		area.activate(self)

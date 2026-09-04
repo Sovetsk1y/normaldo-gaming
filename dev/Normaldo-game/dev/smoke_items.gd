@@ -40,6 +40,8 @@ func _initialize() -> void:
 	await _test_ninja_kinds()
 	print("── Конус просит тапать ──")
 	await _test_cone_tap()
+	print("── Мешок выкладывает знак валюты ──")
+	await _test_money_bag_glyph()
 
 	print("")
 	if _fails == 0:
@@ -216,6 +218,119 @@ func _test_cone_tap() -> void:
 		"сжатый до одного ряда конус просить перестаёт")
 	game.queue_free()
 	await process_frame
+
+# Мешок — единственный ресурс, который платит СОБЫТИЕМ, и ломается это событие
+# молча: доллары всё равно появятся, просто россыпью. Поэтому проверяется не
+# «выплата пришла», а ФОРМА: знак стоит за экраном, целиком, и все клетки —
+# ровно по сетке 5×7. Перекошенный знак — это разъехавшееся время полёта, и
+# заметить его в игре можно только глазом на одном конкретном мешке.
+func _test_money_bag_glyph() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var sp : Node = game.get_node_or_null("Spawner")
+	var nd : Node = game.get_node_or_null("Normaldo")
+	sp.call("clear_items")
+	sp.set_process(false)
+
+	# Знаки почти одного веса: редкий предмет не должен платить случайную сумму —
+	# «повезло» относится к встрече с ним, а не к жеребьёвке внутри. Ровно
+	# поровну не выходит (пять клеток ширины на S доллара и на палки иены), но
+	# разброс держится в две штуки.
+	var bag_script = load("res://scripts/money_bag.gd")
+	var sizes : Array = []
+	for name in (bag_script.GLYPHS as Dictionary).keys():
+		var n := 0
+		for line in (bag_script.GLYPHS[name] as Array):
+			n += String(line).count("X")
+		sizes.append(n)
+	_check(int(sizes.max()) - int(sizes.min()) <= 2,
+		"знаки почти одного веса: %s" % [sizes])
+
+	sp.call("dev_spawn_money_bag")
+	await process_frame
+	var bag : Node2D = null
+	for c in sp.get_children():
+		if c.is_in_group("money_bag"):
+			bag = c
+	_check(bag != null, "мешок появился")
+	if bag == null:
+		game.queue_free()
+		return
+
+	var cells : int = int(sizes.min())
+	bag.call("burst", 1, nd)
+	# Ждём, пока встанут все: залп идёт по одному, и мерить раньше — мерить
+	# половину знака.
+	var t0 := Time.get_ticks_msec()
+	var got : Array = []
+	while Time.get_ticks_msec() - t0 < 8000:
+		await process_frame
+		got = _dollars(sp)
+		# Ждём именно ПРИЗЕМЛЕНИЯ: доллар оживает (`set_process(true)`) в
+		# колбэке тюина полёта. Считать по количеству нельзя — все семнадцать
+		# существуют уже в момент залпа, но половина ещё летит вправо, и
+		# померенный тогда знак «перекошен» по вине теста, а не кода.
+		if got.size() >= cells and _all_landed(got):
+			break
+	_check(sizes.has(got.size()),
+		"выложен целый знак: %d долларов, знаки бывают %s" % [got.size(), sizes])
+	if got.size() < cells:
+		game.queue_free()
+		return
+
+	var vp : Vector2 = get_root().get_visible_rect().size
+	var min_x : float = INF
+	for d in got:
+		min_x = minf(min_x, (d as Node2D).position.x)
+	_check(min_x > vp.x,
+		"знак собран ЗА правым краем: левее всех %.0f при экране %.0f" % [min_x, vp.x])
+
+	# Форма: клетки обязаны лечь ровно по сетке 5×7 — не больше пяти столбцов и
+	# не больше семи строк, и в каждой строке хотя бы один доллар.
+	var cell : float = vp.y * float(bag_script.GLYPH_H_FRAC) / float(bag_script.GLYPH_ROWS)
+	var cols : Dictionary = {}
+	var rows : Dictionary = {}
+	for d in got:
+		cols[int(round(((d as Node2D).position.x - min_x) / cell))] = true
+		rows[int(round((d as Node2D).position.y / cell))] = true
+	_check(cols.size() <= bag_script.GLYPH_COLS and rows.size() <= bag_script.GLYPH_ROWS,
+		"столбцов %d, строк %d — сетка 5×7 выдержана" % [cols.size(), rows.size()])
+	_check(rows.size() >= 5, "знак занимает высоту, а не одну полосу: строк %d" % rows.size())
+
+	# И знак ЕДЕТ — целиком и одинаково: доллар, застрявший с выключенным
+	# _process, остался бы висеть за экраном навсегда.
+	var before : Array = []
+	for d in got:
+		before.append((d as Node2D).position.x)
+	# Ждём НАСТОЯЩИЕ 250 мс: предметы едут на real-time delta, а кадров в
+	# headless набегает столько, что «четверть секунды кадрами» — это доли
+	# миллисекунды и нулевое смещение.
+	var t1 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t1 < 250:
+		get_root().get_tree().paused = false
+		await process_frame
+	var moved := 0
+	for i in got.size():
+		if is_instance_valid(got[i]) and (got[i] as Node2D).position.x < before[i] - 1.0:
+			moved += 1
+	_check(moved == got.size(), "поехали влево все %d из %d" % [moved, got.size()])
+
+	game.queue_free()
+	await process_frame
+
+func _all_landed(dollars: Array) -> bool:
+	for d in dollars:
+		if not is_instance_valid(d) or not (d as Node).is_processing():
+			return false
+	return true
+
+func _dollars(sp: Node) -> Array:
+	var out : Array = []
+	for c in sp.get_children():
+		if c.is_in_group("dollar"):
+			out.append(c)
+	return out
 
 func _put_ninja(sp: Node, kind: String, vp: Vector2) -> Node2D:
 	var node := Area2D.new()
