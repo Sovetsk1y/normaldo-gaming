@@ -168,10 +168,18 @@ func burst(mult: int = 1, catcher: Node2D = null) -> void:
 	tw.tween_callback(queue_free)
 
 # Выстреливает один знак. Доллары уходят ВЕЕРОМ — по одному, с шагом SHOT_STEP,
-# — но приземляются РАЗОМ: длительность полёта у каждого своя и подобрана так,
-# чтобы все встали в одну секунду. Иначе знак приезжает перекошенным: первые
-# доллары уже поехали влево с потоком, пока последние ещё летят вправо.
+# — но приземляются РАЗОМ. Иначе знак приезжает перекошенным: первые доллары уже
+# поехали влево с потоком, пока последние ещё летят вправо.
+#
+# Разом — это ОДИН тюин на весь залп, а не семнадцать своих с подобранными
+# длительностями. Своих было семнадцать, и каждый заводился по таймеру: и
+# таймер, и тюин квантуются кадром, ошибки складывались, и знак иногда приезжал
+# со съехавшим столбцом. У одного тюина часы одни на всех, и «разом» перестаёт
+# быть расчётом — становится свойством.
 func _shoot_glyph(glyph_name: String, copy_idx: int) -> void:
+	var parent := get_parent()
+	if parent == null:
+		return
 	var vp    := get_viewport_rect().size
 	var glyph : Array = GLYPHS.get(glyph_name, GLYPHS["dollar"])
 	var cell  : float = vp.y * GLYPH_H_FRAC / float(GLYPH_ROWS)
@@ -192,20 +200,33 @@ func _shoot_glyph(glyph_name: String, copy_idx: int) -> void:
 	# выстрел читался бы как построчная выкладка, а не как залп.
 	cells.shuffle()
 
-	var total : float = SHOT_FLY + float(cells.size() - 1) * SHOT_STEP
+	# Вылетают с шагом SHOT_STEP, а летят каждый СВОЮ длительность — так, чтобы
+	# приземлиться в один и тот же миг `total`.
+	var total : float = SHOT_FLY + float(maxi(0, cells.size() - 1)) * SHOT_STEP
+	var flying : Array = []
+	var tw := create_tween()
+	tw.set_parallel(true)
 	for i in cells.size():
-		if not is_inside_tree():
-			return
-		_shoot_one(cells[i], total - float(i) * SHOT_STEP)
-		await get_tree().create_timer(SHOT_STEP).timeout
-	# Ждём приземления последнего — знак должен стоять целиком к тому моменту,
-	# когда мешок исчезнет.
-	await get_tree().create_timer(SHOT_FLY).timeout
+		var dollar := _make_dollar()
+		parent.add_child(dollar)
+		# Гасим ПОСЛЕ добавления в дерево: вход в дерево включает обработку
+		# заново, и выключенный заранее доллар оживал бы прямо в стволе мешка.
+		dollar.set_process(false)
+		dollar.collision_layer = 0
+		flying.append(dollar)
+		tw.tween_property(dollar, "position", cells[i], total - float(i) * SHOT_STEP)\
+			.set_delay(float(i) * SHOT_STEP)\
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	await tw.finished
 
-func _shoot_one(to: Vector2, fly_t: float) -> void:
-	var parent := get_parent()
-	if parent == null:
-		return
+	# Оживают тоже разом — в один кадр: доллар, поехавший на пару кадров раньше
+	# соседа, увозит с собой свой столбец.
+	for d in flying:
+		if is_instance_valid(d):
+			d.collision_layer = 2
+			d.set_process(true)
+
+func _make_dollar() -> Node2D:
 	var dollar        := ITEM_SCENE.instantiate()
 	dollar.speed       = speed
 	dollar.is_eatable  = false
@@ -217,19 +238,7 @@ func _shoot_one(to: Vector2, fly_t: float) -> void:
 	spr.texture        = DOLLAR_TEX
 	spr.scale          = Vector2.ONE * DOLLAR_SCALE
 	dollar.position    = position
-	parent.add_child(dollar)
-
-	# Пока летит вперёд — не двигается сам и не ловится: доллар, пойманный на
-	# пути ЗА экран, обесценил бы весь такт (поймал мешок — сразу и деньги).
-	dollar.set_process(false)
-	var had_layer : int = dollar.collision_layer
-	dollar.collision_layer = 0
-
-	var tw := dollar.create_tween()
-	tw.tween_property(dollar, "position", to, fly_t)\
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_callback(func() -> void:
-		if not is_instance_valid(dollar):
-			return
-		dollar.collision_layer = had_layer
-		dollar.set_process(true))
+	# Гасить обработку и хитбокс здесь нельзя — вход в дерево их вернёт; это
+	# делает вызывающий, сразу после add_child. Смысл: доллар, пойманный на пути
+	# ЗА экран, обесценил бы весь такт (поймал мешок — сразу и деньги).
+	return dollar
