@@ -72,31 +72,47 @@ func _test_cards(hud: Node, save: Node) -> void:
 			"и стоят в ряд: (%.0f, %.0f) и (%.0f, %.0f)"
 				% [a.position.x, a.position.y, b.position.x, b.position.y])
 
-	# Свайп по портрету листает ЖИР. Событие подаётся настоящее — то же, что
-	# придёт от пальца.
+	# Жир листается СТРЕЛКАМИ и ТАПОМ ПО ЛАМПЕ — свайпа по портрету больше нет.
+	# Он занимал половину карточки и ел горизонтальное движение, которым
+	# листается сама лента: на телефоне это читалось как «экран не скроллится».
 	var card : Control = _card_named(overlay, "Card_viking")
 	_check(card != null, "карточка викинга на месте")
 	if card != null:
 		var holder : Control = card.get_node_or_null("Portrait")
-		var swipe  : Control = card.get_node_or_null("FatSwipe")
-		_check(holder != null and swipe != null, "у неё есть портрет и зона свайпа")
-		if holder != null and swipe != null:
+		_check(holder != null, "у неё есть портрет")
+		_check(card.get_node_or_null("FatSwipe") == null,
+			"зоны свайпа на портрете больше нет — лента получила ширину обратно")
+		var prev : Button = card.get_node_or_null("ArrowPrev")
+		var next : Button = card.get_node_or_null("ArrowNext")
+		_check(prev != null and next != null, "стрелки листания на месте")
+		if holder != null and next != null and prev != null:
 			var rect : TextureRect = hud.call("_head_icon_rect", holder)
 			var fat0 : int = int(rect.get_meta("head_fat", -1))
-			_swipe(swipe, -40.0)
+			next.pressed.emit()
 			await process_frame
 			var fat1 : int = int(rect.get_meta("head_fat", -1))
-			_check(fat1 == fat0 + 1, "свайп влево листает вперёд: %d → %d" % [fat0, fat1])
-			_swipe(swipe, 40.0)
+			_check(fat1 == fat0 + 1, "стрелка вперёд листает: %d → %d" % [fat0, fat1])
+			prev.pressed.emit()
 			await process_frame
 			_check(int(rect.get_meta("head_fat", -1)) == fat0,
-				"свайп вправо возвращает: %d" % int(rect.get_meta("head_fat", -1)))
+				"стрелка назад возвращает: %d" % int(rect.get_meta("head_fat", -1)))
 
 			# И меняется именно КАРТИНКА, а не только число.
-			_swipe(swipe, -40.0)
+			next.pressed.emit()
 			await process_frame
 			_check(rect.texture != hud.call("_avatar_texture", "viking", fat0),
 				"и портрет действительно другой")
+
+			# Тап по ЛАМПЕ прыгает сразу в её состояние: стрелками до третьего
+			# жира надо тыкать трижды, а лампа стоит прямо под портретом.
+			var lamp3 : Control = card.get_node_or_null("FatTap3")
+			_check(lamp3 != null, "у ламп индикатора есть свои зоны тапа")
+			if lamp3 != null:
+				_tap(lamp3)
+				await process_frame
+				_check(int(rect.get_meta("head_fat", -1)) == 3,
+					"тап по последней лампе показывает четвёртое состояние: %d"
+						% int(rect.get_meta("head_fat", -1)))
 
 			# Под портретом — ТОТ ЖЕ индикатор, что в забеге, и лампы в нём
 			# КОПЯТСЯ. Стояли тут четыре одинаковых квадратика, и горел ровно
@@ -110,21 +126,37 @@ func _test_cards(hud: Node, save: Node) -> void:
 				# как поломка экрана.
 				_check(not bool(gauge.get("warn_on_empty")),
 					"и череп в витрине не пульсирует тревогой")
-				# Отматываем в начало и проходим все четыре состояния подряд.
-				for _r in 4:
-					_swipe(swipe, 40.0)
-					await process_frame
 				var seen : Array = []
 				var cum_ok := true
 				for f in 4:
+					_tap(card.get_node_or_null("FatTap%d" % f))
+					await process_frame
 					var got : int = _lit(gauge)
 					seen.append(got)
 					if got != f + 1:
 						cum_ok = false
-					_swipe(swipe, -40.0)
-					await process_frame
 				_check(cum_ok, "лампы копятся слева направо: %s при ожидаемом [1, 2, 3, 4]"
 					% [seen])
+
+		# ТАП ПО КАРТОЧКЕ открывает экран скина. Раньше для этого была узкая
+		# полоса «ПОДРОБНЕЕ» над кнопкой — потому что карточка целиком под тапом
+		# съела бы свайп жира. Свайпа больше нет.
+		var tap_zone : Control = card.get_node_or_null("CardTap")
+		_check(tap_zone != null, "вся карточка — зона тапа")
+		if tap_zone != null:
+			_check(int(tap_zone.mouse_filter) == int(Control.MOUSE_FILTER_PASS),
+				"и она ПРОПУСКАЕТ событие дальше — иначе снова съест прокрутку")
+			# Протяжка тапом не считается: иначе каждый скролл ленты открывал бы
+			# экран скина.
+			var opened_before : bool = _detail_open(hud)
+			_swipe(tap_zone, -60.0)
+			await process_frame
+			_check(_detail_open(hud) == opened_before,
+				"протяжка по карточке экран не открывает")
+			_tap(tap_zone)
+			for _i in 4:
+				await process_frame
+			_check(_detail_open(hud), "а чистый тап — открывает экран скина")
 
 		# Закрытые уровнем состояния — под замком, а не пустой ячейкой: пустая
 		# читается как «я ещё не дорос», замок — как «сюда не пускают», и это
@@ -224,6 +256,25 @@ func _card_named(root: Node, nm: String) -> Control:
 	return null
 
 # Настоящая последовательность событий пальца: касание, протяжка, отпускание.
+# Открыт ли экран скина. Ищем по ИМЕНИ узла, а не по содержимому: содержимое у
+# него меняется от скина к скину, а имя одно.
+func _detail_open(hud: Node) -> bool:
+	for c in hud.get_children():
+		if String(c.name).begins_with("SkinDetail"):
+			return true
+	return false
+
+# Чистый тап: нажал и отпустил, не сдвинув палец.
+func _tap(ctrl: Control) -> void:
+	if ctrl == null:
+		return
+	var down := InputEventScreenTouch.new()
+	down.pressed = true
+	ctrl.gui_input.emit(down)
+	var up := InputEventScreenTouch.new()
+	up.pressed = false
+	ctrl.gui_input.emit(up)
+
 func _swipe(ctrl: Control, dx: float) -> void:
 	var down := InputEventScreenTouch.new()
 	down.pressed = true

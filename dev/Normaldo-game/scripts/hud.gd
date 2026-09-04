@@ -4567,6 +4567,12 @@ func _build_skin_card(parent: Control, pos: Vector2, w: float, h: float,
 	if not is_owned and not can_buy:
 		card.modulate = Color(1, 1, 1, 0.72)
 
+	# Тап по карточке открывает экран скина. Кладётся ПЕРВЫМ: стрелки, лампы и
+	# кнопка действия добавляются позже, а значит лежат выше и забирают свои
+	# тапы себе.
+	_skin_card_tap(card, Vector2.ZERO, Vector2(w, h), func() -> void:
+		_show_skin_detail(skin_data, from_slots, overlay)).name = "CardTap"
+
 	var y : float = 8.0
 	var rar := _strong_label(SkinRegistry.RARITY_NAMES[rarity], 9,
 		Color(rc.r, rc.g, rc.b, 1.0), 2)
@@ -4643,34 +4649,29 @@ func _build_skin_card(parent: Control, pos: Vector2, w: float, h: float,
 				tw.tween_property(r, "scale", Vector2.ONE, 0.16)\
 					.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
-	# Свайп по портрету. Порог в 22 px намеренно больше дрожания пальца: экран
-	# лежит в горизонтальном скролле, и мелкое движение обязано доставаться
-	# ленте, а не карточке.
-	var swipe := Control.new()
-	swipe.name         = "FatSwipe"
-	swipe.size         = Vector2(box, box)
-	swipe.position     = Vector2((w - box) * 0.5, y)
-	swipe.mouse_filter = Control.MOUSE_FILTER_STOP
-	card.add_child(swipe)
-	var drag := { "x": 0.0, "active": false }
-	swipe.gui_input.connect(func(ev: InputEvent) -> void:
-		if ev is InputEventScreenTouch or ev is InputEventMouseButton:
-			var pressed : bool = ev.pressed
-			if pressed:
-				drag["active"] = true
-				drag["x"] = 0.0
-			else:
-				drag["active"] = false
-		elif drag["active"] and (ev is InputEventScreenDrag or ev is InputEventMouseMotion):
-			drag["x"] = float(drag["x"]) + ev.relative.x
-			if absf(float(drag["x"])) >= 22.0:
-				step.call(-1 if float(drag["x"]) > 0.0 else 1)
-				drag["x"] = 0.0)
-
-	# Стрелки — для тех, кто свайп не нашёл. Свайп быстрее, стрелки очевиднее.
+	# СВАЙПА ПО ПОРТРЕТУ БОЛЬШЕ НЕТ. Он занимал половину карточки и ел
+	# горизонтальное движение — то самое, которым листается лента скинов. На
+	# телефоне это читалось как «экран не скроллится»: палец почти всегда
+	# попадал на портрет, потому что портрет и есть карточка.
+	#
+	# Листается жир теперь двумя способами, и оба точечные: СТРЕЛКИ по краям и
+	# ТАП ПО КВАДРАТИКУ индикатора. Лента получила обратно всю ширину карточки.
 	var arr_y : float = y + box * 0.5 - 12.0
-	_skin_card_arrow(card, Vector2(4.0, arr_y), "<", func() -> void: step.call(-1))
-	_skin_card_arrow(card, Vector2(w - 28.0, arr_y), ">", func() -> void: step.call(1))
+	_skin_card_arrow(card, Vector2(4.0, arr_y), "<",
+		func() -> void: step.call(-1)).name = "ArrowPrev"
+	_skin_card_arrow(card, Vector2(w - 28.0, arr_y), ">",
+		func() -> void: step.call(1)).name = "ArrowNext"
+
+	# Тап по лампе индикатора = «покажи это состояние». Зоны считаются по
+	# раскладке самого индикатора (лампа + GAP), а не делением ширины на четыре:
+	# поделённая ширина разъедется на первой же правке зазора.
+	for i in FatGauge.LAMPS:
+		var lx : float = gauge.position.x + float(i) * (SKC_FAT_CELL + FatGauge.GAP)
+		_skin_card_tap(card, Vector2(lx - 3.0, dot_y - 6.0),
+			Vector2(SKC_FAT_CELL + 6.0, SKC_FAT_CELL + 12.0),
+			func() -> void:
+				state["fat"] = i
+				repaint.call()).name = "FatTap%d" % i
 
 	y = dot_y + gauge_sz.y + 8.0
 
@@ -4713,23 +4714,52 @@ func _build_skin_card(parent: Control, pos: Vector2, w: float, h: float,
 	_skin_action_button(card, 12.0, act_y, w - 24.0, act_h, skin_id,
 		func(): if is_instance_valid(overlay): overlay.queue_free(); _show_shop(0, from_slots, true))
 
-	# «Подробнее» — узкой полосой над кнопкой, а не всей карточкой: карточка
-	# целиком под тапом съела бы и свайп жира.
-	var more := Button.new()
-	more.flat       = true
-	more.focus_mode = Control.FOCUS_NONE
-	more.size       = Vector2(w - 24.0, 18.0)
-	more.position   = Vector2(12.0, act_y - 20.0)
-	more.text       = "ПОДРОБНЕЕ"
+	# «Подробнее» была узкой полосой над кнопкой — потому что карточка целиком
+	# под тапом съела бы свайп жира. Свайпа больше нет, и полоса стала
+	# ПОДПИСЬЮ: тапается вся карточка.
+	var more := Label.new()
+	more.text                 = "ПОДРОБНЕЕ"
 	more.add_theme_font_override("font", UI_FONT)
 	more.add_theme_font_size_override("font_size", 9)
-	more.add_theme_color_override("font_color", Color(0.70, 0.78, 0.92))
-	more.pressed.connect(func():
-		_play_btn_sfx()
-		_show_skin_detail(skin_data, from_slots, overlay))
-	card.add_child(more)
+	more.modulate             = Color(0.70, 0.78, 0.92)
+	more.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	more.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(card, more, Vector2(12.0, act_y - 20.0), Vector2(w - 24.0, 18.0))
 
-func _skin_card_arrow(parent: Control, pos: Vector2, glyph: String, on_tap: Callable) -> void:
+# Зона тапа внутри карточки. Не Button: карточка лежит в горизонтальной ленте,
+# и Button сработал бы на ОТПУСКАНИИ даже после протяжки — каждый скролл ленты
+# открывал бы экран скина. Здесь тап засчитывается, только если палец почти не
+# сдвинулся.
+#
+# MOUSE_FILTER_PASS, а не STOP: событие обязано дойти и до ленты, иначе зона на
+# всю карточку снова съест прокрутку — ровно то, из-за чего убрали свайп.
+const CARD_TAP_SLOP : float = 12.0
+
+func _skin_card_tap(parent: Control, pos: Vector2, size: Vector2, on_tap: Callable) -> Control:
+	var zone := Control.new()
+	zone.position     = pos
+	zone.size         = size
+	zone.mouse_filter = Control.MOUSE_FILTER_PASS
+	parent.add_child(zone)
+	var drag := { "x": 0.0, "y": 0.0, "down": false }
+	zone.gui_input.connect(func(ev: InputEvent) -> void:
+		if ev is InputEventScreenTouch or ev is InputEventMouseButton:
+			if ev.pressed:
+				drag["down"] = true
+				drag["x"] = 0.0
+				drag["y"] = 0.0
+			elif bool(drag["down"]):
+				drag["down"] = false
+				if absf(float(drag["x"])) < CARD_TAP_SLOP \
+						and absf(float(drag["y"])) < CARD_TAP_SLOP:
+					_play_btn_sfx()
+					on_tap.call()
+		elif bool(drag["down"]) and (ev is InputEventScreenDrag or ev is InputEventMouseMotion):
+			drag["x"] = float(drag["x"]) + ev.relative.x
+			drag["y"] = float(drag["y"]) + ev.relative.y)
+	return zone
+
+func _skin_card_arrow(parent: Control, pos: Vector2, glyph: String, on_tap: Callable) -> Button:
 	var btn := Button.new()
 	btn.flat       = true
 	btn.focus_mode = Control.FOCUS_NONE
@@ -4743,6 +4773,7 @@ func _skin_card_arrow(parent: Control, pos: Vector2, glyph: String, on_tap: Call
 		_play_btn_sfx()
 		on_tap.call())
 	parent.add_child(btn)
+	return btn
 
 func _build_skin_grid_cell(parent: Control, pos: Vector2, w: float, h: float,
 		skin_data: Dictionary, overlay: Control, from_slots: bool) -> void:
@@ -4975,6 +5006,9 @@ func _show_skin_detail(skin_data: Dictionary, from_slots: bool, shop_overlay: Co
 	var is_owned := SaveData.owns_skin(skin_id)
 
 	var overlay := Control.new()
+	# Имя нужно проверке: экран скина открывается тапом по карточке, и убедиться
+	# в этом можно только найдя его в дереве.
+	overlay.name = "SkinDetail"
 	overlay.size = vp; overlay.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(overlay)
 

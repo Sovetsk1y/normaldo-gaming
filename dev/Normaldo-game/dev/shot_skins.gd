@@ -55,9 +55,9 @@ func _initialize() -> void:
 	# нулевом жире не показывает главного: лампы КОПЯТСЯ, а не переключаются.
 	if detail == "cards_fat":
 		var n : int = 0
-		for sw in _swipes(get_root()):
+		for arrow in _next_arrows(get_root()):
 			for _s in n:
-				_swipe_left(sw)
+				(arrow as Button).pressed.emit()
 			n += 1
 		for _i in 20:
 			await process_frame
@@ -68,26 +68,18 @@ func _initialize() -> void:
 	print("saved ", name)
 	quit(0)
 
-# Все зоны свайпа жира на экране, слева направо — в порядке карточек в ленте.
-func _swipes(node: Node, out: Array = []) -> Array:
-	if node is Control and node.name == "FatSwipe":
+# Стрелки «вперёд» на всех карточках, слева направо — в порядке карточек ленты.
+# Свайпа по портрету больше нет: он ел горизонтальное движение, которым лента и
+# листается.
+func _next_arrows(node: Node, out: Array = []) -> Array:
+	if node is Control and node.name == "ArrowNext":
 		out.append(node)
 	for c in node.get_children():
-		_swipes(c, out)
+		_next_arrows(c, out)
 	return out
 
-# Свайп ВЛЕВО — «следующее состояние». Порог в карточке 22 px, берём с запасом.
-func _swipe_left(sw: Control) -> void:
-	var down := InputEventMouseButton.new()
-	down.pressed = true
-	sw.gui_input.emit(down)
-	var mv := InputEventMouseMotion.new()
-	mv.relative = Vector2(-30.0, 0.0)
-	sw.gui_input.emit(mv)
-	var up := InputEventMouseButton.new()
-	up.pressed = false
-	sw.gui_input.emit(up)
-
+# Страховка от зависания: если съёмка не дошла до конца за 1200 кадров, выходим
+# с ошибкой вместо того, чтобы висеть до таймаута снаружи.
 func _bail_out() -> void:
 	for _i in 1200:
 		await process_frame
