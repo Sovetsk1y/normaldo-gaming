@@ -794,22 +794,28 @@ func _spawn_level_hazard(kind: String, y: float, vp_w: float, speed: float) -> v
 			else:
 				_spawn_hazard(_pick_hazard(), y, vp_w, speed)
 
-# Полицейская машина — единственный предмет старого проекта, которого у нас не
-# было. Она НЕ вращается и заметно длиннее всего остального: это не летящий
-# мусор, а машина, и по её длине читается, что облететь её можно только сверху
-# или снизу, а не проскочить рядом.
+# Полицейская машина — не предмет, а СОБЫТИЕ: идёт по двум линиям, быстрее
+# потока, пашет всё на своём пути и разбивается у игрока, вываливая двух копов.
+# Вся хореография — в `police_car.gd`; здесь только выбор пары линий.
 #
-# Лист нарисован вверх колёсами (мигалка внизу, крыша сверху) — отражаем.
-const POLICE_CAR_TEX : Texture2D = preload("res://assets/items/police_car.png")
-const POLICE_CAR_PX  : float = 150.0
+# Раньше она была рядовой картинкой в потоке и вела себя как камень, только
+# длиннее. Аргумент «по длине читается, что облететь можно только сверху или
+# снизу» на деле описывал шезлонг, а не машину.
+const POLICE_CAR_SCRIPT := preload("res://scripts/police_car.gd")
 
-func _spawn_police_car(y: float, vp_w: float, speed: float) -> void:
-	var item : Node = _spawn_item(y, vp_w, POLICE_CAR_TEX, 1.0, speed, 1,
-		false, false, false, "police_car", true)
-	for c in item.get_children():
-		if c is Sprite2D:
-			ItemSizing.fit_sprite_content(c, POLICE_CAR_PX)
-			(c as Sprite2D).flip_v = true
+func _spawn_police_car(_y: float, vp_w: float, speed: float) -> void:
+	# Линию выбираем не по переданному y, а сами: занимает она ПАРУ, и верхняя
+	# из пары не может быть последней.
+	var lane : int = randi() % (LANE_COUNT - 1)
+	var lanes := _lane_centers()
+	var car := Area2D.new()
+	car.set_script(POLICE_CAR_SCRIPT)
+	car.set("speed", speed)
+	car.set("lane", lane)
+	car.set("lanes_total", LANE_COUNT)
+	car.position = Vector2(vp_w + 260.0,
+		(float(lanes[lane]) + float(lanes[lane + 1])) * 0.5)
+	add_child(car)
 
 # Тяжёлые и «сюжетные» угрозы приходят не раньше указанной фазы: сейф с копом
 # на первой минуте задавили бы новичка, а шаман с реверсом управления читается
@@ -1807,7 +1813,7 @@ func _inst_lane(scene: PackedScene, speed: float, vp_w: float, lanes: Array, set
 # его подгружает, падал бы на «Identifier not found: Bestiary».
 const BESTIARY_BY_TEX : Dictionary = {
 	PIZZA_TEX: "pizza", DOLLAR_TEX: "dollar", STONE_TEX: "stone",
-	TRASH_TEX: "trash", POLICE_CAR_TEX: "police_car",
+	TRASH_TEX: "trash",
 }
 
 func _make_item(tex: Texture2D, scale: float, speed: float, damage: int,

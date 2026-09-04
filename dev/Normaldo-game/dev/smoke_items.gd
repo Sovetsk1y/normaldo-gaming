@@ -42,6 +42,8 @@ func _initialize() -> void:
 	await _test_cone_tap()
 	print("── Мешок выкладывает знак валюты ──")
 	await _test_money_bag_glyph()
+	print("── Тачка копов ──")
+	await _test_police_car()
 
 	print("")
 	if _fails == 0:
@@ -315,6 +317,130 @@ func _test_money_bag_glyph() -> void:
 		if is_instance_valid(got[i]) and (got[i] as Node2D).position.x < before[i] - 1.0:
 			moved += 1
 	_check(moved == got.size(), "поехали влево все %d из %d" % [moved, got.size()])
+
+	game.queue_free()
+	await process_frame
+
+# Тачка копов — не предмет, а событие в три такта: пашет, разбивается, роняет
+# копов. Ломается это молча и по частям: машина, пролетевшая мимо, всё равно
+# выглядит машиной, просто ничего не делает.
+#
+# Проверяется поэтому каждый такт отдельно, и главное — ЧТО ОСТАЁТСЯ ПОСЛЕ:
+# два копа на соседних линиях, а не на той же, и не один.
+func _test_police_car() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var sp : Node = game.get_node_or_null("Spawner")
+	sp.call("clear_items")
+	sp.set_process(false)
+	get_root().get_tree().paused = false
+	var vp : Vector2 = get_root().get_visible_rect().size
+	var lane_h : float = vp.y / 5.0
+	# Голову убираем с поля. Она стоит на третьей линии — ровно там, куда падает
+	# один из копов, — и честно его ЛОМАЕТ: сбитый коп начинает падать, а тест
+	# меряет линию по координате и видит её съехавшей вниз. Проверяется здесь
+	# машина, а не столкновения.
+	var nd : Node2D = game.get_node_or_null("Normaldo")
+	if nd != null:
+		nd.position = Vector2(-600.0, vp.y * 0.5)
+
+	sp.call("_spawn_police_car", 0.0, vp.x, 250.0)
+	await process_frame
+	var car : Node2D = null
+	for c in sp.get_children():
+		if c.is_in_group("police_car"):
+			car = c
+	_check(car != null, "машина появилась")
+	if car == null:
+		game.queue_free()
+		return
+
+	# Две линии, а не одна: машина в один лейн — это просто длинный предмет.
+	var box : CollisionShape2D = null
+	for c in car.get_children():
+		if c is CollisionShape2D:
+			box = c
+	var h : float = 0.0 if box == null else float((box.shape as RectangleShape2D).size.y)
+	_check(h > lane_h * 1.0 and h < lane_h * 2.0,
+		"перекрывает две линии, но не впритык: %.0f при лейне %.0f" % [h, lane_h])
+	_check(float(car.get("speed")) > 250.0,
+		"идёт быстрее потока: %.0f против 250" % float(car.get("speed")))
+
+	# Пашет: предмет, поставленный ей в лоб, сносится.
+	var mark : Node2D = sp.call("build_random_item", 0.0)
+	_check(mark != null, "мишень собрана")
+	if mark != null:
+		mark.position = car.position
+		sp.add_child(mark)
+		await process_frame
+		await process_frame
+		var swept : bool = not is_instance_valid(mark) or bool(mark.get("_falling"))
+		_check(swept, "и сносит всё, что попалось на пути")
+
+	# Разбивается, не долетев до левого края. Подводим её к самой черте вручную:
+	# ждать честного пролёта через весь экран здесь незачем, а машина после
+	# аварии живёт меньше секунды и успевала освободиться прямо посреди опроса —
+	# тест падал на `get` у мёртвого узла и МОЛЧА обрывался, показывая зелёное.
+	var lane : int = int(car.get("lane"))
+	# Запоминаем, кто был на экране ДО аварии: сбитая машиной мишень тоже могла
+	# бы попасть в подсчёт «кто вылез».
+	var before_ids : Dictionary = {}
+	for c in sp.get_children():
+		before_ids[c.get_instance_id()] = true
+
+	car.position.x = vp.x * 0.32
+	var crashed  := false
+	var crash_x  := -1.0
+	var no_hit   := false
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 5000:
+		get_root().get_tree().paused = false
+		await process_frame
+		if not is_instance_valid(car):
+			break
+		if bool(car.get("_crashed")):
+			crashed = true
+			crash_x = car.position.x
+			no_hit  = int(car.get("collision_layer")) == 0
+			break
+	_check(crashed, "разбивается сама, а не улетает за край")
+	_check(crash_x > 0.0, "и разбивается В КАДРЕ: x = %.0f" % crash_x)
+	_check(no_hit, "разбитая машина больше не бьёт")
+
+	# И роняет двух копов на РАЗНЫЕ линии рядом с занятой парой.
+	var t1 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t1 < 900:
+		get_root().get_tree().paused = false
+		await process_frame
+	var cops : Array = []
+	for c in sp.get_children():
+		if before_ids.has(c.get_instance_id()):
+			continue
+		if c.get("kind") == null or String(c.get("kind")) != "cop":
+			continue
+		cops.append(c)
+	_check(cops.size() == 2, "из неё вылезли двое: %d" % cops.size())
+	if cops.size() == 2:
+		var rows : Array = []
+		var ys   : Array = []
+		for c in cops:
+			if is_instance_valid(c):
+				rows.append(int(floor((c as Node2D).position.y / lane_h)))
+				ys.append(int((c as Node2D).position.y))
+		rows.sort()
+		_check(rows.size() == 2 and rows[0] != rows[1],
+			"и встали на разные линии: %s" % [rows])
+		# Соседние линии — это lane-1 и lane+2. У края соседа с одной стороны
+		# нет, и коп садится внутрь освободившейся пары: это тоже честно.
+		var beside := true
+		for r in rows:
+			if r == lane or r == lane + 1:
+				continue
+			if r != lane - 1 and r != lane + 2:
+				beside = false
+		_check(beside, "рядом с занятой парой (%d–%d): %s (y=%s)"
+			% [lane, lane + 1, rows, ys])
 
 	game.queue_free()
 	await process_frame
