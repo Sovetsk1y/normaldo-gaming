@@ -122,9 +122,9 @@ var _boss_test_t      : float = 0.0
 const CAMPAIGN_LEVELS : Array = [
 	{ "name": "КАНАЛИЗАЦИЯ", "boss": "ninja", "letter": 14.0, "phase": 0 },
 	{ "name": "УЛИЦА",       "boss": "croc",  "letter": 13.0, "phase": 1 },
-	{ "name": "ДОРОГА В КЛУБ", "boss": "",    "letter": 12.0, "phase": 2 },
-	{ "name": "ЗАДВОРКИ",    "boss": "",      "letter": 11.0, "phase": 3 },
-	{ "name": "КЛУБ",        "boss": "club",  "letter": 10.0, "phase": 4 },
+	{ "name": "ЗАДВОРКИ",      "boss": "",    "letter": 12.0, "phase": 2 },
+	{ "name": "ДОРОГА В КЛУБ", "boss": "",    "letter": 11.0, "phase": 3 },
+	{ "name": "ПЕРЕД КЛУБОМ",  "boss": "club","letter": 10.0, "phase": 4 },
 ]
 
 # Текущий уровень, 0-based. Публичный: интерфейс рисует по нему карточку и
@@ -164,12 +164,19 @@ const CAMPAIGN_PAT_WEIGHTS : Array = [
 #   cad  — seconds between set-pieces
 #   sp   — eligible set-piece ids for this phase
 # See /Концепция/Эпизод 1 — прогрессия предметов (редизайн).md
+# ЭКРАН НЕ ДОЛЖЕН ПУСТОВАТЬ. Интервалы сжаты примерно на четверть, а сет-писы
+# приходят в полтора раза чаще: между двумя событиями игрок не должен успевать
+# заскучать, а «сложные предметы с анимацией» — бомж с бочкой, волна бомжей,
+# каскад, конус-переросток — и есть то, ради чего забег смотрят.
+#
+# Сжаты именно ИНТЕРВАЛЫ, а не доля ресурсов: соотношение «еда/угроза» подобрано
+# отдельно и трогать его — значит менять сложность, а не плотность.
 const CAMPAIGN_DIRECTOR : Array = [
-	{ "res": 0.90, "int": 0.85, "cad": 20.0, "sp": ["sandwich", "zigzag"] },
-	{ "res": 0.76, "int": 0.72, "cad": 16.0, "sp": ["sandwich", "zigzag", "barrel_cascade", "snake_columns", "bum_crowd", "bum_barrel", "glove_wave", "cone"] },
-	{ "res": 0.66, "int": 0.64, "cad": 14.0, "sp": ["barrel_cascade", "snake_columns", "stone_chess", "bum_wall", "bum_crowd", "bum_barrel", "diagonal", "glove_wave", "cone"] },
-	{ "res": 0.58, "int": 0.56, "cad": 12.0, "sp": ["snake_columns", "stone_chess", "glove_wave", "diagonal", "bum_wall", "bum_crowd", "bum_barrel", "cone"] },
-	{ "res": 0.52, "int": 0.50, "cad": 10.0, "sp": ["stone_chess", "glove_wave", "molotov_wave", "diagonal", "bum_crowd"] },
+	{ "res": 0.90, "int": 0.62, "cad": 14.0, "sp": ["sandwich", "zigzag", "cone", "bum_crowd"] },
+	{ "res": 0.76, "int": 0.54, "cad": 12.0, "sp": ["sandwich", "zigzag", "barrel_cascade", "snake_columns", "bum_crowd", "bum_barrel", "glove_wave", "cone"] },
+	{ "res": 0.66, "int": 0.48, "cad": 10.0, "sp": ["barrel_cascade", "snake_columns", "stone_chess", "bum_wall", "bum_crowd", "bum_barrel", "diagonal", "glove_wave", "cone"] },
+	{ "res": 0.58, "int": 0.42, "cad":  9.0, "sp": ["snake_columns", "stone_chess", "glove_wave", "diagonal", "bum_wall", "bum_crowd", "bum_barrel", "cone"] },
+	{ "res": 0.52, "int": 0.38, "cad":  8.0, "sp": ["stone_chess", "glove_wave", "molotov_wave", "diagonal", "bum_crowd", "bum_barrel"] },
 ]
 
 # Item speed goes up in STEPS (background scrolls at a fixed, slower pace — see
@@ -635,12 +642,6 @@ func _random_burst(dc: Dictionary, speed: float, lanes: Array, vp_w: float) -> v
 		if i < count - 1:
 			await get_tree().create_timer(interval).timeout
 
-# Наручники — единственный предмет с мгновенной смертью, поэтому у них
-# отдельный, более жёсткий гейт: только с фазы FROM (третья минута, игрок уже
-# читает поле) и с собственным низким шансом поверх обычного розыгрыша.
-const HANDCUFFS_FROM_PHASE : int   = 3
-const HANDCUFFS_CHANCE     : float = 0.012
-
 # One weighted-random item. Lethal telegraph threats (glove/molotov/bomb) never
 # come from the random stream — only from readable set-pieces.
 #
@@ -650,59 +651,82 @@ const HANDCUFFS_CHANCE     : float = 0.012
 func _spawn_random_item(dc: Dictionary, speed: float, lanes: Array, vp_w: float) -> void:
 	var y : float = lanes[randi() % LANE_COUNT] + _t1_osc_y()
 
-	if _phase >= HANDCUFFS_FROM_PHASE and randf() < HANDCUFFS_CHANCE:
-		_spawn_effect_item("handcuffs", y, vp_w, speed)
-		return
-
+	# РОЗЫГРЫШ РЕСУРСА. Пицца берёт почти три четверти — она главный ресурс и
+	# главная еда: жир, а с ним и запас жизней, набирается только ей. Доллар
+	# вчетверо реже: он платит за скины, а не за выживание, и валится он реже
+	# намеренно — иначе кошелёк наполняется быстрее, чем игрок успевает
+	# захотеть покупку.
+	#
+	# БОНУСЫ РЕДКИ. Все девять вместе — десятая часть ресурсных спавнов, а мешок
+	# с деньгами внутри неё ещё и один из самых редких: мешок — это событие
+	# («восемь долларов сразу, лети за ними»), а событие, случающееся каждые
+	# двадцать секунд, перестаёт быть событием.
 	if randf() < float(dc["res"]):
 		var r := randf()
-		if   r < 0.66: _spawn_item(y, vp_w, PIZZA_TEX, 0.09, speed, 0, true, true, true)
-		elif r < 0.84: _spawn_dollar(y, vp_w, speed)
-		elif r < 0.89: _inst_lane(MONEY_BAG_SCENE, speed, vp_w, lanes)
-		elif r < 0.925: _inst_lane(MAGNET_SCENE, speed, vp_w, lanes)
+		if   r < 0.740: _spawn_item(y, vp_w, PIZZA_TEX, 0.09, speed, 0, true, true, true)
+		elif r < 0.900: _spawn_dollar(y, vp_w, speed)
+		elif r < 0.920: _inst_lane(MAGNET_SCENE, speed, vp_w, lanes)        # магнит
+		elif r < 0.935: _inst_lane(MONEY_BAG_SCENE, speed, vp_w, lanes)     # мешок (редкий)
 		elif r < 0.950: _spawn_effect_item("cola", y, vp_w, speed)          # банка колы (ускорение)
-		elif r < 0.968: _spawn_effect_item("magic_hat", y, vp_w, speed)     # шляпа мага (иммун к замедлению)
-		elif r < 0.984: _spawn_effect_item("casey_mask", y, vp_w, speed)    # маска Кейси (иммун к урону)
-		elif r < 0.993: _spawn_effect_item("hourglass", y, vp_w, speed)     # песочные часы (замедление мира)
-		elif r < 0.998: _spawn_scripted(MAGIC_BOX_SCRIPT, y, vp_w, speed)   # мэджик бокс
+		elif r < 0.964: _spawn_effect_item("magic_hat", y, vp_w, speed)     # шляпа мага (иммун к замедлению)
+		elif r < 0.978: _spawn_effect_item("casey_mask", y, vp_w, speed)    # маска Кейси (иммун к урону)
+		elif r < 0.988: _spawn_effect_item("hourglass", y, vp_w, speed)     # песочные часы (замедление мира)
+		elif r < 0.996: _spawn_scripted(MAGIC_BOX_SCRIPT, y, vp_w, speed)   # мэджик бокс
 		else:           _spawn_effect_item("casino_chip", y, vp_w, speed)   # жетон автомата (редкий)
 	else:
 		_spawn_level_hazard(_pick_level_hazard(), y, vp_w, speed)
 
 # ── Угрозы ПО УРОВНЯМ ────────────────────────────────────────────────────────
-# У каждого уровня свой набор — тот же, что был в старом проекте
-# (`_itemsByLevel` в `pull_up_game.dart`). Именно набор и делает локацию
-# локацией: канализация — это банановая кожура под ногами и полицейская машина в
-# проезде, стройка — конусы и дорожные знаки, задворки и клуб — всё сразу и
-# вдобавок боксёрская перчатка.
+# У КАЖДОГО УРОВНЯ СВОЙ НАБОР — и это не украшение, а то, из чего локация
+# состоит. Канализация — это банан под ногами, бочки и бомжи; река — штурвал,
+# бутылка и костёр на берегу; задворки — пляжный хлам; дорога в клубе — двор с
+# машинами и колёсами; перед клубом — копы, наручники и зазывалы.
 #
-# Веса перенесены как есть, с одной правкой: у банана на первом уровне в старом
-# проекте стояло 80 против трёх у мусорки, то есть уровень был банановым и
-# больше никаким. Оставлено 40 — банан по-прежнему главная угроза локации, но
-# рядом с ним видно и остальных.
+# Раньше был общий список `HAZ_BASE`, который добавлялся ко всем уровням разом:
+# камень, змея, собака, вор, компас, туз, ниндзя, чек и семь «сюжетных» угроз
+# летели ВЕЗДЕ. От этого все пять уровней ощущались одним и тем же уровнем с
+# разной картинкой на заднике.
 #
-# БАЗА добавляется к набору уровня и есть везде: это те угрозы, которые не
-# привязаны к месту, — камень, змея, собака, вор, компас, туз, ниндзя, чек и
-# семёрка «сюжетных» угроз под резисты скинов.
-const HAZ_BASE : Dictionary = {
-	"stone": 12, "snake": 11, "dog": 7, "thief": 6, "compass": 4,
-	"black_ace": 3, "ninja": 5, "loser_ticket": 2, "hazard": 5,
+# Теперь везде летит только ОДНО — боксёрская перчатка: это не предмет места, а
+# ритм-событие, и на всех уровнях оно читается одинаково.
+#
+# Ресурсы и бонусы (пицца, доллар, мешок, магнит, маска, шляпа, мэджик бокс,
+# кола, часы, магнитофон) идут отдельным розыгрышем и тоже есть везде — см.
+# `_spawn_random_item`.
+#
+# См. /Концепция/Уровни/Раскладка по уровням.md
+const HAZ_ALWAYS : Dictionary = {
+	"glove": 6,
 }
+
+# Ниндзя приходит в поток ТОЛЬКО СО ВТОРОГО уровня — после того, как игрок
+# встретил его боссом в конце первого. Предмет, объясняющий сам себя боем с
+# боссом, до этого боя ничего не объясняет: игрок видит непонятную фигуру,
+# которая почему-то останавливается посреди экрана.
 const HAZ_LEVEL : Array = [
-	{ "banana": 40, "trash": 6,  "police_car": 14 },
-	{ "banana": 20, "cone": 10, "homeless": 10 },
-	# ДОРОГА В КЛУБ. Уровень уже пахнет клубом: по дороге стоят девочки-зазывалы
-	# (замедляют, не бьют — как у хозяина клуба), летят молотовы и перчатки,
-	# катаются полицейские, отираются бомжи. Конусы и знаки остаются от стройки,
-	# через которую эта дорога и идёт.
-	{ "banana": 20, "roadsign": 10, "cone": 10, "homeless": 10, "trash": 3,
-	  "girl": 14, "molotov": 10, "glove": 10, "police_car": 10 },
-	{ "banana": 20, "roadsign": 20, "trash": 20, "cone": 20, "homeless": 20, "glove": 20 },
-	{ "banana": 20, "roadsign": 20, "trash": 20, "cone": 40, "homeless": 20, "glove": 20 },
+	# 1. КАНАЛИЗАЦИЯ — бочки, камни, бомжи, конусы, банан, дорожный знак.
+	# Кобра и яд — своя фауна канализации, отсюда они и не уходят.
+	{ "banana": 26, "trash": 16, "stone": 14, "homeless": 16, "cone": 12,
+	  "roadsign": 10, "snake": 12, "poison": 6 },
+	# 2. УЛИЦА (река) — штурвал, бутылка с письмом, птица, зонт, костёр, конус.
+	{ "helm": 16, "bottle": 16, "bird": 14, "umbrella": 16, "campfire": 14,
+	  "cone": 10, "ninja": 6 },
+	# 3. ЗАДВОРКИ (пляж) — шезлонг, зонт, камень, компас, банан, пиво, птица.
+	{ "lounger": 12, "umbrella": 16, "stone": 14, "compass": 10, "banana": 16,
+	  "beer": 14, "bird": 12, "shaman": 6, "ninja": 6 },
+	# 4. ДОРОГА В КЛУБ (двор) — перевёрнутая машина копов, колесо, молотов,
+	# собака, бочка, бандит, бомж. Сейф стоит здесь же: двор — единственное
+	# место, где тяжёлый железный ящик не выглядит пришельцем.
+	{ "police_car": 14, "tire": 16, "molotov": 12, "dog": 14, "trash": 14,
+	  "thief": 12, "homeless": 14, "safe": 6, "ninja": 6 },
+	# 5. ПЕРЕД КЛУБОМ (парковка) — конус, полицейский, наручники, бомж, колесо,
+	# девочка. Клубное же и добавлено: коктейль, туз и чек лузера.
+	{ "cone": 14, "cop": 14, "handcuffs": 12, "homeless": 12, "tire": 14,
+	  "girl": 14, "cocktail": 8, "black_ace": 5, "loser_ticket": 4, "ninja": 6 },
 ]
 
 func _pick_level_hazard() -> String:
-	var pool : Dictionary = HAZ_BASE.duplicate()
+	var pool : Dictionary = HAZ_ALWAYS.duplicate()
 	var lvl : Dictionary = HAZ_LEVEL[clampi(level, 0, HAZ_LEVEL.size() - 1)] \
 		if campaign_mode else HAZ_LEVEL[HAZ_LEVEL.size() - 1]
 	for k in lvl:
@@ -719,7 +743,7 @@ func _pick_level_hazard() -> String:
 
 func _spawn_level_hazard(kind: String, y: float, vp_w: float, speed: float) -> void:
 	match kind:
-		"banana":       _spawn_slowing(y, vp_w, speed)
+		"banana":       _spawn_slowing(y, vp_w, speed, true)
 		"trash":        _spawn_t1_negative(y, vp_w, speed, true)
 		"stone":        _spawn_item(y, vp_w, STONE_TEX, 0.16, speed, 1, false, false, false, "stone", true)
 		"snake":        _spawn_snake(y, vp_w, speed, true)
@@ -731,12 +755,23 @@ func _spawn_level_hazard(kind: String, y: float, vp_w: float, speed: float) -> v
 		"black_ace":    _spawn_effect_item("black_ace", y, vp_w, speed)
 		"ninja":        _spawn_ninja(y, vp_w, speed)
 		"loser_ticket": _spawn_effect_item("loser_ticket", y, vp_w, speed)
+		"beer":         _spawn_slowing(y, vp_w, speed)
+		"handcuffs":    _spawn_effect_item("handcuffs", y, vp_w, speed)
 		"cone":         _spawn_cone(vp_w, speed)
 		"glove":        _spawn_glove(y, vp_w)
 		"police_car":   _spawn_police_car(y, vp_w, speed)
 		"girl":         _spawn_girl(y, vp_w, speed)
 		"molotov":      _spawn_molotov_single(y, vp_w, speed)
-		_:              _spawn_hazard(_pick_hazard(), y, vp_w, speed)
+		# Всё остальное — предметы `hazard_item.gd`: они названы в раскладке
+		# ПОИМЁННО (штурвал, зонт, костёр, шезлонг, колесо, коп, сейф…), и имя
+		# обязано дойти до спавна. Раньше здесь стоял слепой `_pick_hazard()`:
+		# раскладка просила зонт, а прилетал случайный из семи — и уровни снова
+		# становились одинаковыми, только теперь незаметно.
+		_:
+			if HAZARD_ITEM_SCRIPT.KINDS.has(kind):
+				_spawn_hazard(kind, y, vp_w, speed)
+			else:
+				_spawn_hazard(_pick_hazard(), y, vp_w, speed)
 
 # Полицейская машина — единственный предмет старого проекта, которого у нас не
 # было. Она НЕ вращается и заметно длиннее всего остального: это не летящий

@@ -183,7 +183,10 @@ func _test_effects(normaldo: Node, spawner: Node) -> void:
 	await _wait(1.2)
 	_check(_count_items(spawner) > before_count, "мэджик бокс: выплюнул предметы")
 
-	# Наручники — энд гейм. Снимаем dev-бессмертие, иначе предмет их уважает.
+	# Наручники — СКОВЫВАЮТ. Раньше это была мгновенная смерть; предмет из общего
+	# потока, убивающий сразу, не оставляет игроку хода — он либо не встретился,
+	# либо забег кончился без разговора. Снимаем dev-бессмертие и иммунитеты,
+	# иначе предмет их уважает и проверять нечего.
 	# Перед этим гасим поле и все временные щиты: мэджик бокс из прошлого шага
 	# разбрасывает предметы, и подобранная маска Кейси честно съедала бы
 	# наручники — тест падал на исправном поведении раз в несколько прогонов.
@@ -194,7 +197,9 @@ func _test_effects(normaldo: Node, spawner: Node) -> void:
 	await process_frame
 	normaldo.set_dev_immortal(false)
 	await _touch(normaldo, spawner, "handcuffs")
-	_check(bool(normaldo.get("_dead")), "наручники: энд гейм")
+	_check(not bool(normaldo.get("_dead")), "наручники больше не убивают")
+	_check(float(normaldo.get("_slow_remaining")) > 0.0,
+		"а сковывают: замедление %.1f с" % normaldo.get("_slow_remaining"))
 
 func _test_multiplier(normaldo: Node) -> void:
 	# Учёт добычи: набрали N, бросок ×M — на счету должно стать N × M.

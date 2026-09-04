@@ -132,7 +132,7 @@ const ENTRIES : Array = [
 	  "text": "Колдует на ходу. Что именно — узнаешь, когда прилетит." },
 	{ "id": "handcuffs", "section": S_ENEMY, "title": "НАРУЧНИКИ",
 	  "icon": "res://assets/items/handcuffs.png", "script": "effect_item", "kind": "handcuffs",
-	  "text": "Запирают лейн: пока не спадут, вбок не уйти." },
+	  "text": "Сковывают: пока не спадут, голова еле ползёт." },
 	{ "id": "black_ace", "section": S_ENEMY, "title": "ЧЁРНЫЙ ТУЗ",
 	  "icon": "res://assets/items/black_ace.png", "script": "effect_item", "kind": "black_ace",
 	  "text": "Забирает спелл. Скин остаётся, а бить ему нечем." },
@@ -157,6 +157,24 @@ const ENTRIES : Array = [
 	{ "id": "bum_barrel", "section": S_ENEMY, "title": "БОМЖ С БОЧКОЙ",
 	  "icon": "res://assets/items/barrel_open1.png", "script": "bum_barrel",
 	  "text": "Ставит бочку поперёк дороги и выпускает из неё собаку." },
+
+	# Предметы локаций (раскладка по уровням). Скрипт у всех один —
+	# `hazard_item`, — поэтому опознаются они по `kind`, как и первая семёрка.
+	{ "id": "umbrella", "section": S_ENEMY, "title": "ЗОНТ",
+	  "icon": "res://assets/items/umbrella.png", "script": "hazard_item", "kind": "umbrella",
+	  "text": "Парусит и оттого летит медленнее потока. Крупный: объезжают, а не проскакивают." },
+	{ "id": "bottle", "section": S_ENEMY, "title": "БУТЫЛКА С ПИСЬМОМ",
+	  "icon": "res://assets/items/letter_bottle.png", "script": "hazard_item", "kind": "bottle",
+	  "text": "Не бьёт — разливается под ноги и вяжет на четыре секунды." },
+	{ "id": "tire", "section": S_ENEMY, "title": "КОЛЕСО",
+	  "icon": "res://assets/items/tire.png", "script": "hazard_item", "kind": "tire",
+	  "text": "Катится быстрее потока. Успеть отреагировать — весь вопрос." },
+	{ "id": "lounger", "section": S_ENEMY, "title": "ШЕЗЛОНГ",
+	  "icon": "res://assets/items/lounger.png", "script": "hazard_item", "kind": "lounger",
+	  "text": "Самый длинный предмет: обойти можно только сверху или снизу." },
+	{ "id": "campfire", "section": S_ENEMY, "title": "КОСТЁР",
+	  "icon": "res://assets/items/firewood.png", "script": "hazard_item", "kind": "campfire",
+	  "text": "Дрова горят тем же огнём, что остаётся после молотова." },
 
 	# ── БОССЫ ────────────────────────────────────────────────────────────────
 	# Восемь на всю игру, и порядок здесь — порядок ВСТРЕЧИ, а не алфавит: раздел

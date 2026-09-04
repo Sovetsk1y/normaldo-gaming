@@ -12,7 +12,7 @@ extends Area2D
 #   шляпа мага     — иммунитет к замедлению
 #   банка колы     — ускорение
 #   чек лузера     — обнуляет доллары забега
-#   наручники      — мгновенная смерть
+#   наручники      — сковывают: замедление на 4 с
 #   чёрный туз     — сжигает жир до минимума
 #   жетон          — валюта автомата
 #
@@ -52,6 +52,10 @@ const SPINS : Array = ["hourglass", "black_ace", "casino_chip"]
 
 @export var speed : float = 250.0
 @export var kind  : String = "hourglass"
+# Полёт СВОИМ курсом вместо обычного «влево с потоком». Нужен ровно одному
+# случаю: коп кидает наручники в сторону Нормальдо, и лететь они обязаны туда,
+# куда он бросил, а не туда, куда едут все.
+@export var vel   : Vector2 = Vector2.ZERO
 
 var _pulse_t   : float    = 0.0
 var _spin      : bool     = false
@@ -90,8 +94,13 @@ func _build_glow() -> void:
 	add_child(_glow)
 
 func _process(delta: float) -> void:
-	position.x -= speed * delta
-	if position.x < -200.0:
+	if vel != Vector2.ZERO:
+		position += vel * delta
+	else:
+		position.x -= speed * delta
+	var vp := get_viewport_rect().size
+	if position.x < -200.0 or position.x > vp.x + 260.0 \
+			or position.y < -200.0 or position.y > vp.y + 200.0:
 		queue_free()
 		return
 

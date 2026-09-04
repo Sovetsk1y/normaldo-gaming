@@ -18,7 +18,7 @@ const SP := preload("res://scripts/spawner.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 29
+const EXPECTED_CHECKS : int = 28
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -68,9 +68,50 @@ func _test_table() -> void:
 	_check(shortens, "период между буквами укорачивается")
 
 # ── Наборы предметов ─────────────────────────────────────────────────────────
-# Веса перенесены из `_itemsByLevel` старого проекта. Проверяется не «набор
-# непустой», а ПРИНАДЛЕЖНОСТЬ: то, что должно быть только на своём уровне,
-# на чужом не встречается.
+# У КАЖДОГО УРОВНЯ СВОЙ НАБОР — из этого локация и состоит. Проверяется не
+# «набор непустой», а ПРИНАДЛЕЖНОСТЬ в обе стороны: заявленный предмет на своём
+# уровне встречается, а на чужом — нет.
+#
+# Раскладка ниже — копия той, что в `spawner.HAZ_LEVEL`, и это не дублирование
+# ради дублирования: таблица в спавнере — веса, а здесь — ЗАМЫСЕЛ. Поменяв вес,
+# легко случайно уронить предмет с уровня или подсыпать его на чужой; тест
+# ловит ровно это.
+#
+# См. /Концепция/Уровни/Раскладка по уровням.md
+const LAYOUT : Dictionary = {
+	# предмет → на каких уровнях (0-based) он ДОЛЖЕН встречаться
+	"banana":     [0, 2],
+	"trash":      [0, 3],
+	"stone":      [0, 2],
+	"homeless":   [0, 3, 4],
+	"cone":       [0, 1, 4],
+	"roadsign":   [0],
+	"snake":      [0],
+	"poison":     [0],
+	"helm":       [1],
+	"bottle":     [1],
+	"bird":       [1, 2],
+	"umbrella":   [1, 2],
+	"campfire":   [1],
+	"lounger":    [2],
+	"compass":    [2],
+	"beer":       [2],
+	"shaman":     [2],
+	"police_car": [3],
+	"tire":       [3, 4],
+	"molotov":    [3],
+	"dog":        [3],
+	"thief":      [3],
+	"safe":       [3],
+	"cop":        [4],
+	"handcuffs":  [4],
+	"girl":       [4],
+	"cocktail":   [4],
+	"black_ace":  [4],
+	"loser_ticket": [4],
+}
+# Единственное, что летит ВЕЗДЕ: это не предмет места, а ритм-событие.
+const EVERYWHERE : Array = ["glove"]
 
 func _test_pools() -> void:
 	var e : Dictionary = await _boot()
@@ -80,53 +121,51 @@ func _test_pools() -> void:
 	for lvl in 5:
 		sp.set("level", lvl)
 		var kinds : Dictionary = {}
-		for _i in 4000:
+		for _i in 6000:
 			kinds[String(sp.call("_pick_level_hazard"))] = true
 		seen.append(kinds)
 
-	# Полицейская машина ездит там, где есть дорога: канализационный проезд на
-	# первом уровне и сама ДОРОГА В КЛУБ на третьем. На стройке и задворках её
-	# нет — там ездить негде.
-	var car_ok : bool = seen[0].has("police_car") and seen[2].has("police_car") \
-		and not seen[1].has("police_car") and not seen[3].has("police_car") \
-		and not seen[4].has("police_car")
-	_check(car_ok, "полицейская машина — на первом и третьем уровнях")
-	# Конусы начинаются со второго, перчатка — с третьего.
-	_check(not seen[0].has("cone") and seen[1].has("cone"),
-		"конусы приходят со второго уровня")
-	_check(not seen[0].has("glove") and not seen[1].has("glove")
-			and seen[2].has("glove") and seen[3].has("glove"),
-		"боксёрская перчатка — с третьего")
+	var missing : Array = []
+	var stray   : Array = []
+	for item in LAYOUT:
+		var want : Array = LAYOUT[item]
+		for lvl in 5:
+			var here : bool = (seen[lvl] as Dictionary).has(item)
+			if want.has(lvl) and not here:
+				missing.append("%s нет на %d" % [item, lvl + 1])
+			elif not want.has(lvl) and here:
+				stray.append("%s залетел на %d" % [item, lvl + 1])
+	_check(missing.is_empty(), "каждый предмет есть на своих уровнях: %s" % [missing])
+	_check(stray.is_empty(), "и не залетает на чужие: %s" % [stray])
 
-	# ДОРОГА В КЛУБ — единственный уровень с девочками и молотовом в потоке:
-	# уровень уже пахнет клубом, но до самого клуба ещё два уровня.
-	var girls_ok  : bool = (seen[2] as Dictionary).has("girl")
-	var moloto_ok : bool = (seen[2] as Dictionary).has("molotov")
-	for i in 5:
-		if i == 2:
-			continue
-		if seen[i].has("girl"):
-			girls_ok = false
-		if seen[i].has("molotov"):
-			moloto_ok = false
-	_check(girls_ok, "девочки-зазывалы — только на ДОРОГЕ В КЛУБ")
-	_check(moloto_ok, "и молотов в потоке — тоже только там")
-	_check(not seen[0].has("roadsign") and not seen[1].has("roadsign")
-			and seen[2].has("roadsign"),
-		"дорожный знак — с третьего")
-	# Банан есть везде: это общая примета улицы, а не одной локации.
-	var banana_all := true
-	for i in 5:
-		if not seen[i].has("banana"):
-			banana_all = false
-	_check(banana_all, "банановая кожура есть на всех уровнях")
-	# И база тоже: камень, змея, ниндзя не привязаны к месту.
-	var base_all := true
-	for i in 5:
-		for k in ["stone", "snake", "ninja"]:
-			if not seen[i].has(k):
-				base_all = false
-	_check(base_all, "камень, змея и ниндзя есть везде")
+	var all_ok := true
+	for k in EVERYWHERE:
+		for lvl in 5:
+			if not (seen[lvl] as Dictionary).has(k):
+				all_ok = false
+	_check(all_ok, "боксёрская перчатка летит на всех уровнях")
+
+	# НИНДЗЯ — только со второго. На первом игрок его ещё не встречал: там он
+	# ждёт боссом в конце, и предмет, который объясняет себя этим боем, до боя
+	# читается как непонятная фигура, зачем-то замирающая посреди экрана.
+	var ninja_ok : bool = not (seen[0] as Dictionary).has("ninja")
+	for lvl in range(1, 5):
+		if not (seen[lvl] as Dictionary).has("ninja"):
+			ninja_ok = false
+	_check(ninja_ok, "ниндзя приходит в поток со второго уровня")
+
+	# И наборы РАЗНЫЕ: два уровня, совпавшие по составу, — это один уровень с
+	# двумя задниками.
+	var same : Array = []
+	for a in range(5):
+		for b in range(a + 1, 5):
+			var ka : Array = (seen[a] as Dictionary).keys()
+			ka.sort()
+			var kb : Array = (seen[b] as Dictionary).keys()
+			kb.sort()
+			if ka == kb:
+				same.append("%d и %d" % [a + 1, b + 1])
+	_check(same.is_empty(), "наборы уровней не повторяются: %s" % [same])
 	e["game"].queue_free()
 	await process_frame
 

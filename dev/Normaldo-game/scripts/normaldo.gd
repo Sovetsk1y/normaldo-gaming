@@ -1385,19 +1385,20 @@ func apply_fat_burn() -> void:
 	await get_tree().create_timer(1.5).timeout
 	_invincible = false
 
-# Наручники: энд гейм.
+# Наручники: СКОВЫВАЮТ. Раньше это был энд-гейм — мгновенная смерть от
+# предмета, который прилетал из общего потока; такой предмет невозможно
+# «сыграть»: он либо не встретился, либо забег кончился без разговора. Теперь
+# они делают то, что и обещает рисунок, — сковывают движение.
+const HANDCUFFS_SLOW : float = 4.0
+
 func apply_handcuffs() -> void:
-	# Маска Кейси разбирается выше, в диспетчере (она ломается и слетает, как от
-	# любого препятствия). Здесь остаются dev-бессмертие и обычное окно
-	# неуязвимости после удара — иначе предмет ломал бы и тестирование, и
-	# честную паузу после потери жира.
 	if _dev_immortal or _invincible:
 		_vfx_dodge_flash()
 		return
 	_last_hit_group = "handcuffs"
 	_last_hit_name  = "handcuffs"
-	_show_floating_text("ЭНД ГЕЙМ", Color(1.00, 0.20, 0.20))
-	_die()
+	_show_floating_text("СКОВАН!", Color(0.75, 0.80, 0.95))
+	apply_slow(HANDCUFFS_SLOW)
 
 # Песочные часы: замедляют МИР, а не голову. Разница принципиальная — эффект
 # должен читаться как передышка, поэтому предметы и фон едут медленнее, а
@@ -3613,9 +3614,9 @@ func _on_area_entered(area: Area2D) -> void:
 		# негативные предметы, а спелл обещает пролёт сквозь любой такой.
 		if _invincible:
 			return
-		var lethal := area.is_in_group("handcuffs")
+		var cuffs := area.is_in_group("handcuffs")
 		area.queue_free()
-		if lethal:
+		if cuffs:
 			apply_handcuffs()
 		else:
 			apply_fat_burn()
