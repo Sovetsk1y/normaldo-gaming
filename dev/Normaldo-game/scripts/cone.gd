@@ -7,6 +7,11 @@ extends Area2D
 
 const TEX      := preload("res://assets/items/cone.png")
 const UI_FONT  := preload("res://assets/fonts/RussoOne-Regular.ttf")
+# Картинка TAP! — та же, что в мини-играх с большой пиццей и с жиробоссом.
+# Одна и та же надпись на все три случая намеренно: «по этому надо тапать» —
+# один приём игры, и объяснять его тремя разными способами значит учить трижды.
+const TAP_TEX  := preload("res://assets/ui/reactions/tap.png")
+const TAP_PX   : float = 58.0
 
 @export var speed : float = 250.0
 var damage : int = 1
@@ -15,6 +20,8 @@ var _rows : int = 3           # высота в лейнах: 3 → 2 → 1
 var _num  : int = 0
 var _spr  : Sprite2D
 var _lbl  : Label
+var _tap_img : Sprite2D
+var _tap_t   : float = 0.0
 var _cs   : CollisionShape2D
 
 func _ready() -> void:
@@ -44,6 +51,15 @@ func _ready() -> void:
 	_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	add_child(_lbl)
 
+	# TAP! — НАД числом. Число одно ничего не просит: оно читается как «сколько
+	# во мне жизней», а не как «бей по мне пальцем». Картинка над ним и есть та
+	# просьба, а цифра под ней — счётчик, сколько ещё раз.
+	_tap_img = Sprite2D.new()
+	_tap_img.texture        = TAP_TEX
+	_tap_img.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_tap_img.scale = Vector2.ONE * ItemSizing.content_scale(TAP_TEX, TAP_PX)
+	add_child(_tap_img)
+
 	_num = randi_range(5, 10)
 	_resize()
 	input_event.connect(_on_input)
@@ -58,11 +74,15 @@ func _resize() -> void:
 	_spr.scale = Vector2(sc, sc)
 	var w := ts.x * sc
 	(_cs.shape as RectangleShape2D).size = Vector2(w * 0.70, h * 0.86)
-	# Число по центру конуса (только пока рядов > 1).
+	# Число по центру конуса (только пока рядов > 1), картинка TAP! — над ним,
+	# в четверти высоты конуса: выше она налезала бы на верхушку, ниже — на цифру.
 	_lbl.size     = Vector2(80.0, 40.0)
 	_lbl.position = Vector2(-40.0, -20.0)
 	_lbl.visible  = _rows > 1
 	_lbl.text     = str(_num)
+	if is_instance_valid(_tap_img):
+		_tap_img.visible  = _rows > 1
+		_tap_img.position = Vector2(0.0, -h * 0.26)
 
 func _on_input(_vp: Node, ev: InputEvent, _shape_idx: int) -> void:
 	if _rows <= 1:
@@ -106,3 +126,10 @@ func _process(delta: float) -> void:
 	position.x -= speed * delta
 	if position.x < -260.0:
 		queue_free()
+		return
+	# Пульс TAP! — не украшение: неподвижная надпись на летящем предмете читается
+	# как часть рисунка, дышащая — как просьба.
+	if is_instance_valid(_tap_img) and _tap_img.visible:
+		_tap_t += delta * 5.0
+		var k : float = ItemSizing.content_scale(TAP_TEX, TAP_PX)
+		_tap_img.scale = Vector2.ONE * k * (1.0 + sin(_tap_t) * 0.09)

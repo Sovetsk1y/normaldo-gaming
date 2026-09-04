@@ -38,6 +38,8 @@ func _initialize() -> void:
 	await _test_box_pool()
 	print("── Три вида ниндзя ──")
 	await _test_ninja_kinds()
+	print("── Конус просит тапать ──")
+	await _test_cone_tap()
 
 	print("")
 	if _fails == 0:
@@ -169,6 +171,49 @@ func _test_ninja_kinds() -> void:
 		t += 1.0 / 60.0
 	_check(get_root().get_tree().get_nodes_in_group("smoke").is_empty(),
 		"а потом рассеивается (%.1f)" % t)
+	game.queue_free()
+	await process_frame
+
+# Большой конус — единственный предмет потока, который надо ТАПАТЬ. Само по себе
+# число на нём этого не просит: оно читается как «сколько во мне жизней», а не
+# как «бей по мне пальцем». Просьба — картинка TAP! над числом, та же, что в
+# мини-играх с пиццей и с жиробоссом: «по этому надо тапать» — один приём игры,
+# и объяснять его тремя разными способами значит учить трижды.
+#
+# Проверяется и обратное: сжавшись до одного ряда, конус становится обычным
+# препятствием — и просить перестаёт.
+func _test_cone_tap() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var sp : Node = game.get_node_or_null("Spawner")
+	sp.call("clear_items")
+	sp.set_process(false)
+	var vp : Vector2 = get_root().get_visible_rect().size
+	sp.call("_spawn_cone", vp.x, 0.0)
+	await process_frame
+
+	var cone : Node2D = null
+	for c in sp.get_children():
+		if c.is_in_group("cone"):
+			cone = c
+	_check(cone != null, "конус появился")
+	if cone == null:
+		game.queue_free()
+		return
+	var tap : Sprite2D = cone.get("_tap_img")
+	var lbl : Label    = cone.get("_lbl")
+	_check(is_instance_valid(tap) and tap.visible, "и просит тапать картинкой TAP!")
+	_check(is_instance_valid(lbl) and lbl.visible and lbl.text != "",
+		"а число под ней говорит, сколько ещё раз: «%s»" % lbl.text)
+	# НАД числом, а не поверх него: цифра стоит в центре конуса.
+	_check(tap.position.y < lbl.position.y,
+		"картинка выше числа: %.0f против %.0f" % [tap.position.y, lbl.position.y])
+
+	cone.set("_rows", 1)
+	cone.call("_resize")
+	_check(not tap.visible and not lbl.visible,
+		"сжатый до одного ряда конус просить перестаёт")
 	game.queue_free()
 	await process_frame
 

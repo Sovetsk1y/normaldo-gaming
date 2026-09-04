@@ -1112,6 +1112,13 @@ func _build_skill_badges(normaldo: Node) -> void:
 # перезагружает сцену, из дерева вынимают и крокодила, и интерфейс, крокодил
 # уходит первым и дёргает этот обработчик у уже отцепленного HUD.
 # Всё, что про отцепленное дерево, живёт в UiKit.slide_to().
+# ИНТЕРФЕЙС ЗАБЕГА ОСТАЁТСЯ И НА БОССЕ. Левая стопка — пауза, ресурсы и полоса
+# жира — уезжала за край на время боя: считалось, что бой надо показывать без
+# помех. Убирались при этом ровно те вещи, которые в бою нужнее всего: сколько у
+# меня жира (то есть жизней), сколько собрано и чем поставить паузу. Игрок
+# оставался один на один с боссом и без единой цифры о себе.
+#
+# Въезд стопки остался — он играется один раз, на старте забега.
 func _slide_in_hud() -> void:
 	UiKit.slide_to(_left_container, "position:x", 0.0, 0.45,
 		Tween.TRANS_BACK, Tween.EASE_OUT)
@@ -1296,10 +1303,49 @@ func _show_menu() -> void:
 	if normaldo and normaldo.has_method("start_menu_idle"):
 		normaldo.start_menu_idle()
 
+	_start_menu_music()
+
 	# Flush a deep-link queued by a notification tap — runs on every menu
 	# rebuild so a tap that arrived mid-run gets handled once the player
 	# either dies and returns or backs out manually.
 	call_deferred("_route_deep_link_if_ready")
+
+# ── Музыка главного меню ──────────────────────────────────────────────────────
+# Меню молчало: трек забега заводится только на старте, и до первого тапа игра
+# встречала тишиной. Играет здесь тот же трек, что и в лудилке, — он у игры
+# один «нигровой», и меню с ним сразу читается как вход в заведение, а не как
+# пауза перед забегом.
+#
+# Крутится он на ОБЩЕМ узле Music, а не на своём проигрывателе: тот сидит на
+# шине Music, то есть слушается ползунка громкости в настройках, и его же
+# гасит смерть. Свой плеер пришлось бы отдельно подписывать на всё это.
+const MENU_MUSIC := preload("res://assets/slots/slots_music.mp3")
+const RUN_MUSIC  := preload("res://assets/audio/main_theme.mp3")
+
+func _music_node() -> Node:
+	return get_parent().get_node_or_null("Music") if get_parent() != null else null
+
+func _start_menu_music() -> void:
+	var m = _music_node()
+	if m == null or not m.has_method("start"):
+		return
+	# Меню перестраивается на каждый возврат из экранов — если трек уже идёт,
+	# перезапуск сбросил бы его на начало посреди фразы. Но если он в этот
+	# момент ГАСНЕТ (смерть увела громкость в ноль и вот-вот нажмёт стоп),
+	# «уже играет» — обман: заводим заново.
+	var fading : bool = m.has_method("is_fading_out") and bool(m.is_fading_out())
+	if m.stream == MENU_MUSIC and m.playing and not fading:
+		return
+	var st : AudioStreamMP3 = MENU_MUSIC
+	st.loop  = true
+	m.stream = st
+	m.start()
+
+# Идёт ли сейчас именно меню-трек. Спрашивает экран лудилки: у него тот же
+# трек, и заводить второй проигрыватель поверх идущего незачем.
+func menu_music_playing() -> bool:
+	var m = _music_node()
+	return m != null and m.stream == MENU_MUSIC and m.playing
 
 # Wraps `Notifications.consume_launch_payload()` so `_ready` can hand it to
 # `call_deferred` without binding to the autoload reference directly.
@@ -6030,8 +6076,17 @@ func _start_game() -> void:
 		normaldo.enable_input()
 		_build_skill_badges(normaldo)
 	var music := get_parent().get_node_or_null("Music")
-	if music and music.has_method("start"):
-		music.start()
+	if music:
+		# Из меню приходим с ЧУЖИМ треком в стволе, поэтому не start(), а
+		# перекрёстное затухание: обрыв меню-трека на первом кадре забега
+		# слышен как сбой, а не как смена сцены.
+		var run_st : AudioStreamMP3 = RUN_MUSIC
+		run_st.loop = true
+		if music.has_method("swap_to"):
+			music.swap_to(run_st, 0.7)
+		elif music.has_method("start"):
+			music.stream = run_st
+			music.start()
 	_run_outcome = "death"
 	QuestManager.notify_run_started(is_campaign, is_endless)
 	Analytics.event("run_started", {
@@ -6694,7 +6749,6 @@ func summon_club_boss(test_mode: bool = false) -> void:
 	var spawner   := get_parent().get_node_or_null("Spawner")
 	if not normaldo or not game_root:
 		return
-	_slide_out_hud_for_boss()
 	var boss := Node2D.new()
 	boss.set_script(CLUB_BOSS_SCRIPT)
 	boss.call("setup", normaldo, spawner, game_root, test_mode)
@@ -6713,7 +6767,6 @@ func summon_leatherhead(test_mode: bool = false) -> void:
 	var spawner   := get_parent().get_node_or_null("Spawner")
 	if not normaldo or not game_root:
 		return
-	_slide_out_hud_for_boss()
 	var croc := Node2D.new()
 	croc.set_script(LEATHERHEAD_SCRIPT)
 	croc.call("setup", normaldo, spawner, game_root, test_mode)
@@ -6930,7 +6983,6 @@ func _summon_boss(kind: String) -> void:
 		return
 	# Slide the HUD off-screen so the boss arena reads clean — no resource
 	# chrome competing with the fight visuals.
-	_slide_out_hud_for_boss()
 	# Фон ЗАМИРАЕТ на боссе. Едущая стена за спиной у стоящего босса читается как
 	# «мы всё ещё бежим», хотя бежать уже некуда: бой идёт на месте.
 	var bg := game_root.get_node_or_null("Background")
@@ -6955,11 +7007,6 @@ func _summon_boss(kind: String) -> void:
 	game_root.add_child(boss)
 	boss.connect("defeated", _on_boss_defeated)
 
-# Slide the left HUD stack (pause chip + resources + fat panel) off to the
-# left while the boss is on stage. Reversed by _slide_in_hud() after defeat.
-func _slide_out_hud_for_boss() -> void:
-	UiKit.slide_to(_left_container, "position:x", -_left_slide_w - 10.0, 0.45,
-		Tween.TRANS_QUAD, Tween.EASE_IN)
 
 func _on_boss_defeated() -> void:
 	# Босс ПОСЛЕДНЕГО уровня кончает кампанию; босс любого другого — ведёт на

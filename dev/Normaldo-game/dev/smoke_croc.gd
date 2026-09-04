@@ -167,24 +167,36 @@ func _test_hunt() -> void:
 	await process_frame
 	c.call("_act_hunt")
 
-	# Ключевая проверка всей битвы: НИТЬ РАНЬШЕ ПУЛИ. Ждём появления нити и
+	# Ключевая проверка всей битвы: ТЕЛЕГРАФ РАНЬШЕ ПУЛИ. Рисованной нити прицела
+	# больше нет — её убрали вместе с прочими вспомогательными линиями, — и
+	# телеграфом работает сам босс: перед выстрелом он ПЕРЕСТАЁТ ВЕСТИ стволом и
+	# застывает на линии игрока. Ловим момент, когда слежение выключилось, и
 	# смотрим, что пули в этот момент ещё нет.
-	var laser_at := -1.0
+	var aim_at := -1.0
 	var bullet_at := -1.0
+	var was_tracking := false
 	var t := 0.0
-	while t < 6.0 and (laser_at < 0.0 or bullet_at < 0.0):
+	while t < 6.0 and (aim_at < 0.0 or bullet_at < 0.0):
 		await process_frame
 		t += 1.0 / 60.0
-		if laser_at < 0.0 and not _lines(e["game"], []).is_empty():
-			laser_at = t
+		var tracking : bool = bool(c.get("_tracking"))
+		if tracking:
+			was_tracking = true
+		elif was_tracking and aim_at < 0.0:
+			aim_at = t
 		if bullet_at < 0.0 and _count("bullet") > 0:
 			bullet_at = t
-	_check(laser_at > 0.0, "нить прицела загорелась (%.2f с)" % laser_at)
+	_check(aim_at > 0.0, "ствол замер на линии игрока (%.2f с)" % aim_at)
 	_check(bullet_at > 0.0, "и выстрел состоялся (%.2f с)" % bullet_at)
-	_check(laser_at > 0.0 and bullet_at > laser_at,
-		"нить РАНЬШЕ пули: %.2f против %.2f" % [laser_at, bullet_at])
-	_check(bullet_at - laser_at > 0.25,
-		"и у игрока есть время уйти: %.2f с" % (bullet_at - laser_at))
+	_check(aim_at > 0.0 and bullet_at > aim_at,
+		"замер РАНЬШЕ пули: %.2f против %.2f" % [aim_at, bullet_at])
+	_check(bullet_at - aim_at > 0.25,
+		"и у игрока есть время уйти: %.2f с" % (bullet_at - aim_at))
+
+	# И НИКАКИХ ЛИНИЙ-ПОДСКАЗОК на экране: ни нити прицела, ни подсвеченного
+	# края. Вспомогательная линия, объясняющая «откуда сейчас прилетит»,
+	# превращает бой в чтение схемы.
+	_check(_lines(e["game"], []).is_empty(), "нити прицела на экране нет")
 
 	# Пуля летит ПО ПРЯМОЙ и никуда не доводится: иначе нить бессмысленна.
 	var b : Node2D = get_root().get_tree().get_nodes_in_group("bullet")[0]
@@ -327,13 +339,14 @@ func _test_tail() -> void:
 	await process_frame
 	c.call("_act_tail")
 
-	# Свечение края раньше хвоста — та же проверка, что и с нитью.
-	var glow_at := -1.0
+	# ДОРОЖКА раньше хвоста. Светящейся полосы у края больше нет — предупреждает
+	# только выложенная добыча, и она обязана лечь ДО удара, иначе такт
+	# превращается в «угадал / не угадал».
 	var tail_at := -1.0
 	var bait_at := -1.0
 	var full_at := -1.0
 	var t := 0.0
-	while t < 6.0 and (glow_at < 0.0 or tail_at < 0.0):
+	while t < 6.0 and tail_at < 0.0:
 		await process_frame
 		t += 1.0 / 60.0
 		var loot_n : int = _count("pizza") + _count("dollar")
@@ -341,16 +354,11 @@ func _test_tail() -> void:
 			bait_at = t
 		if full_at < 0.0 and loot_n >= int(CROC.BAIT_COUNT):
 			full_at = t
-		if glow_at < 0.0:
-			for ch in e["game"].get_children():
-				if ch is ColorRect and (ch as ColorRect).size.y < 20.0:
-					glow_at = t
-					break
 		if tail_at < 0.0 and _count("croc_tail") > 0:
 			tail_at = t
-	_check(glow_at > 0.0, "край загорелся (%.2f с)" % glow_at)
-	_check(tail_at > 0.0 and tail_at > glow_at,
-		"хвост пошёл ПОСЛЕ свечения: %.2f против %.2f" % [tail_at, glow_at])
+	_check(bait_at > 0.0, "дорожка легла (%.2f с)" % bait_at)
+	_check(tail_at > 0.0 and tail_at > bait_at,
+		"хвост пошёл ПОСЛЕ дорожки: %.2f против %.2f" % [tail_at, bait_at])
 
 	# ПРИМАНКА. Дорожка выкладывается ВМЕСТЕ со свечением, а хвост выходит сразу
 	# за последней пиццей: пауза после дорожки означала бы, что её можно спокойно

@@ -300,7 +300,6 @@ func _test_teardown(hud: Node) -> void:
 	hud.call("_slide_in_hud")
 	_check(is_equal_approx(lc.position.x, 0.0),
 		"_slide_in_hud() на отцепленном HUD довозит стопку: x = %.1f" % lc.position.x)
-	hud.call("_slide_out_hud_for_boss")
-	_check(lc.position.x < -10.0,
-		"_slide_out_hud_for_boss() там же уводит её за край: x = %.1f" % lc.position.x)
+	# Обратной проверки «увести за край» здесь больше нет: интерфейс на боссах
+	# не уезжает — жир, доллары и спеллы нужны в бою ровно так же, как в забеге.
 	game.free()

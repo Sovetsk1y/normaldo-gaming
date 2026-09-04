@@ -235,15 +235,21 @@ func _ready() -> void:
 	_mute_tv() 
 
 func _start_music() -> void:
-	_music = AudioStreamPlayer.new()
-	var stream := load("res://assets/slots/slots_music.mp3") as AudioStreamMP3
-	if stream:
-		stream.loop   = true
-		_music.stream = stream
-	_music.volume_db    = -4.0
-	_music.process_mode = Node.PROCESS_MODE_ALWAYS
-	add_child(_music)
-	_music.play()
+	# Тот же трек теперь крутится и в главном меню. Если он уже идёт — свой
+	# проигрыватель не заводим: он начал бы ту же мелодию с нуля поверх идущей,
+	# и вход в лудилку звучал бы как склейка двух копий одной записи.
+	var menu_has_it : bool = _hud != null and _hud.has_method("menu_music_playing") \
+			and bool(_hud.menu_music_playing())
+	if not menu_has_it:
+		_music = AudioStreamPlayer.new()
+		var stream := load("res://assets/slots/slots_music.mp3") as AudioStreamMP3
+		if stream:
+			stream.loop   = true
+			_music.stream = stream
+		_music.volume_db    = -4.0
+		_music.process_mode = Node.PROCESS_MODE_ALWAYS
+		add_child(_music)
+		_music.play()
 
 	# Pre-build the spin-rolling SFX so the first КРУТИТЬ tap doesn't pay
 	# the load-and-attach cost. Stream is looped so it plays as long as the
