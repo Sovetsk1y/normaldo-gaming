@@ -341,31 +341,37 @@ func _test_bum_variety() -> void:
 
 	# Сорок спавнов на каждый источник: при честной монетке шанс не увидеть
 	# второй кадр — один на пятьсот миллиардов.
+	#
+	# Каждый источник считается СРАЗУ, без ожидания кадра. Кадр здесь не нужен:
+	# спрайт ставится в `_ready`, то есть уже на add_child. А вреден он тем, что
+	# сет-пис с бочкой за это время успевает доиграть свой такт и подчистить
+	# поток — тест мигал «кадров 0» на исправном коде.
 	const TRIES : int = 40
 	var seen_solo : Dictionary = {}
 	for i in TRIES:
 		sp.call("_spawn_homeless", vp.y * 0.5, vp.x, 250.0)
+	_collect_tex(sp, seen_solo)
+	sp.call("clear_items")
+
 	var seen_sign : Dictionary = {}
 	for i in TRIES:
 		sp.call("_spawn_scripted", load("res://scripts/roadsign_bum.gd"),
 			vp.y * 0.5, vp.x, 250.0)
+	_collect_tex(sp, seen_sign)
+	sp.call("clear_items")
+
+	# Бочку держим в СВОЁМ узле: сет-пис по ходу такта чистит поток спавнера, и
+	# сложенные туда сорок штук сносят друг друга.
+	var pen := Node2D.new()
+	sp.add_child(pen)
 	var seen_barrel : Dictionary = {}
 	for i in TRIES:
 		var bb := Node2D.new()
 		bb.set_script(load("res://scripts/bum_barrel.gd"))
 		bb.call("setup", null, vp.y * 0.5, 250.0)
-		sp.add_child(bb)
-	await process_frame
-
-	for c in sp.get_children():
-		var sc = c.get_script()
-		if sc == null:
-			continue
-		var name := String(sc.resource_path).get_file().get_basename()
-		match name:
-			"homeless":     _collect_tex(c, seen_solo)
-			"roadsign_bum": _collect_tex(c, seen_sign)
-			"bum_barrel":   _collect_tex(c, seen_barrel)
+		pen.add_child(bb)
+	_collect_tex(pen, seen_barrel)
+	pen.queue_free()
 
 	_check(seen_solo.size() == 2,
 		"одиночный бомж бывает и рыжим, и седым: кадров %d" % seen_solo.size())
