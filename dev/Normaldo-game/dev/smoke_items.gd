@@ -413,6 +413,46 @@ func _test_safe_crack() -> void:
 		_check(int(safe.get("collision_layer")) == 0,
 			"и по дороге вниз уже не бьёт")
 
+	# И ПО РЕЗИСТУ ТОЖЕ. Резист (венец викинга, десятый уровень) отменяет урон,
+	# но не отменяет того, что по ящику ударили: деньги высыпаются, а платит за
+	# них не жир, а прокачанный до конца скин.
+	sp.call("clear_items")
+	await process_frame
+	save.active_skin = "viking"
+	save.skin_level  = 10
+	n.call("reload_skin")
+	n.call("_build_skin_runtime")
+	n.set("fat_state", 3)
+	n.call("_apply_skin_to_sprite")
+	await process_frame
+	_check(bool(n.call("is_skill_ready", "resist:safe")),
+		"у прокачанного викинга резист на сейф готов")
+
+	sp.call("_spawn_safe", vp.y * 0.5, vp.x, 250.0)
+	await process_frame
+	var safe2 : Node2D = null
+	for c in sp.get_children():
+		if c.is_in_group("safe"):
+			safe2 = c
+	if safe2 != null:
+		var fat_r : int = int(n.get("fat_state"))
+		safe2.position = n.position
+		var want2 : int = int(load("res://scripts/safe.gd").COIN_COUNT)
+		var seen2 : Dictionary = {}
+		var t2 := Time.get_ticks_msec()
+		while Time.get_ticks_msec() - t2 < 6000:
+			get_root().get_tree().paused = false
+			await process_frame
+			for c in sp.get_children():
+				if c.is_in_group("dollar") or c.is_in_group("money_bag"):
+					seen2[c.get_instance_id()] = true
+			if seen2.size() >= want2:
+				break
+		_check(int(n.get("fat_state")) == fat_r,
+			"резист удар отменил: жир %d → %d" % [fat_r, int(n.get("fat_state"))])
+		_check(seen2.size() >= want2,
+			"но сейф всё равно вскрылся: %d штук" % seen2.size())
+
 	game.queue_free()
 	await process_frame
 

@@ -1672,7 +1672,7 @@ func _trigger_resist(tag: String, area: Area2D) -> void:
 	# рисунок — как к этому относится Нормальдо.
 	_pop_sticker(Phrases.resist())
 	_bum_feast(tag)
-	_kill_item(area)
+	_crack_or_kill(area)
 
 # Destroy an obstacle with the "falling death" used in the ЖИРОБОСС mini-game:
 # knock_down() drops it under gravity with a spin AND plays its death cry
@@ -3726,12 +3726,15 @@ func _handle_obstacle(area: Area2D) -> void:
 	if area.has_meta("invert_duration"):
 		apply_invert(float(area.get_meta("invert_duration")))
 		_show_floating_text("ПРОКЛЯТИЕ!", Color(0.55, 1.00, 0.45))
-	# СЕЙФ ВСКРЫВАЕТСЯ УДАРОМ: урон уже нанесён строкой выше, а теперь он
-	# перелетает на голову и высыпает деньги (см. safe.gd). Убирает он себя сам —
-	# падением, — поэтому _kill_item ему не нужен.
-	#
-	# Только здесь, в ветке настоящего удара: резист выше уже вернулся, и денег
-	# там нет намеренно.
+	_crack_or_kill(area)
+
+# Сейф не «уничтожается» ударом, а ВСКРЫВАЕТСЯ: сам перелетает на голову, сам
+# высыпает деньги и сам себя убирает падением (см. safe.gd). Поэтому там, где
+# предмет обычно добивают, у него своя развилка.
+#
+# Развилок ДВЕ, и обе платят: настоящий удар и резист. Резист отменяет урон, но
+# не отменяет того, что по ящику ударили, — а вскрыт он именно ударом.
+func _crack_or_kill(area: Area2D) -> void:
 	if area.has_method("crack_open"):
 		area.call("crack_open", self)
 		return
