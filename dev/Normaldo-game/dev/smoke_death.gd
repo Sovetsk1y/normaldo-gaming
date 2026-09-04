@@ -42,6 +42,8 @@ func _initialize() -> void:
 	await _test_quests(hud, save)
 	print("── Награда за уровень ──")
 	await _test_reward(hud, save)
+	print("── Двойная выгода ──")
+	await _test_double_money(hud, save)
 	print("── Перезагрузка сцены по «ЕЩЁ РАЗ» ──")
 	_test_teardown(hud)
 
@@ -252,6 +254,31 @@ func _test_reward(hud: Node, save: Node) -> void:
 # значение обязано доехать напрямую, без твина. Заодно это ловит и обратную
 # ошибку — «просто выйти, если не в дереве»: тогда интерфейс навсегда остался бы
 # стоять за краем экрана.
+# «ДВОЙНАЯ ВЫГОДА» — перк Очков на 10 уровне: доллары забега идут ×2.
+#
+# Перк был ОБЪЯВЛЕН в лестнице наград и не реализован вовсе: строка в карточке
+# скина обещала удвоение, а на счёт приходила ровно та же сумма. Проверяется
+# поэтому не «есть перк в таблице», а САМО НАЧИСЛЕНИЕ — и то, что без перка оно
+# остаётся прежним.
+func _test_double_money(hud: Node, save: Node) -> void:
+	hud.set("_dollars_this_run", 37)
+
+	save.active_skin = "glasses"
+	save.skin_level  = 10
+	_check(int(hud.call("_run_dollars_payout")) == 74,
+		"у Очков на 10 уровне 37 долларов забега превращаются в %d"
+			% hud.call("_run_dollars_payout"))
+
+	save.skin_level = 9
+	_check(int(hud.call("_run_dollars_payout")) == 37,
+		"на 9 уровне перка ещё нет: %d" % hud.call("_run_dollars_payout"))
+
+	save.active_skin = "classic"
+	save.skin_level  = 10
+	_check(int(hud.call("_run_dollars_payout")) == 37,
+		"у чужого скина перка нет: %d" % hud.call("_run_dollars_payout"))
+	hud.set("_dollars_this_run", 0)
+
 func _test_teardown(hud: Node) -> void:
 	var probe := Node2D.new()                       # намеренно НЕ в дереве
 	probe.position = Vector2(-500.0, 7.0)

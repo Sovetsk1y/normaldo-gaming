@@ -12,7 +12,7 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 32
+const EXPECTED_CHECKS : int = 33
 
 # ── Слух теста ───────────────────────────────────────────────────────────────
 # Звук проверяется НАБЛЮДЕНИЕМ, а не чтением констант: сцена расставляет плееры
@@ -208,6 +208,13 @@ func _initialize() -> void:
 	# именно ВОЗВРАТ: подавшийся и не вернувшийся бомж — это не тычок, а сдвиг.
 	var bx_home : float = -1e9
 	var bx_min  : float =  1e9
+	# Пока бомж подаётся вперёд, БОЧКА СТОИТ. Она заваливается поворотом вокруг
+	# нижнего угла, то есть её тело в первый же миг уезжает влево на десятки
+	# пикселей — туда же, куда подаётся бомж, — и наложись эти такты, на экране
+	# читалось бы «дёрнулись вместе», а не «он толкнул, и она упала». Ровно это и
+	# было видно, пока падение начиналось в момент касания.
+	var bar_x0 : float = bar.global_position.x
+	var bar_drift : float = 0.0
 	var t_s := 0.0
 	while t_s < 1.6:
 		await process_frame
@@ -216,10 +223,15 @@ func _initialize() -> void:
 		var bx : float = bum.position.x
 		bx_home = maxf(bx_home, bx)
 		bx_min  = minf(bx_min, bx)
+		# Смотрим только НА ТЫЧКЕ: бомж сдвинут, а бочка ещё стоит стоймя.
+		if bx < bx_home - 1.0 and absf(bar.rotation) < 0.01:
+			bar_drift = maxf(bar_drift, absf(bar.global_position.x - bar_x0))
 	_check(bx_home - bx_min > 8.0,
 		"бомж толкнул бочку: подался вперёд на %.0f px" % (bx_home - bx_min))
 	_check(absf(bum.position.x - bx_home) < 3.0,
 		"и вернулся назад: %.0f против %.0f" % [bum.position.x, bx_home])
+	_check(bar_drift < 1.0,
+		"а бочка на тычке стояла: увело на %.1f px" % bar_drift)
 
 	# А дальше — открытая бочка и собака из неё.
 	# У бочки два кадра: закрыта и открыта. Третьим когда-то был `trash_bin.png` —

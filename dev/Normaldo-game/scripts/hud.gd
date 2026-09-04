@@ -1106,24 +1106,6 @@ func _build_skill_badges(normaldo: Node) -> void:
 	layer.call("setup", normaldo)
 	_skill_badges_layer = layer
 
-const _RESIST_MARKS_SCRIPT := preload("res://scripts/resist_marks.gd")
-var _resist_marks_layer : Node2D = null
-
-# Метки резиста живут в МИРЕ, а не в HUD: они рисуются на летящих предметах, и
-# координаты у них игровые. Поэтому слой вешается на сцену игры, а не сюда.
-# См. /Концепция/Интерфейс забега.md
-func _build_resist_marks(normaldo: Node) -> void:
-	if is_instance_valid(_resist_marks_layer):
-		_resist_marks_layer.queue_free()
-	var scene := get_parent()
-	if scene == null:
-		return
-	var layer := Node2D.new()
-	layer.set_script(_RESIST_MARKS_SCRIPT)
-	scene.add_child(layer)
-	layer.call("setup", normaldo)
-	_resist_marks_layer = layer
-
 # Левая стопка (пауза + ресурсы + жир) въезжает из-за края. Зовут отсюда трое:
 # начало забега, победа над боссом и — в тестовом режиме — сам босс своим
 # `tree_exited`. Последний и приносил падение: «ЕЩЁ РАЗ» на экране смерти
@@ -6047,7 +6029,6 @@ func _start_game() -> void:
 	if normaldo:
 		normaldo.enable_input()
 		_build_skill_badges(normaldo)
-		_build_resist_marks(normaldo)
 	var music := get_parent().get_node_or_null("Music")
 	if music and music.has_method("start"):
 		music.start()
@@ -7174,6 +7155,20 @@ func _show_victory() -> void:
 	btn_menu.pressed.connect(_restart)
 	add_child(btn_menu)
 
+# ── Двойная выгода ───────────────────────────────────────────────────────────
+# Доллары, которые ЗАЧИСЛЯЮТСЯ за забег. У Очков на 10 уровне открыта
+# «ДВОЙНАЯ ВЫГОДА» — все доллары забега идут ×2.
+#
+# Считается в ОДНОМ месте и отсюда берётся везде: начисление в сейв, баланс «до
+# забега», полёт монет к кошельку и строка итога. Разойдись эти четыре числа —
+# игрок увидит, как ему начислили одно, а написали другое, и поверит написанному.
+func _run_dollars_payout() -> int:
+	return int(round(float(_dollars_this_run) * _run_dollars_mult()))
+
+func _run_dollars_mult() -> float:
+	return 2.0 if SkinProgression.has_perk(
+		String(SaveData.active_skin), int(SaveData.skin_level), "double_money") else 1.0
+
 func _on_dollars_changed(count: int) -> void:
 	_dollars_this_run = count
 	_dollar_label.text = str(count)
@@ -7221,7 +7216,7 @@ func _on_normaldo_died(total_pizzas: int, death_pos: Vector2) -> void:
 	if is_instance_valid(_oneshot_panel):
 		_oneshot_panel.visible = false
 	await get_tree().create_timer(0.8).timeout
-	SaveData.add_dollars(_dollars_this_run, "run_end")
+	SaveData.add_dollars(_run_dollars_payout(), "run_end")
 	var xp_before    := SaveData.skin_xp
 	var level_before := SaveData.skin_level
 	# Личная статистика скина: забег засчитывается ровно здесь, одновременно с
@@ -7426,7 +7421,7 @@ func _show_game_over(total_pizzas: int, level_rewards: Array, xp_before: int, le
 	for r in level_rewards:
 		level_reward_d += int(r["dollars"])
 		level_reward_t += int(r["tokens"])
-	var balance_before_run : int = SaveData.dollars - _dollars_this_run - level_reward_d
+	var balance_before_run : int = SaveData.dollars - _run_dollars_payout() - level_reward_d
 
 	var overlay := ColorRect.new()
 	overlay.color        = Color(0, 0, 0, 0.78)
@@ -7453,7 +7448,7 @@ func _show_game_over(total_pizzas: int, level_rewards: Array, xp_before: int, le
 		_build_go_rank_block(left.position.x, left.position.y, left.size.x, _pm, left.size.y)
 
 	_run_xp_animation(xp_before, level_before, total_pizzas)
-	_spawn_dollar_fly_to_balance(_dollars_this_run)
+	_spawn_dollar_fly_to_balance(_run_dollars_payout())
 
 	# Дев-кнопки экрана смерти — под рубильником инструментария: опыт живёт в
 	# главном меню, и второй его набор поверх итогов забега только лезет в кадр.
@@ -7482,7 +7477,12 @@ func _build_go_left(r: Rect2, total_pizzas: int, level_rewards: Array,
 	var sw  : float = w - AV - 10.0
 	_go_stat_row(Vector2(sx0, y + 2.0), sw, PIZZA_TEXTURE, "× %d" % total_pizzas,
 		Color(1.0, 0.88, 0.55), _pm, true)
-	_go_stat_row(Vector2(sx0, y + 26.0), sw, DOLLAR_TEXTURE, "+ %d" % _dollars_this_run,
+	# С «ДВОЙНОЙ ВЫГОДОЙ» в строке стоит уже удвоенное число и пометка ×2: без
+	# неё игрок видит вдвое больше собранного и решает, что счётчик врал весь
+	# забег, — перк обязан назвать себя там же, где сработал.
+	var paid : int = _run_dollars_payout()
+	_go_stat_row(Vector2(sx0, y + 26.0), sw, DOLLAR_TEXTURE,
+		("+ %d  ×2" % paid) if paid != _dollars_this_run else ("+ %d" % paid),
 		Color(1.0, 0.88, 0.35), _pm, false)
 
 	var t_lbl := Label.new()

@@ -269,6 +269,7 @@ const _WHEEL_TEX         := preload("res://assets/skills/ship_wheel.png")
 const _CARD_TEX          := preload("res://assets/skills/card.png")
 const _X3_TEX            := preload("res://assets/skills/x3.png")
 const _CASEY_TEX         := preload("res://assets/items/casey_mask.png")
+const _MAGIC_HAT_TEX     := preload("res://assets/items/magic_hat.png")
 const _SFX_GLITTER       := preload("res://assets/audio/magic_glitter.mp3")   # transformus flight
 const _SFX_POOF          := preload("res://assets/audio/magic_poof.mp3")      # item → pizza/dollar
 const _ITEM_SCENE        := preload("res://scenes/item.tscn")
@@ -318,8 +319,16 @@ const _DTAP_DIST : float = 55.0   # taps must be close together (не путат
 #   маска Кейси — переиспользует механику шрамов Джокера (_begin_scars)
 #
 # См. /Концепция/Эффекты и бонусы.md
-const CASEY_MASK_DURATION : float = 3.0
-const MAGIC_HAT_DURATION  : float = 3.0
+# Маска и шляпа держатся ВОСЕМЬ секунд, а не три. Три — это меньше, чем время
+# между двумя волнами: подобрал, увидел надпись «НЕУЯЗВИМ!» — и эффект кончился,
+# ни разу не пригодившись. Предмет, который нельзя РЕАЛИЗОВАТЬ, читается как
+# ничего не делающий, сколько бы правды ни было написано в его описании.
+#
+# Восемь — это две-три волны: успеваешь и увидеть, что стал неуязвим, и решить,
+# куда этим пролететь. Кола осталась на трёх: у неё эффект не «можно рискнуть»,
+# а «быстрее двигаешься», и он читается сразу.
+const CASEY_MASK_DURATION : float = 8.0
+const MAGIC_HAT_DURATION  : float = 8.0
 const COLA_DURATION       : float = 3.0
 const COLA_SPEED_MULT     : float = 1.55
 
@@ -1329,6 +1338,12 @@ func apply_slow_immunity(duration: float = MAGIC_HAT_DURATION) -> void:
 	_show_floating_text("НЕ ЗАМЕДЛИТЬ!", Color(0.45, 0.60, 1.00))
 	_vfx_particles(SkinSkills.TRANSFORM)
 	_play_oneshot(_RESIST_SFX)
+	# ШЛЯПА НАДЕВАЕТСЯ — как маска Кейси. Пока эффект шёл, на экране не менялось
+	# ничего, кроме кружка в углу: голова та же, а «иммунитет к замедлению» —
+	# состояние, которое иначе видно только в момент, когда тебя НЕ замедлили,
+	# то есть никогда. Надетая шляпа отвечает на «а он ещё действует?» там же,
+	# где игрок и смотрит, — на своей голове.
+	_wear_hat(duration)
 
 # Банка колы: ускорение движения головы.
 func apply_speed_boost(duration: float = COLA_DURATION) -> void:
@@ -1609,33 +1624,6 @@ func active_charges() -> int:
 
 func active_max_charges() -> int:
 	return _active_max_charges
-
-# ── Метки резиста на предметах (scripts/resist_marks.gd) ─────────────────────
-# Главный вопрос забега — «этот предмет мне страшен?» — задаётся за полсекунды
-# до столкновения, когда смотреть в угол экрана некогда. Ответ рисуется на
-# самом предмете, а состояние резиста для него отдаёт вот это.
-enum ResistState { NONE = 0, READY = 1, COOLING = 2 }
-
-func resist_state_for(area: Area2D) -> int:
-	return resist_state_for_tag(resist_tag_for(area))
-
-# Тег резиста для предмета, или "" если этот скин его не ломает. Слой меток
-# спрашивает это ОДИН раз при появлении предмета: разбор тега идёт перебором
-# групп, и гонять его каждый кадр по всем предметам на экране незачем.
-func resist_tag_for(area: Area2D) -> String:
-	if _resist_cd_for.is_empty() or not is_instance_valid(area):
-		return ""
-	var tag := _area_tag(area)
-	return tag if _resist_cd_for.has(tag) else ""
-
-func resist_state_for_tag(tag: String) -> int:
-	if tag == "":
-		return ResistState.NONE
-	return ResistState.READY if is_skill_ready("resist:" + tag) else ResistState.COOLING
-
-# Есть ли у скина резисты вообще — слой меток не запускается, если их нет.
-func has_any_resist() -> bool:
-	return not _resist_cd_for.is_empty()
 
 func start_skill_cd(key: String, total: float) -> void:
 	if total <= 0.0:
@@ -3427,20 +3415,49 @@ func _begin_scars(duration: float, gated: bool) -> void:
 		if is_instance_valid(self) and _scars_active and _scars_token == tok:
 			_end_scars())
 
+# ── Носимое на голове ────────────────────────────────────────────────────────
+# Маска Кейси и шляпа мага надеваются ОДИНАКОВО: спрайт вешается ребёнком на
+# спрайт головы. Оттого он и едет с ней, и крутится на морфе жира, и меняется
+# вместе с кадром — своей синхронизации не нужно ни строчки.
+#
+# `width_k` — доля ШИРИНЫ ГОЛОВЫ, которую занимает вещь; `pos` — в тех же
+# единицах, то есть в долях кадра головы, а не в пикселях экрана: голова у
+# скинов разного размера, и пиксельный отступ уехал бы у каждого второго.
+func _spawn_worn(tex: Texture2D, width_k: float, pos: Vector2) -> Sprite2D:
+	var w := Sprite2D.new()
+	w.texture        = tex
+	w.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	w.z_index        = 6
+	var head : Vector2 = _sprite.texture.get_size()
+	w.scale    = Vector2.ONE * (head.x * width_k / tex.get_size().x)
+	w.position = Vector2(pos.x * head.x, pos.y * head.y)
+	w.modulate = Color(1, 1, 1, 0.0)
+	_sprite.add_child(w)
+	var tw := w.create_tween()
+	tw.tween_property(w, "modulate:a", 1.0, 0.14)
+	return w
+
+# Шляпа сидит НАД головой и уже, чем маска: маска — это лицо, её кладут поверх
+# морды, а шляпа надевается сверху и морду закрывать не должна.
+const HAT_WIDTH_K : float = 0.74
+const HAT_POS     : Vector2 = Vector2(0.02, -0.46)
+var _hat_worn  : Sprite2D = null
+var _hat_token : int = 0
+
+func _wear_hat(duration: float) -> void:
+	_hat_token += 1
+	var tok := _hat_token
+	if not is_instance_valid(_hat_worn):
+		_hat_worn = _spawn_worn(_MAGIC_HAT_TEX, HAT_WIDTH_K, HAT_POS)
+	# Подобрал вторую шляпу — эффект продлевается, и старый таймер снимать её
+	# больше не должен: по токену он поймёт, что он уже не последний.
+	get_tree().create_timer(duration).timeout.connect(func() -> void:
+		if is_instance_valid(self) and _hat_token == tok:
+			_drop_worn(_hat_worn)
+			_hat_worn = null)
+
 func _spawn_scars_mask() -> void:
-	# Child of the head sprite so it inherits the fat-morph spin + follows drags.
-	var m := Sprite2D.new()
-	m.texture        = _CASEY_TEX
-	m.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	m.z_index        = 6
-	var msc := (_sprite.texture.get_size().x * 0.98) / _CASEY_TEX.get_size().x
-	m.scale    = Vector2(msc, msc)
-	m.position = Vector2(0.0, -1.0)
-	m.modulate = Color(1, 1, 1, 0.0)
-	_sprite.add_child(m)
-	_scars_mask = m
-	var tw := m.create_tween()
-	tw.tween_property(m, "modulate:a", 1.0, 0.14)
+	_scars_mask = _spawn_worn(_CASEY_TEX, 0.98, Vector2(0.0, -0.006))
 
 func _end_scars() -> void:
 	if not _scars_active:
@@ -3457,6 +3474,14 @@ func _drop_scars_mask() -> void:
 		return
 	var m := _scars_mask
 	_scars_mask = null
+	_drop_worn(m)
+
+# Снять вещь с головы: она отцепляется, ПЕРЕСАЖИВАЕТСЯ В МИР с сохранением
+# экранного положения и падает. Пересадка обязательна — оставшись ребёнком
+# головы, она уезжала бы вместе с ней, и «слетела» читалось бы как «поехала».
+func _drop_worn(m: Sprite2D) -> void:
+	if not is_instance_valid(m):
+		return
 	var gp    := m.global_position
 	var grot  := m.global_rotation
 	var gscl  := m.global_scale

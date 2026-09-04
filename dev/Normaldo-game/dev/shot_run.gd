@@ -61,27 +61,6 @@ func _initialize() -> void:
 	for _i in 150:
 		await process_frame
 
-	# Режим «marks»: ставим на экран ровно те предметы, к которым у скина есть
-	# резист, — иначе в кадр попадает случайная волна бананов, и метку показать
-	# не на чем.
-	if name.begins_with("marks") or (argv.size() > 5 and argv[5] == "marks"):
-		spawner.call("clear_items")
-		var vpw : float = get_root().get_visible_rect().size.x
-		var rows : Array = [
-			[0.30, spawner.TRASH_TEX, 0.30],
-			[0.55, spawner.STONE_TEX, 0.30],
-			[0.80, spawner.TRASH_TEX, 0.30],
-		]
-		for ri in rows.size():
-			var row : Array = rows[ri]
-			for k in 3:
-				var it : Node = spawner.call("_spawn_item",
-					get_root().get_visible_rect().size.y * float(row[0]),
-					vpw - 180.0 * float(k) - 40.0, row[1], float(row[2]), 0.0, 1)
-				it.position.x = vpw - 210.0 * float(k) - 150.0
-		for _i in 4:
-			await process_frame
-
 	if cd:
 		# Часть кружков — на откате: в кадр должны попасть оба состояния.
 		var layer : Node = hud.get("_skill_badges_layer")

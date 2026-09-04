@@ -3,14 +3,15 @@ extends SceneTree
 # Headless-проверка интерфейса ВО ВРЕМЯ забега.
 #   godot --headless --path . --script res://dev/smoke_run_hud.gd
 #
-# Метка резиста рисуется на летящем предмете — то есть в самом горячем месте
-# игры. Ошибка тут стоит дорого: помеченный не тот предмет = игрок подставился
-# под удар, поверив интерфейсу. Здесь проверяется именно соответствие метки
-# реальному резисту, а не то, что она «где-то нарисовалась».
+# Резисты, кружки способностей, полоса жира и лампы 💀 F A T — всё, что игрок
+# читает, пока летит.
+#
+# Колец резиста на предметах больше нет (их убрали: см. «Интерфейс забега»), но
+# сами резисты остались, и главная тихая поломка тоже: опечатка в теге молча
+# выключает резист навсегда — `_area_tag` просто никогда не вернёт такую строку.
+# Это и проверяется первым разделом.
 #
 # См. /Концепция/Интерфейс забега.md
-
-const MARKS := preload("res://scripts/resist_marks.gd")
 
 var _fails : int = 0
 
@@ -35,12 +36,8 @@ func _initialize() -> void:
 		quit(1)
 		return
 
-	print("── Состояние резиста по предмету ──")
+	print("── Теги резистов ──")
 	await _test_state(game, normaldo, save, spawner)
-	print("── Слой меток ──")
-	await _test_marks(game, normaldo, save, spawner)
-	print("── Скин без резистов ──")
-	await _test_no_resists(game, normaldo, save, spawner)
 	print("── Ряд кружков ──")
 	await _test_badges(hud, normaldo, save)
 	print("── Полоса жира ──")
@@ -139,54 +136,31 @@ func _put_item(spawner: Node, tex: Texture2D, y: float, x: float) -> Node:
 	it.position.x = x
 	return it
 
-func _marks_layer(game: Node, normaldo: Node) -> Node2D:
-	var layer := Node2D.new()
-	layer.set_script(MARKS)
-	game.add_child(layer)
-	layer.call("setup", normaldo)
-	return layer
-
-func _drawn(layer: Node2D, normaldo: Node) -> Dictionary:
-	# Что слой НАРИСУЕТ: по одному состоянию на предмет из его списка.
-	var out := { "ready": 0, "cooling": 0, "none": 0 }
-	for e in (layer.get("_items") as Array):
-		var n = e["n"]
-		if not is_instance_valid(n):
-			continue
-		match int(normaldo.call("resist_state_for_tag", String(e["tag"]))):
-			1: out["ready"]   = int(out["ready"]) + 1
-			2: out["cooling"] = int(out["cooling"]) + 1
-			_: out["none"]    = int(out["none"]) + 1
-	return out
-
 # ── Тесты ─────────────────────────────────────────────────────────────────────
 
-# Главное: метка обязана соответствовать РЕАЛЬНОМУ резисту. Проверяем на всех
-# скинах и всех их тегах разом — опечатка в одном теге иначе живёт до релиза.
+# Резист держится на ОДНОЙ строке — теге предмета, — и опечатка в ней ничего не
+# ломает громко: `_area_tag` просто никогда не вернёт такую строку, резист молча
+# не срабатывает, и заметить это можно только подставившись под нужный предмет.
+# Поэтому теги сверяются у ВСЕХ скинов разом.
 func _test_state(game: Node, normaldo: Node, save: Node, spawner: Node) -> void:
 	spawner.call("clear_items")
 	var trash : Node = _put_item(spawner, spawner.TRASH_TEX, 200.0, 600.0)
 	var stone : Node = _put_item(spawner, spawner.STONE_TEX, 260.0, 700.0)
 	await process_frame
 
+	# Предмет опознаётся тем же тегом, которым записан резист скина.
 	_use_skin(normaldo, save, "viking")   # резисты: cone / stone / trash / safe
-	_check(int(normaldo.call("resist_state_for", trash)) == 1,
-		"бочка помечена «сломаю»: %d" % normaldo.call("resist_state_for", trash))
-	_check(int(normaldo.call("resist_state_for", stone)) == 1, "камень помечен «сломаю»")
+	var cds : Dictionary = normaldo.get("_resist_cd_for")
+	_check(String(normaldo.call("_area_tag", trash)) == "trash" and cds.has("trash"),
+		"бочка опознана тегом резиста викинга")
+	_check(String(normaldo.call("_area_tag", stone)) == "stone" and cds.has("stone"),
+		"камень тоже")
 
-	# Ушёл в откат — метка обязана смениться, а не остаться зелёной.
-	normaldo.call("start_skill_cd", "resist:trash", 8.0)
-	await process_frame
-	_check(int(normaldo.call("resist_state_for", trash)) == 2,
-		"на откате бочка помечена «ударит»: %d" % normaldo.call("resist_state_for", trash))
-	_check(int(normaldo.call("resist_state_for", stone)) == 1,
-		"откат одного резиста не гасит другой")
-
-	# У чужого скина те же предметы не помечаются вовсе.
+	# У чужого скина тех же тегов в резистах нет.
 	_use_skin(normaldo, save, "joker")    # bum / thief / cop / black_ace
-	_check(int(normaldo.call("resist_state_for", trash)) == 0
-		and int(normaldo.call("resist_state_for", stone)) == 0,
-		"чужие предметы не помечены")
+	cds = normaldo.get("_resist_cd_for")
+	_check(not cds.has("trash") and not cds.has("stone"),
+		"у джокера этих резистов нет")
 
 	# Опечатка в теге резиста молча выключает его навсегда: `_area_tag` просто
 	# никогда не вернёт такую строку, резист не сработает, а метки не будет.
@@ -209,67 +183,6 @@ func _test_state(game: Node, normaldo: Node, save: Node, spawner: Node) -> void:
 			if not known.has(String(tag)):
 				bad.append("%s → %s" % [sid, tag])
 	_check(bad.is_empty(), "теги резистов разбираются у всех скинов: %s" % [bad])
-
-func _test_marks(game: Node, normaldo: Node, save: Node, spawner: Node) -> void:
-	spawner.call("clear_items")
-	_use_skin(normaldo, save, "viking")
-	var trash : Node = _put_item(spawner, spawner.TRASH_TEX, 200.0, 600.0)
-	var stone : Node = _put_item(spawner, spawner.STONE_TEX, 260.0, 700.0)
-	await process_frame
-
-	var layer := _marks_layer(game, normaldo)
-	for _i in 10:
-		await process_frame
-	var d := _drawn(layer, normaldo)
-	_check(int(d["ready"]) == 2 and int(d["cooling"]) == 0,
-		"слой видит оба предмета готовыми: %s" % [d])
-
-	normaldo.call("start_skill_cd", "resist:stone", 8.0)
-	await process_frame
-	d = _drawn(layer, normaldo)
-	_check(int(d["ready"]) == 1 and int(d["cooling"]) == 1,
-		"после отката один готов, один остывает: %s" % [d])
-
-	# Кольцо масштабируется по предмету и не выходит за разумные границы.
-	var radii : Array = []
-	for e in (layer.get("_items") as Array):
-		radii.append(float(e["r"]))
-	var in_range := true
-	for r in radii:
-		if float(r) < MARKS.RING_MIN or float(r) > MARKS.RING_MAX:
-			in_range = false
-	_check(in_range, "радиусы колец в границах: %s" % [radii])
-
-	# Предмет исчез — слой не падает и перестаёт его считать.
-	trash.queue_free()
-	stone.queue_free()
-	for _i in 12:
-		await process_frame
-	d = _drawn(layer, normaldo)
-	_check(int(d["ready"]) + int(d["cooling"]) == 0,
-		"исчезнувшие предметы пропали из слоя: %s" % [d])
-	layer.free()
-	await process_frame
-
-# Классика резистов не имеет вовсе — экран обязан остаться чистым.
-func _test_no_resists(game: Node, normaldo: Node, save: Node, spawner: Node) -> void:
-	spawner.call("clear_items")
-	_use_skin(normaldo, save, "classic")
-	save.skin_level = 1
-	normaldo.call("_build_skin_runtime")
-	_put_item(spawner, spawner.TRASH_TEX, 200.0, 600.0)
-	_put_item(spawner, spawner.STONE_TEX, 260.0, 700.0)
-	await process_frame
-	_check(not bool(normaldo.call("has_any_resist")), "у классики резистов нет")
-
-	var layer := _marks_layer(game, normaldo)
-	for _i in 10:
-		await process_frame
-	_check((layer.get("_items") as Array).is_empty(),
-		"слой пуст: рисовать нечего, экран не меняется")
-	layer.free()
-	spawner.call("clear_items")
-	await process_frame
 
 func _test_badges(hud: Node, normaldo: Node, save: Node) -> void:
 	# spider_man — скин с ПОСТОЯННО включённой пассивкой: именно её статичный ★

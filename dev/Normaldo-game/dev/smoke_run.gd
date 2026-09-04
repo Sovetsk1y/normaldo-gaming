@@ -119,11 +119,29 @@ func _test_effects(normaldo: Node, spawner: Node) -> void:
 	await _touch(normaldo, spawner, "magic_hat")
 	normaldo.call("apply_slow", 4.0)
 	_check(float(normaldo.get("_slow_remaining")) <= 0.0, "шляпа мага: замедление погашено")
+	# И она НАДЕТА. Иммунитет к замедлению — состояние, которое иначе видно
+	# только в момент, когда тебя не замедлили, то есть никогда; надетая шляпа
+	# отвечает «эффект ещё идёт» там, где игрок и смотрит, — на своей голове.
+	# Проверяется, что вещь висит ребёнком СПРАЙТА ГОЛОВЫ: только так она едет с
+	# ней и крутится на морфе жира.
+	var hat : Sprite2D = normaldo.get("_hat_worn")
+	_check(is_instance_valid(hat) and hat.get_parent() == normaldo.get_node("Sprite2D"),
+		"шляпа мага: надета на голову")
 
 	# Маска Кейси — неуязвимость.
 	await _touch(normaldo, spawner, "casey_mask")
 	_check(bool(normaldo.get("_scars_active")), "маска Кейси: неуязвимость включилась")
+	var mask : Sprite2D = normaldo.get("_scars_mask")
+	_check(is_instance_valid(mask) and mask.get_parent() == normaldo.get_node("Sprite2D"),
+		"и тоже надета на голову")
 	normaldo.call("_end_scars")
+
+	# Оба эффекта — ДОЛГИЕ. Три секунды короче паузы между волнами: подобрал,
+	# прочитал надпись — и всё кончилось, ни разу не пригодившись.
+	_check(float(normaldo.CASEY_MASK_DURATION) >= 6.0
+		and float(normaldo.MAGIC_HAT_DURATION) >= 6.0,
+		"маска и шляпа держатся дольше волны: %.0f и %.0f с"
+			% [normaldo.CASEY_MASK_DURATION, normaldo.MAGIC_HAT_DURATION])
 
 	# Песочные часы — замедление мира. Сбрасываем множитель явно: за 30 c
 	# прогона фаз голова могла подобрать часы сама, и тогда «стало меньше, чем
