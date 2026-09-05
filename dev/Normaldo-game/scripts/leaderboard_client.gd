@@ -130,6 +130,16 @@ func _init_or_sync_user() -> void:
 # Результат забега уходит В ТАБЛИЦУ СВОЕГО РЕЖИМА. Раньше режим был один и
 # аргумента не требовалось; теперь их четыре, и без явного `mode` рекорд эпизода
 # лёг бы в таблицу бесконечного — то есть в чужой зачёт, где дистанция другая.
+# Дошёл ли ДО СЕРВЕРА последний отправленный результат. Нужно не клиенту, а
+# экрану лидеров: он писал «результат забега уже засчитан» всегда, а это
+# обещание, которое некому выполнить, если отправка упала по той же причине, по
+# которой не пришла таблица. Утешать игрока враньём хуже, чем не утешать.
+#   -1 — ничего ещё не отправляли, 0 — не дошло, 1 — дошло.
+var _last_submit : int = -1
+
+func last_submit_ok() -> int:
+	return _last_submit
+
 func submit_score(mode: int, score: int, run_seconds: float) -> Dictionary:
 	if not is_ready():
 		await _await_ready()
@@ -156,6 +166,7 @@ func submit_score(mode: int, score: int, run_seconds: float) -> Dictionary:
 			SaveData.record_skin[_mode_name(mode)] = avatar_skin
 		SaveData.current_week_id = str(data.get("week_id", SaveData.current_week_id))
 		SaveData._save()
+	_last_submit = 1 if resp.ok else 0
 	return resp
 
 func fetch_leaderboard(mode: int, limit: int = 100) -> Dictionary:

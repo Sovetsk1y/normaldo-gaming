@@ -1151,7 +1151,15 @@ func _show_empty_state(reason: String, detail: String = "") -> void:
 	lbl.add_theme_font_override("font", UI_FONT)
 	lbl.add_theme_font_size_override("font_size", 14)
 	_apply_text_fx(lbl)
-	lbl.text                 = reason + "\nПопробуй позже — результат забега уже засчитан."
+	# Про засчитанный результат говорим ТОЛЬКО если он и правда дошёл. Строка
+	# стояла безусловной, а отправка результата идёт тем же путём, что и запрос
+	# таблицы: не пришла таблица — скорее всего, не ушёл и результат. Утешать
+	# игрока обещанием, которое некому выполнить, хуже, чем не утешать.
+	var tail : String = "\nПопробуй позже."
+	match int(LeaderboardClient.last_submit_ok()):
+		1:  tail = "\nПопробуй позже — результат последнего забега уже засчитан."
+		0:  tail = "\nРезультат последнего забега тоже не ушёл на сервер."
+	lbl.text                 = reason + tail
 	lbl.modulate             = Color(0.62, 0.62, 0.68)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
