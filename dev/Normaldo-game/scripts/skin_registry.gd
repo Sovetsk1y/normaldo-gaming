@@ -37,6 +37,10 @@ const LORE : Dictionary = {
 func lore_for(id: String) -> String:
 	return String(LORE.get(id, ""))
 
+# ПОРЯДОК — ЭТО ЛЕСТНИЦА. Записи идут от дешёвых к дорогим, по три на ступень:
+# витрина листается слева направо и по дороге показывает, куда копить. Раньше
+# порядок был историческим (в каком скины появлялись), и рядом стояли Бэтмен за
+# девять тысяч и Кусс за пять — лестницы не читалось.
 const SKINS : Array = [
 	{
 		"id":        "classic",
@@ -63,10 +67,18 @@ const SKINS : Array = [
 		"audio_dir": "res://assets/audio/skins/tyson/",
 	},
 	{
+		"id":        "kuss",
+		"name_ru":   "КУСС",
+		"rarity":    COMMON,
+		"price":     5000,
+		"tex_dir":   "res://assets/normaldo/kuss/",
+		"audio_dir": "res://assets/audio/skins/kuss/",
+	},
+	{
 		"id":        "batman",
 		"name_ru":   "БЭТМЕН",
 		"rarity":    RARE,
-		"price":     5000,
+		"price":     9000,
 		"tex_dir":   "res://assets/normaldo/batman/",
 		"audio_dir": "res://assets/audio/skins/batman/",
 	},
@@ -74,17 +86,65 @@ const SKINS : Array = [
 		"id":        "halloween",
 		"name_ru":   "ПУГАЛО",
 		"rarity":    RARE,
-		"price":     5000,
+		"price":     9000,
 		"tex_dir":   "res://assets/normaldo/halloween/",
 		"audio_dir": "res://assets/audio/skins/halloween/",
 	},
 	{
-		"id":        "kuss",
-		"name_ru":   "КУСС",
+		"id":        "joker",
+		"name_ru":   "ДЖОКЕР",
 		"rarity":    RARE,
-		"price":     5000,
-		"tex_dir":   "res://assets/normaldo/kuss/",
-		"audio_dir": "res://assets/audio/skins/kuss/",
+		"price":     9000,
+		"tex_dir":   "res://assets/normaldo/joker/",
+		"audio_dir": "res://assets/audio/skins/joker/",
+	},
+	{
+		"id":        "harry_potter",
+		"name_ru":   "ГАРРИ",
+		"rarity":    EPIC,
+		"price":     15000,
+		"tex_dir":   "res://assets/normaldo/harry_potter/",
+		"audio_dir": "res://assets/audio/skins/harry_potter/",
+	},
+	{
+		"id":        "glasses",
+		"name_ru":   "ОЧКИ",
+		"rarity":    EPIC,
+		"price":     15000,
+		"tex_dir":   "res://assets/normaldo/glasses/",
+		"audio_dir": "res://assets/audio/skins/glasses/",
+	},
+	{
+		"id":        "spider_man",
+		"name_ru":   "СПАЙДЕР",
+		"rarity":    EPIC,
+		"price":     15000,
+		"tex_dir":   "res://assets/normaldo/spider_man/",
+		"audio_dir": "res://assets/audio/skins/spider_man/",
+	},
+	{
+		"id":        "dracula",
+		"name_ru":   "ДРАКУЛА",
+		"rarity":    LEGENDARY,
+		"price":     20000,
+		"tex_dir":   "res://assets/normaldo/dracula/",
+		"audio_dir": "res://assets/audio/skins/dracula/",
+	},
+	{
+		"id":        "wizard",
+		"name_ru":   "ВОЛШЕБНИК",
+		"rarity":    LEGENDARY,
+		"price":     20000,
+		"tex_dir":   "res://assets/normaldo/wizard/",
+		"audio_dir": "res://assets/audio/skins/wizard/",
+	},
+	{
+		"id":        "pirate",
+		"name_ru":   "ПИРАТ",
+		"rarity":    LEGENDARY,
+		"price":     20000,
+		"tex_dir":   "res://assets/normaldo/pirate/",
+		"audio_dir": "res://assets/audio/skins/pirate/",
 	},
 	{
 		"id":        "new_year",
@@ -94,66 +154,26 @@ const SKINS : Array = [
 		"tex_dir":   "res://assets/normaldo/new_year/",
 		"audio_dir": "res://assets/audio/skins/new_year/",
 	},
-	{
-		"id":        "dracula",
-		"name_ru":   "ДРАКУЛА",
-		"rarity":    EPIC,
-		"price":     7000,
-		"tex_dir":   "res://assets/normaldo/dracula/",
-		"audio_dir": "res://assets/audio/skins/dracula/",
-	},
-	{
-		"id":        "glasses",
-		"name_ru":   "ОЧКИ",
-		"rarity":    EPIC,
-		"price":     7000,
-		"tex_dir":   "res://assets/normaldo/glasses/",
-		"audio_dir": "res://assets/audio/skins/glasses/",
-	},
-	{
-		"id":        "wizard",
-		"name_ru":   "ВОЛШЕБНИК",
-		"rarity":    EPIC,
-		"price":     7000,
-		"tex_dir":   "res://assets/normaldo/wizard/",
-		"audio_dir": "res://assets/audio/skins/wizard/",
-	},
-	{
-		"id":        "harry_potter",
-		"name_ru":   "ГАРРИ",
-		"rarity":    LEGENDARY,
-		"price":     9999,
-		"tex_dir":   "res://assets/normaldo/harry_potter/",
-		"audio_dir": "res://assets/audio/skins/harry_potter/",
-	},
-	{
-		"id":        "pirate",
-		"name_ru":   "ПИРАТ",
-		"rarity":    LEGENDARY,
-		"price":     9999,
-		"tex_dir":   "res://assets/normaldo/pirate/",
-		"audio_dir": "res://assets/audio/skins/pirate/",
-	},
-	{
-		"id":        "spider_man",
-		"name_ru":   "СПАЙДЕР",
-		"rarity":    LEGENDARY,
-		"price":     9999,
-		"tex_dir":   "res://assets/normaldo/spider_man/",
-		"audio_dir": "res://assets/audio/skins/spider_man/",
-	},
-	{
-		"id":        "joker",
-		"name_ru":   "ДЖОКЕР",
-		"rarity":    LEGENDARY,
-		"price":     9999,
-		"tex_dir":   "res://assets/normaldo/joker/",
-		"audio_dir": "res://assets/audio/skins/joker/",
-	},
 ]
 
-# Цены выставлены по ТЗ на скины (10.08.2026): обычные 5000, эпические 7000,
-# легендарные 9999. «Нормальдо» и «Санта» в ТЗ отсутствуют — их цены прежние.
+# ЛЕСТНИЦА РЕДКОСТЕЙ — по три скина в каждой ступени, цена растёт вдвое к концу:
+#
+#   Обычный     5000 — викинг, Тайсон, Кусс
+#   Редкий      9000 — Бэтмен, Пугало, Джокер
+#   Эпический  15000 — Гарри, Очки, Спайдер
+#   Легендарный 20000 — Дракула, Волшебник, Пират
+#
+# Ровно по три — это не эстетика, а читаемость витрины: ступень из двух не
+# ощущается ступенью, из четырёх — перестаёт запоминаться. Разрыв между
+# ступенями заметный (×1.8, ×1.7, ×1.3): переход на следующую редкость обязан
+# быть решением, а не мелкой доплатой.
+#
+# Прежняя раскладка (обычные 5000, эпические 7000, легендарные 9999) ставила
+# Бэтмена и Кусса в одну цену с викингом, а всю верхнюю половину коллекции — в
+# полторы цены нижней. Копить было не за чем.
+#
+# «Нормальдо» бесплатен, «Санта» сезонный и в витрине не показывается — их цены
+# в лестницу не входят.
 const RARITY_NAMES : Array = ["Классик", "Обычный", "Редкий", "Эпический", "Легендарный"]
 const RARITY_COLORS : Array = [
 	Color(0.70, 0.70, 0.70),
