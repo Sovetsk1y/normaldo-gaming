@@ -136,6 +136,7 @@ var _human   : bool       = false
 var _cried   : bool       = false
 var _falling : bool       = false
 var _fall_vel: Vector2    = Vector2.ZERO
+var _fall_spin: float     = 0.0
 
 func _ready() -> void:
 	_cfg    = KINDS.get(kind, KINDS["helm"])
@@ -176,10 +177,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	if _falling:
-		_fall_vel.y += 900.0 * delta
-		position    += _fall_vel * delta
-		_sprite.rotation += 3.0 * delta
-		if position.y > get_viewport_rect().size.y + 200.0:
+		_fall_vel = KnockFall.step(self, _sprite, _fall_vel, _fall_spin, delta)
+		if KnockFall.is_gone(self):
 			queue_free()
 		return
 
@@ -318,4 +317,9 @@ func knock_down() -> void:
 		return
 	_falling = true
 	collision_layer = 0
-	_fall_vel = Vector2(-speed * 0.12, randf_range(-60.0, -10.0))
+	# Числа падения — из общего кирпича, а не свои. Здесь стояла ручная копия
+	# (900 гравитации, 0.12 отскока, поворот 3.0), совпадавшая с копией в
+	# `item.gd` случайно: правь одну — и сбитая бочка полетит не так, как сбитый
+	# конус, хотя удар один и тот же.
+	_fall_vel  = KnockFall.launch_velocity(speed)
+	_fall_spin = KnockFall.launch_spin()
