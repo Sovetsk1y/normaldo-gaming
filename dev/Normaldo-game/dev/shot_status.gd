@@ -48,10 +48,17 @@ func _initialize() -> void:
 		"invert":    normaldo.call("apply_invert", 30.0)
 		"hourglass": normaldo.call("_mark_world_slow", 30.0)
 		"armor":     normaldo.call("apply_casey_mask", 30.0)
+		"sphere_pop":
+			# Кадр В МОМЕНТ ПЕРЕСКОКА огибающей: появление идёт через TRANS_BACK,
+			# и `open_amount` на мгновение уходит выше единицы. Именно здесь и
+			# вспыхивал квадрат вокруг сферы — ловить его надо тут, в обычном
+			# кадре сферы его уже нет.
+			normaldo.call("_sphere_flash", 1.25)
+			await _wait(0.06)
 		"sphere":
 			# Сфера резиста считается шейдером, а не проигрывается кадрами, —
 			# и снимается она через тот же вход, что зовёт сам резист.
-			normaldo.call("_sphere_flash", 1.55)
+			normaldo.call("_sphere_flash", 1.25)
 		_:
 			# Мгновенные — через тот же вход, что и в игре: он не просто вешает
 			# картинку, а надувает её и гасит, и кадр обязан показывать это, а не
