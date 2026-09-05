@@ -5,9 +5,9 @@ const CHAPTERS : Array = [
 	{ "title": "Глава 1 — Первый полёт",  "quests": [0, 1, 2] },
 	{ "title": "Глава 2 — Канализация",   "quests": [3, 4, 5, 6] },
 	{ "title": "Глава 3 — Жир как броня", "quests": [7, 8, 9, 10] },
-	{ "title": "Глава 4 — Бесконечность", "quests": [11, 12] },
-	{ "title": "Глава 5 — Новый образ",   "quests": [13, 14, 15] },
-	{ "title": "Глава 6 — Легенда",       "quests": [16] },
+	{ "title": "Глава 4 — Бесконечность", "quests": [11, 12, 13] },
+	{ "title": "Глава 5 — Новый образ",   "quests": [14, 15, 16] },
+	{ "title": "Глава 6 — Легенда",       "quests": [17] },
 ]
 
 const STORY_QUESTS : Array = [
@@ -19,13 +19,19 @@ const STORY_QUESTS : Array = [
 	{ "title": "Первая минута",    "desc": "Выживи 60 сек в кампании",          "cond": "campaign_time:60",  "reward_d": 500,  "reward_t": 0 },
 	{ "title": "На скорости",      "desc": "Выживи 3 минуты в кампании",        "cond": "campaign_time:180", "reward_d": 0,    "reward_t": 1 },
 	{ "title": "Не оглядывайся",   "desc": "Дойди до босса",                    "cond": "boss_reached",      "reward_d": 800,  "reward_t": 2 },
-	{ "title": "Ногой об голову",  "desc": "Победи NinjaFoot",                  "cond": "boss_defeated",     "reward_d": 0,    "reward_t": 0, "reward_endless": true },
+	{ "title": "Ногой об голову",  "desc": "Победи NinjaFoot",                  "cond": "boss_defeated",     "reward_d": 0,    "reward_t": 0 },
 	# ch3
 	{ "title": "Растём",           "desc": "Прокачай скин до 2-го уровня",      "cond": "skin_level:2",      "reward_d": 0,    "reward_t": 1 },
 	{ "title": "Жирнеем",          "desc": "Достигни состояния Жир",             "cond": "fat_reached:2",     "reward_d": 500,  "reward_t": 0 },
 	{ "title": "Пятёрочка",        "desc": "Прокачай скин до 5-го уровня",      "cond": "skin_level:5",      "reward_d": 0,    "reward_t": 2 },
 	{ "title": "Убер-режим",       "desc": "Достигни Убер жир",                  "cond": "fat_reached:3",     "reward_d": 800,  "reward_t": 1 },
 	# ch4
+	# Первым в главе стоит то, что саму главу и открывает. Раньше бесконечный
+	# выдавала победа над первым боссом («Ногой об голову»), и глава про
+	# бесконечность начиналась с задания «запусти бесконечный режим» — то есть с
+	# середины разговора. Теперь режим открывает ПРОЙДЕННАЯ КАМПАНИЯ, и глава
+	# начинается ровно с этого.
+	{ "title": "Кампания пройдена",    "desc": "Пройди все три эпизода",           "cond": "campaign_complete", "reward_d": 0,    "reward_t": 3, "reward_endless": true },
 	{ "title": "Пробуй бесконечность", "desc": "Запусти бесконечный режим",         "cond": "endless_started",   "reward_d": 400,  "reward_t": 0 },
 	{ "title": "Выживший",         "desc": "Выживи 5 минут в бесконечном режиме",          "cond": "endless_time:300",  "reward_d": 1000, "reward_t": 2 },
 	# ch5
@@ -122,7 +128,10 @@ var _run_campaign_secs : float = 0.0
 var _story_campaign60_done  : bool = false
 var _story_campaign180_done : bool = false
 
-const ENDLESS_UNLOCK_QUEST_IDX : int = 6  # "Ногой об голову" — defeat first boss
+# Сюжетное задание, за которым числится награда «бесконечный режим». Сам режим
+# открывается не им, а прогрессом эпизодов (см. `is_endless_unlocked`) — этот
+# индекс нужен книге, чтобы подписать награду словами, и дев-сбросу.
+const ENDLESS_UNLOCK_QUEST_IDX : int = 11  # "Кампания пройдена"
 
 func _ready() -> void:
 	story_completed.resize(STORY_QUESTS.size())
@@ -136,9 +145,19 @@ func _ready() -> void:
 	check_cooldowns()
 	SaveData.data_changed.connect(_on_save_data_changed)
 
+# ── Когда открыт бесконечный режим ───────────────────────────────────────────
+# КОГДА ПРОЙДЕНЫ ВСЕ ЭПИЗОДЫ. Раньше хватало победы над первым боссом — тогда
+# кампания была одним неразрывным забегом, и «победил ниндзю» означало «дошёл
+# до середины». Теперь эпизоды отыгрываются по отдельности, и бесконечный —
+# это то, что открывается ПОСЛЕ кампании, а не в её первой трети.
+#
+# Считаем по `SaveData.episodes_done`, а не по галочке сюжетного задания:
+# задание — награда за победу, а открытие режима — состояние прогресса, и
+# смешивать их значит терять режим вместе со сбросом заданий.
+const CAMPAIGN_EPISODES : int = 3
+
 func is_endless_unlocked() -> bool:
-	return story_completed.size() > ENDLESS_UNLOCK_QUEST_IDX \
-		and bool(story_completed[ENDLESS_UNLOCK_QUEST_IDX])
+	return SaveData.episodes_done >= CAMPAIGN_EPISODES
 
 func is_endless_cond(cond_key: String) -> bool:
 	return cond_key == "endless_today" \
@@ -523,6 +542,7 @@ func notify_campaign_phase(phase: int) -> void:
 
 func notify_campaign_complete() -> void:
 	_run_complete = true
+	_check_story("campaign_complete")
 	_check_daily_cond("campaign_complete")
 	quests_updated.emit()
 
@@ -602,11 +622,10 @@ func _complete_story(idx: int) -> void:
 		"idx":  int(idx),
 		"cond": str(def.get("cond", "")),
 	})
-	# Story quest that flips the endless-unlock flag — fire a dedicated
-	# milestone so dashboards can chart the boss → endless funnel cleanly
-	# without having to join two events.
-	if bool(def.get("reward_endless", false)):
-		Analytics.event("endless_unlocked", { "via_story_idx": int(idx) })
+	# `reward_endless` — это ПОДПИСЬ награды в книге, а не сам замок: режим
+	# открывается прогрессом эпизодов (см. `is_endless_unlocked`), и событие
+	# `endless_unlocked` шлёт интерфейс в тот момент, когда открытие произошло
+	# на самом деле.
 	_save()
 	quests_updated.emit()
 
@@ -664,6 +683,9 @@ func _eval_daily(slot: int) -> void:
 # without wiping everything else. Useful for replaying the boss + unlock
 # celebration without losing daily/skin progress.
 func dev_reset_endless_unlock() -> void:
+	# Прогресс эпизодов и есть замок бесконечного — сбрасываем именно его.
+	SaveData.episodes_done = 0
+	SaveData._save()
 	if story_completed.size() > ENDLESS_UNLOCK_QUEST_IDX:
 		story_completed[ENDLESS_UNLOCK_QUEST_IDX] = false
 		story_claimed[ENDLESS_UNLOCK_QUEST_IDX]   = false

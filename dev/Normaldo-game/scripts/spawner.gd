@@ -87,6 +87,24 @@ const T45_BATCH_SIZES : Array = [3, 3, 5, 5, 8, 8]
 @export var campaign_mode  : bool  = false
 @export var boss_test_mode : bool  = false
 
+# ── Как идёт цепочка уровней ─────────────────────────────────────────────────
+# ЭПИЗОД (endless_chain = false) — играется ОДИН уровень и его босс, после
+# победы забег кончается. Эпизоды открываются по одному, и каждый ведёт свой
+# зачёт в таблице лидеров: у всех игроков одна и та же дистанция, поэтому счёт
+# в эпизоде сравним честно.
+#
+# БЕСКОНЕЧНЫЙ (endless_chain = true) — все три уровня подряд, и после третьего
+# круг начинается заново с первого. Сложность при этом НЕ ОТКАТЫВАЕТСЯ: скорость
+# растёт по общему времени забега, а фаза не опускается ниже уже достигнутой
+# (`_phase_floor`). Без этого второй круг был бы легче первого, и «бесконечный»
+# превратился бы в «повторяющийся».
+@export var endless_chain  : bool  = false
+
+# Наибольшая фаза за забег. Нужна только бесконечному: при переходе на новый
+# круг уровень тянет за собой свою стартовую планку, и без этого пола первый
+# уровень второго круга начинался бы с нуля.
+var _phase_floor : int = 0
+
 const BOSS_TEST_DELAY : float = 10.0
 var _boss_test_t      : float = 0.0
 
@@ -281,6 +299,7 @@ func _process(delta: float) -> void:
 		if _phase_elapsed >= dur:
 			_phase        += 1
 			_phase_elapsed = 0.0
+			_phase_floor   = mini(_phase, CAMPAIGN_PHASES.size() - 1)
 			if _phase >= CAMPAIGN_PHASES.size():
 				# Боссом командует ПОСЛЕДНЯЯ БУКВА, а не таблица фаз: иначе эпизод
 				# кончался бы посреди слова. Кончились фазы — держимся на
@@ -438,9 +457,15 @@ func _finish_level() -> void:
 	set_process(false)
 	_frozen = true
 	var boss : String = level_boss() if campaign_mode else "ninja"
-	var nxt  : int = level + 1
-	if not campaign_mode or nxt >= CAMPAIGN_LEVELS.size():
-		nxt = 0
+	# Куда дальше. −1 означает «дальше некуда, забег кончился»:
+	#   ЭПИЗОД кончается всегда — в нём ровно один уровень;
+	#   БЕСКОНЕЧНЫЙ не кончается никогда — после третьего уровня круг заходит
+	#   на первый.
+	# Ноль здесь раньше значил «кампания пройдена», и это мешало: в
+	# бесконечном ноль — законный номер следующего уровня.
+	var nxt  : int = -1
+	if campaign_mode and endless_chain:
+		nxt = (level + 1) % CAMPAIGN_LEVELS.size()
 	# `boss_time` оставлен ради всего, что уже на него подписано (задания,
 	# аналитика, дев-кнопка): для них «дошёл до босса» не изменилось.
 	if boss != "":
@@ -452,8 +477,24 @@ func _finish_level() -> void:
 func advance_level() -> void:
 	if not campaign_mode:
 		return
-	level = clampi(level + 1, 0, CAMPAIGN_LEVELS.size() - 1)
+	if endless_chain:
+		level = (level + 1) % CAMPAIGN_LEVELS.size()
+	else:
+		level = clampi(level + 1, 0, CAMPAIGN_LEVELS.size() - 1)
 	_start_level()
+
+# С какого уровня начинается забег. Эпизод ставит сюда свой номер, бесконечный
+# начинает с первого. Планка сложности берётся у уровня: эпизод 3, начатый с
+# фазы 0, был бы легче эпизода 1, хотя стоит в конце кампании.
+func set_start_level(idx: int) -> void:
+	level         = clampi(idx, 0, CAMPAIGN_LEVELS.size() - 1)
+	_phase        = int(CAMPAIGN_LEVELS[level]["phase"])
+	_phase_floor  = _phase
+	# Период до первой буквы — тоже у уровня. Значение по умолчанию — период
+	# ПЕРВОГО, и без этой строки третий эпизод начинал бы слово в своём темпе
+	# только со второй буквы.
+	_letter_idx   = 0
+	_letter_timer = _letter_period()
 
 # Общая часть старта уровня: слово с начала, фаза со своей планки, поток
 # разморожен. Скорость предметов НЕ сбрасывается — она растёт по общему времени
@@ -462,7 +503,10 @@ func _start_level() -> void:
 	_letter_idx    = 0
 	_letter_active = false
 	_letter_timer  = _letter_period()
-	_phase         = int(CAMPAIGN_LEVELS[level]["phase"])
+	# Планка уровня, но НЕ НИЖЕ уже достигнутой: на втором круге бесконечного
+	# первый уровень не имеет права стать снова лёгким.
+	_phase         = maxi(int(CAMPAIGN_LEVELS[level]["phase"]), _phase_floor)
+	_phase_floor   = _phase
 	_phase_elapsed = 0.0
 	_frozen        = false
 	_pattern_running = false

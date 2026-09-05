@@ -12,7 +12,7 @@ extends SceneTree
 # банан под ногами и полицейская машина, стройка — конусы и знаки. Перепутать их
 # местами нельзя, а на глаз это ловится только после долгой игры.
 #
-# См. /Концепция/Уровни/Кампания — три эпизода.md
+# См. /Концепция/Уровни/Кампания — три уровня.md
 
 const SP := preload("res://scripts/spawner.gd")
 
@@ -22,7 +22,7 @@ const LEVELS : int = 3
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 26
+const EXPECTED_CHECKS : int = 32
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -43,6 +43,8 @@ func _initialize() -> void:
 	await _test_advance()
 	print("── Фон: своя полоса на уровень ──")
 	await _test_background()
+	print("── Эпизод против бесконечного ──")
+	await _test_chain()
 	_finish()
 
 # ── Таблица ──────────────────────────────────────────────────────────────────
@@ -185,6 +187,9 @@ func _test_letters_end_level() -> void:
 	var e : Dictionary = await _boot()
 	var sp : Node = e["sp"]
 	sp.set("campaign_mode", true)
+	# Цепочка целиком — это БЕСКОНЕЧНЫЙ режим: переходы между уровнями бывают
+	# только в нём (эпизод — один уровень, и после него забег кончается).
+	sp.set("endless_chain", true)
 	sp.set_process(true)
 	var got : Array = []
 	sp.connect("level_cleared", func(boss: String, nxt: int) -> void:
@@ -211,6 +216,7 @@ func _test_advance() -> void:
 	var e : Dictionary = await _boot()
 	var sp : Node = e["sp"]
 	sp.set("campaign_mode", true)
+	sp.set("endless_chain", true)
 	sp.set("_letter_idx", 8)
 	sp.set("level", 0)
 	sp.call("advance_level")
@@ -232,7 +238,7 @@ func _test_advance() -> void:
 	sp.call("_run_letter")
 	await _tick(8.0)
 	_check(not got.is_empty() and int(got[0][1]) == 0,
-		"после третьего следующего нет: %s" % [got])
+		"а после третьего круг заходит на первый: %s" % [got])
 	e["game"].queue_free()
 	await process_frame
 
@@ -261,6 +267,56 @@ func _test_background() -> void:
 	for t in texs:
 		distinct[t] = true
 	_check(distinct.size() == LEVELS, "и у всех трёх она своя: %d разных" % distinct.size())
+	e["game"].queue_free()
+	await process_frame
+
+# ── Эпизод против бесконечного ───────────────────────────────────────────────
+# Одна и та же машинерия уровней, разница ровно в одном: кончается ли цепочка
+# после последнего уровня или заходит на новый круг. Ошибка тут тихая в обе
+# стороны — эпизод, не желающий кончаться, читается как зависший забег, а
+# бесконечный, кончившийся на третьем боссе, — как «игра сломалась на победе».
+func _test_chain() -> void:
+	var e : Dictionary = await _boot()
+	var sp : Node = e["sp"]
+	sp.set("campaign_mode", true)
+
+	# ЭПИЗОД. Ставим второй и доводим слово до конца: следующего уровня быть не
+	# должно ни на первом эпизоде, ни на последнем.
+	sp.set("endless_chain", false)
+	for ep in LEVELS:
+		sp.call("set_start_level", ep)
+		sp.set("_letter_idx", SP.LETTER_WORD.length() - 1)
+		var got : Array = []
+		var h := func(boss: String, nxt: int) -> void: got.append([boss, nxt])
+		sp.connect("level_cleared", h)
+		sp.set_process(true)
+		sp.call("_run_letter")
+		await _tick(8.0)
+		sp.disconnect("level_cleared", h)
+		_check(got.size() == 1 and int(got[0][1]) == -1,
+			"эпизод %d кончается сам: %s" % [ep + 1, got])
+
+	# БЕСКОНЕЧНЫЙ. С последнего уровня цепочка заходит на первый, а не обрывается.
+	sp.set("endless_chain", true)
+	sp.call("set_start_level", LEVELS - 1)
+	sp.set("_letter_idx", SP.LETTER_WORD.length() - 1)
+	var loop : Array = []
+	sp.connect("level_cleared", func(boss: String, nxt: int) -> void: loop.append(nxt))
+	sp.set_process(true)
+	sp.call("_run_letter")
+	await _tick(8.0)
+	_check(loop.size() == 1 and int(loop[0]) == 0,
+		"в бесконечном после последнего уровня круг заходит на первый: %s" % [loop])
+
+	# И СЛОЖНОСТЬ НЕ ОТКАТЫВАЕТСЯ. Второй круг обязан начинаться не легче того
+	# места, где кончился первый: иначе «бесконечный» это «повторяющийся».
+	sp.set("_phase", SP.CAMPAIGN_PHASES.size() - 1)
+	sp.set("_phase_floor", SP.CAMPAIGN_PHASES.size() - 1)
+	sp.call("advance_level")
+	await process_frame
+	_check(int(sp.get("level")) == 0, "уровень стал первым: %d" % int(sp.get("level")))
+	_check(int(sp.get("_phase")) == SP.CAMPAIGN_PHASES.size() - 1,
+		"а фаза осталась на достигнутой планке: %d" % int(sp.get("_phase")))
 	e["game"].queue_free()
 	await process_frame
 

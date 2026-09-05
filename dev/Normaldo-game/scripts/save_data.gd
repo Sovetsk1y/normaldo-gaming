@@ -39,11 +39,20 @@ var user_id              : String = ""     # Firebase uid
 var refresh_token        : String = ""     # for re-issuing idToken on cold start
 var display_name         : String = ""     # auto-generated "Normaldo-XXXX" or user-chosen
 var custom_display_name  : bool   = false  # true once the user has renamed
-var recovery_code        : String = ""     # plaintext — shown in settings, hash is on server
-var best_endless         : int    = 0      # cached server best for current week
-var total_endless        : int    = 0      # cached server total for current week
+var recovery_code        : String = ""     # открытым текстом — показывается в настройках, хэш на сервере
+# Рекорды недели по режимам: ключ — имя режима сервера («ep1»…«ep3», «endless»),
+# значение — лучший результат. Раньше тут лежали `best_endless` и
+# `total_endless`: рекорд и «гора пицц» одного-единственного режима. Режимов
+# стало четыре, и каждый ведёт СВОЙ рекорд — см. `LeaderboardMock.Mode`.
+var mode_best            : Dictionary = {}
 var current_week_id      : String = ""
 var pending_rewards      : Array  = []     # locally cached copy of server pending_rewards
+
+# ─── Кампания: сколько эпизодов пройдено ─────────────────────────────────────
+# Эпизоды отыгрываются ПО ОТДЕЛЬНОСТИ: прошёл первый — забег кончился, открылся
+# второй. Здесь лежит номер последнего пройденного, 0…3; 3 означает «кампания
+# пройдена», и ровно по этому числу открывается бесконечный режим.
+var episodes_done        : int    = 0
 
 # ─── Player avatar (top-left menu cell) ──────────────────────────────────────
 var chosen_avatar_skin : String = ""       # "" → use active_skin
@@ -398,9 +407,9 @@ func _save() -> void:
 		"display_name":        display_name,
 		"custom_display_name": custom_display_name,
 		"recovery_code":       recovery_code,
-		"best_endless":        best_endless,
-		"total_endless":       total_endless,
+		"mode_best":           mode_best,
 		"current_week_id":     current_week_id,
+		"episodes_done":       episodes_done,
 		"pending_rewards":     pending_rewards,
 		"chosen_avatar_skin":  chosen_avatar_skin,
 		"chosen_avatar_fat":   chosen_avatar_fat,
@@ -470,9 +479,14 @@ func _load() -> void:
 	display_name        = str(d.get("display_name",        ""))
 	custom_display_name = bool(d.get("custom_display_name", false))
 	recovery_code       = str(d.get("recovery_code",       ""))
-	best_endless        = int(d.get("best_endless",        0))
-	total_endless       = int(d.get("total_endless",       0))
+	# Старые сейвы несут `best_endless` — рекорд единственного тогдашнего
+	# режима. Он и есть рекорд бесконечного: терять его при обновлении не за
+	# что. «Гора пицц» (`total_endless`) не переносится — режима больше нет.
+	mode_best           = (d.get("mode_best", {}) as Dictionary).duplicate()
+	if not mode_best.has("endless") and int(d.get("best_endless", 0)) > 0:
+		mode_best["endless"] = int(d.get("best_endless", 0))
 	current_week_id     = str(d.get("current_week_id",     ""))
+	episodes_done       = int(d.get("episodes_done",       0))
 	chosen_avatar_skin  = str(d.get("chosen_avatar_skin",  ""))
 	chosen_avatar_fat   = int(d.get("chosen_avatar_fat",   -1))
 	sfx_volume          = float(d.get("sfx_volume",        1.0))

@@ -11,6 +11,23 @@ setGlobalOptions({region: "europe-west1", maxInstances: 10});
 
 // ─── Tuning ──────────────────────────────────────────────────────────────────
 
+// ─── Режимы ──────────────────────────────────────────────────────────────────
+// У каждого режима СВОЯ таблица рекордов недели: три эпизода кампании и
+// бесконечный. Раньше таблиц было две — "best" и "total", — и обе про один
+// режим: лучший забег и сумма пицц за неделю. Сумма мерила усидчивость, а не
+// игру, и убрана; вместо неё разбиение по режимам, где сравнение честное —
+// у эпизода одна и та же дистанция для всех.
+const MODES = ["ep1", "ep2", "ep3", "endless"] as const;
+type Mode = typeof MODES[number];
+
+function requireMode(raw: unknown, fallback: Mode = "endless"): Mode {
+  const m = String(raw ?? fallback);
+  if (!(MODES as readonly string[]).includes(m)) {
+    throw new HttpsError("invalid-argument", `mode must be one of ${MODES.join(", ")}`);
+  }
+  return m as Mode;
+}
+
 const MAX_PIZZAS_PER_SECOND = 4.0;
 const SCORE_BUFFER          = 50;
 const MAX_RUN_SECONDS       = 3600;
@@ -45,9 +62,9 @@ function requireAuth(ctxAuth: {uid: string} | undefined): string {
   return ctxAuth.uid;
 }
 
-async function computeRank(weekId: string, metric: "best" | "total", score: number): Promise<number> {
+async function computeRank(weekId: string, mode: Mode, score: number): Promise<number> {
   if (score <= 0) return 0; // unranked
-  const snap = await db.collection(`leaderboards/${weekId}/${metric}`)
+  const snap = await db.collection(`leaderboards/${weekId}/${mode}`)
     .where("score", ">", score)
     .count()
     .get();
@@ -76,8 +93,7 @@ export const initUser = onCall(async (request) => {
       const doc: Record<string, unknown> = {
         display_name:    displayName,
         week_id:         weekId,
-        best_endless:    0,
-        total_endless:   0,
+        mode_best:       {},
         pending_rewards: [],
         last_submit_at:  0,
         created_at:      admin.firestore.FieldValue.serverTimestamp(),
@@ -109,17 +125,18 @@ export const initUser = onCall(async (request) => {
     avatar_skin:     fresh.get("avatar_skin") ?? "classic",
     avatar_fat:      fresh.get("avatar_fat")  ?? 0,
     week_id:         fresh.get("week_id"),
-    best_endless:    fresh.get("best_endless") ?? 0,
-    total_endless:   fresh.get("total_endless") ?? 0,
+    mode_best:       fresh.get("mode_best") ?? {},
     pending_rewards: fresh.get("pending_rewards") ?? [],
   };
 });
 
 // ─── submitScore ─────────────────────────────────────────────────────────────
-// Validates and writes an endless-run score. Always bumps total. Only writes
-// to /leaderboards/{week}/best/{uid} when score beats the user's prior best.
+// Проверяет результат забега и кладёт его в таблицу СВОЕГО режима. Пишет в
+// /leaderboards/{week}/{mode}/{uid} только если результат побил прошлый рекорд
+// игрока в этом режиме — таблица ведёт рекорды, а не историю попыток.
 export const submitScore = onCall(async (request) => {
   const uid = requireAuth(request.auth);
+  const mode       = requireMode(request.data?.mode);
   const score      = Number(request.data?.score ?? 0);
   const runSeconds = Number(request.data?.run_seconds ?? 0);
   const avatarSkin = String(request.data?.avatar_skin ?? "classic").slice(0, 32);
@@ -142,11 +159,10 @@ export const submitScore = onCall(async (request) => {
 
   const weekId   = getCurrentWeekId();
   const userRef  = db.doc(`users/${uid}`);
-  const lbBest   = db.doc(`leaderboards/${weekId}/best/${uid}`);
-  const lbTotal  = db.doc(`leaderboards/${weekId}/total/${uid}`);
+  const lbRef    = db.doc(`leaderboards/${weekId}/${mode}/${uid}`);
 
   let newBest = 0;
-  let newTotal = 0;
+  let modeBest: Record<string, number> = {};
   let displayName = "";
 
   await db.runTransaction(async (tx) => {
@@ -159,71 +175,57 @@ export const submitScore = onCall(async (request) => {
     if (now - lastSubmit < SUBMIT_THROTTLE_MS) {
       throw new HttpsError("resource-exhausted", "submit throttled");
     }
-    // Week rollover: if user's stored week is stale, reset before adding
+    // Week rollover: если запомненная у игрока неделя устарела, рекорды недели
+    // считаются с нуля.
     const storedWeek = userSnap.get("week_id") ?? weekId;
-    const prevBest  = storedWeek === weekId ? (userSnap.get("best_endless")  ?? 0) : 0;
-    const prevTotal = storedWeek === weekId ? (userSnap.get("total_endless") ?? 0) : 0;
+    modeBest = storedWeek === weekId
+      ? {...((userSnap.get("mode_best") ?? {}) as Record<string, number>)}
+      : {};
+    const prevBest = Number(modeBest[mode] ?? 0);
     displayName = userSnap.get("display_name") ?? "Normaldo";
 
-    newBest  = Math.max(prevBest, score);
-    newTotal = prevTotal + score;
+    newBest = Math.max(prevBest, score);
+    modeBest[mode] = newBest;
 
-    const updateData: Record<string, unknown> = {
+    tx.update(userRef, {
       week_id:        weekId,
-      best_endless:   newBest,
-      total_endless:  newTotal,
+      mode_best:      modeBest,
       last_submit_at: now,
       updated_at:     admin.firestore.FieldValue.serverTimestamp(),
-    };
-    tx.update(userRef, updateData);
+    });
 
-    const ts = admin.firestore.FieldValue.serverTimestamp();
     if (score > prevBest) {
-      tx.set(lbBest, {
+      tx.set(lbRef, {
         user_id:      uid,
         display_name: displayName,
         avatar_skin:  avatarSkin,
         avatar_fat:   avatarFat,
         score:        newBest,
-        updated_at:   ts,
+        updated_at:   admin.firestore.FieldValue.serverTimestamp(),
       });
     }
-    tx.set(lbTotal, {
-      user_id:      uid,
-      display_name: displayName,
-      avatar_skin:  avatarSkin,
-      avatar_fat:   avatarFat,
-      score:        newTotal,
-      updated_at:   ts,
-    }, {merge: true});
   });
 
   // Rank queries (outside the transaction; eventual consistency is OK here)
-  const [rankBest, rankTotal] = await Promise.all([
-    computeRank(weekId, "best",  newBest),
-    computeRank(weekId, "total", newTotal),
-  ]);
+  const rank = await computeRank(weekId, mode, newBest);
 
   return {
-    best_endless:  newBest,
-    total_endless: newTotal,
-    rank_best:     rankBest,
-    rank_total:    rankTotal,
-    week_id:       weekId,
+    mode,
+    best:      newBest,
+    rank,
+    mode_best: modeBest,
+    week_id:   weekId,
   };
 });
 
 // ─── getLeaderboard ──────────────────────────────────────────────────────────
 export const getLeaderboard = onCall(async (request) => {
   requireAuth(request.auth);
-  const metric = String(request.data?.metric ?? "best");
-  if (metric !== "best" && metric !== "total") {
-    throw new HttpsError("invalid-argument", "metric must be 'best' or 'total'");
-  }
+  const mode = requireMode(request.data?.metric);
   const limit = Math.min(Number(request.data?.limit ?? TOP_LIMIT), TOP_LIMIT);
   const weekId = getCurrentWeekId();
 
-  const snap = await db.collection(`leaderboards/${weekId}/${metric}`)
+  const snap = await db.collection(`leaderboards/${weekId}/${mode}`)
     .orderBy("score", "desc")
     .orderBy("updated_at", "asc")
     .limit(limit)
@@ -238,7 +240,7 @@ export const getLeaderboard = onCall(async (request) => {
     score:        doc.get("score"),
   }));
 
-  const totalSnap = await db.collection(`leaderboards/${weekId}/${metric}`).count().get();
+  const totalSnap = await db.collection(`leaderboards/${weekId}/${mode}`).count().get();
 
   return {
     week_id:       weekId,
@@ -250,33 +252,30 @@ export const getLeaderboard = onCall(async (request) => {
 // ─── getWindow ───────────────────────────────────────────────────────────────
 export const getWindow = onCall(async (request) => {
   const uid = requireAuth(request.auth);
-  const metric = String(request.data?.metric ?? "best");
-  if (metric !== "best" && metric !== "total") {
-    throw new HttpsError("invalid-argument", "metric must be 'best' or 'total'");
-  }
+  const mode = requireMode(request.data?.metric);
   const radius = Math.min(Math.max(Number(request.data?.radius ?? 5), 1), 20);
   const weekId = getCurrentWeekId();
 
-  const playerDoc = await db.doc(`leaderboards/${weekId}/${metric}/${uid}`).get();
+  const playerDoc = await db.doc(`leaderboards/${weekId}/${mode}/${uid}`).get();
   if (!playerDoc.exists) {
     return {rows: [], player_rank: 0};
   }
   const myScore = playerDoc.get("score") as number;
 
   const [aboveSnap, belowSnap] = await Promise.all([
-    db.collection(`leaderboards/${weekId}/${metric}`)
+    db.collection(`leaderboards/${weekId}/${mode}`)
       .where("score", ">", myScore)
       .orderBy("score", "asc")
       .limit(radius)
       .get(),
-    db.collection(`leaderboards/${weekId}/${metric}`)
+    db.collection(`leaderboards/${weekId}/${mode}`)
       .where("score", "<", myScore)
       .orderBy("score", "desc")
       .limit(radius)
       .get(),
   ]);
 
-  const playerRank = await computeRank(weekId, metric as "best" | "total", myScore);
+  const playerRank = await computeRank(weekId, mode, myScore);
 
   const above = aboveSnap.docs.reverse().map((doc, i) => ({
     rank:         playerRank - aboveSnap.size + i,
@@ -362,8 +361,6 @@ export const updateAvatar = onCall(async (request) => {
 
   const weekId = getCurrentWeekId();
   const userRef = db.doc(`users/${uid}`);
-  const lbBest  = db.doc(`leaderboards/${weekId}/best/${uid}`);
-  const lbTotal = db.doc(`leaderboards/${weekId}/total/${uid}`);
   const ts = admin.firestore.FieldValue.serverTimestamp();
 
   await userRef.set({
@@ -373,12 +370,18 @@ export const updateAvatar = onCall(async (request) => {
   }, {merge: true});
 
   // Only patch leaderboard rows that already exist — avoid creating empty
-  // entries for users who haven't submitted a score yet.
-  const [bestSnap, totalSnap] = await Promise.all([lbBest.get(), lbTotal.get()]);
+  // entries for users who haven't submitted a score yet. Строк теперь до
+  // четырёх: по одной на режим.
+  const refs = MODES.map((m) => db.doc(`leaderboards/${weekId}/${m}/${uid}`));
+  const snaps = await Promise.all(refs.map((r) => r.get()));
   const batch = db.batch();
-  if (bestSnap.exists)  batch.update(lbBest,  {avatar_skin: avatarSkin, avatar_fat: avatarFat});
-  if (totalSnap.exists) batch.update(lbTotal, {avatar_skin: avatarSkin, avatar_fat: avatarFat});
-  if (bestSnap.exists || totalSnap.exists) await batch.commit();
+  let touched = 0;
+  snaps.forEach((snap, i) => {
+    if (!snap.exists) return;
+    batch.update(refs[i], {avatar_skin: avatarSkin, avatar_fat: avatarFat});
+    touched += 1;
+  });
+  if (touched > 0) await batch.commit();
 
   return {avatar_skin: avatarSkin, avatar_fat: avatarFat};
 });
@@ -426,13 +429,16 @@ export const setDisplayName = onCall(async (request) => {
   // Propagate the new name to any existing leaderboard rows for this week.
   // Like updateAvatar, only patch — don't create empty entries.
   const weekId = getCurrentWeekId();
-  const lbBest  = db.doc(`leaderboards/${weekId}/best/${uid}`);
-  const lbTotal = db.doc(`leaderboards/${weekId}/total/${uid}`);
-  const [bestSnap, totalSnap] = await Promise.all([lbBest.get(), lbTotal.get()]);
+  const refs = MODES.map((m) => db.doc(`leaderboards/${weekId}/${m}/${uid}`));
+  const snaps = await Promise.all(refs.map((r) => r.get()));
   const batch = db.batch();
-  if (bestSnap.exists)  batch.update(lbBest,  {display_name: raw});
-  if (totalSnap.exists) batch.update(lbTotal, {display_name: raw});
-  if (bestSnap.exists || totalSnap.exists) await batch.commit();
+  let touched = 0;
+  snaps.forEach((snap, i) => {
+    if (!snap.exists) return;
+    batch.update(refs[i], {display_name: raw});
+    touched += 1;
+  });
+  if (touched > 0) await batch.commit();
 
   return {display_name: raw};
 });
@@ -441,10 +447,10 @@ export const setDisplayName = onCall(async (request) => {
 // Auth is OPTIONAL: a freshly-installed app may call this without an idToken.
 // When auth IS present (device already had an anon identity), we MERGE the
 // anon's current-week leaderboard progress into the restored account so the
-// player ends up as a single row whose score includes both identities:
-//   best_endless  = max(anon.best,  restored.best)
-//   total_endless = anon.total    + restored.total
-// Then the anon's footprint is removed.
+// player ends up as a single row per mode:
+//   mode_best[m] = max(anon.mode_best[m], restored.mode_best[m])
+// Then the anon's footprint is removed. Складывать тут нечего — таблицы ведут
+// РЕКОРДЫ, а рекорд двух личностей это лучший из двух.
 export const restoreAccount = onCall(async (request) => {
   const hash = String(request.data?.recovery_code_hash ?? "");
   if (!hash || hash.length < 16) {
@@ -467,62 +473,51 @@ async function mergeAndCleanup(oldUid: string, newUid: string): Promise<void> {
   const weekId = getCurrentWeekId();
   const ts = admin.firestore.FieldValue.serverTimestamp();
 
-  const [oldUserSnap, newUserSnap, oldBestSnap, newBestSnap, oldTotalSnap, newTotalSnap]
-    = await Promise.all([
-      db.doc(`users/${oldUid}`).get(),
-      db.doc(`users/${newUid}`).get(),
-      db.doc(`leaderboards/${weekId}/best/${oldUid}`).get(),
-      db.doc(`leaderboards/${weekId}/best/${newUid}`).get(),
-      db.doc(`leaderboards/${weekId}/total/${oldUid}`).get(),
-      db.doc(`leaderboards/${weekId}/total/${newUid}`).get(),
-    ]);
+  const oldRefs = MODES.map((m) => db.doc(`leaderboards/${weekId}/${m}/${oldUid}`));
+  const newRefs = MODES.map((m) => db.doc(`leaderboards/${weekId}/${m}/${newUid}`));
+  const [oldUserSnap, newUserSnap, ...rowSnaps] = await Promise.all([
+    db.doc(`users/${oldUid}`).get(),
+    db.doc(`users/${newUid}`).get(),
+    ...oldRefs.map((r) => r.get()),
+    ...newRefs.map((r) => r.get()),
+  ]);
+  const oldRowSnaps = rowSnaps.slice(0, MODES.length);
+  const newRowSnaps = rowSnaps.slice(MODES.length);
 
   // Restored account identity drives the merged row (display_name + avatar).
   const displayName = (newUserSnap.get("display_name") as string | undefined) ?? "";
   const avatarSkin  = (newUserSnap.get("avatar_skin")  as string | undefined) ?? "classic";
   const avatarFat   = (newUserSnap.get("avatar_fat")   as number | undefined) ?? 0;
 
-  const oldBest  = oldBestSnap.exists  ? (oldBestSnap.get("score")  as number) : 0;
-  const newBest  = newBestSnap.exists  ? (newBestSnap.get("score")  as number) : 0;
-  const oldTotal = oldTotalSnap.exists ? (oldTotalSnap.get("score") as number) : 0;
-  const newTotal = newTotalSnap.exists ? (newTotalSnap.get("score") as number) : 0;
-  const mergedBest  = Math.max(oldBest, newBest);
-  const mergedTotal = oldTotal + newTotal;
-
   const batch = db.batch();
+  const mergedBest: Record<string, number> = {};
 
-  // Write merged leaderboard rows under the restored uid.
-  if (mergedBest > 0) {
-    batch.set(db.doc(`leaderboards/${weekId}/best/${newUid}`), {
-      user_id:      newUid,
-      display_name: displayName,
-      avatar_skin:  avatarSkin,
-      avatar_fat:   avatarFat,
-      score:        mergedBest,
-      updated_at:   ts,
-    });
-  }
-  if (mergedTotal > 0) {
-    batch.set(db.doc(`leaderboards/${weekId}/total/${newUid}`), {
-      user_id:      newUid,
-      display_name: displayName,
-      avatar_skin:  avatarSkin,
-      avatar_fat:   avatarFat,
-      score:        mergedTotal,
-      updated_at:   ts,
-    });
-  }
+  MODES.forEach((mode, i) => {
+    const oldScore = oldRowSnaps[i].exists ? (oldRowSnaps[i].get("score") as number) : 0;
+    const newScore = newRowSnaps[i].exists ? (newRowSnaps[i].get("score") as number) : 0;
+    const best = Math.max(oldScore, newScore);
+    if (best > 0) {
+      mergedBest[mode] = best;
+      batch.set(newRefs[i], {
+        user_id:      newUid,
+        display_name: displayName,
+        avatar_skin:  avatarSkin,
+        avatar_fat:   avatarFat,
+        score:        best,
+        updated_at:   ts,
+      });
+    }
+    batch.delete(oldRefs[i]);
+  });
+
   // Sync the user doc counters so client fetches see the merged values.
   batch.set(db.doc(`users/${newUid}`), {
-    best_endless:  mergedBest,
-    total_endless: mergedTotal,
-    updated_at:    ts,
+    mode_best:  mergedBest,
+    updated_at: ts,
   }, {merge: true});
 
-  // Remove the anon footprint: leaderboard rows, user doc, name reservation,
-  // recovery_lookup.
-  batch.delete(db.doc(`leaderboards/${weekId}/best/${oldUid}`));
-  batch.delete(db.doc(`leaderboards/${weekId}/total/${oldUid}`));
+  // Remove the anon footprint: user doc, name reservation, recovery_lookup.
+  // Строки таблиц уже удалены выше, по одной на режим.
   if (oldUserSnap.exists) {
     const oldName = oldUserSnap.get("display_name") as string | undefined;
     if (oldName) {
@@ -561,7 +556,7 @@ export const weeklyReset = onSchedule({
   const prevWeek = getCurrentWeekId(prev);
   const newWeek  = getCurrentWeekId(now);
 
-  // G3 — collect each ranked player's best prize across metrics; pushed after
+  // G3 — collect each ranked player's best prize across modes; pushed after
   // the Firestore writes commit so a send failure can't poison the reset.
   const prizeTargets = new Map<string, {place: number; dollars: number; tokens: number}>();
 
@@ -572,7 +567,7 @@ export const weeklyReset = onSchedule({
     return;
   }
 
-  for (const metric of ["best", "total"] as const) {
+  for (const metric of MODES) {
     const lb = await db.collection(`leaderboards/${prevWeek}/${metric}`)
       .orderBy("score", "desc")
       .orderBy("updated_at", "asc")
@@ -585,7 +580,7 @@ export const weeklyReset = onSchedule({
       place += 1;
       const uid = doc.get("user_id") as string;
       const {dollars, tokens} = rewardForPlace(place);
-      // Keep the better prize when a player ranks in both metrics.
+      // Keep the better prize when a player ranks in several modes.
       const prev = prizeTargets.get(uid);
       if (!prev || tokens > prev.tokens) prizeTargets.set(uid, {place, dollars, tokens});
       const reward = {
@@ -624,10 +619,9 @@ export const weeklyReset = onSchedule({
   let ops = 0;
   for (const u of allUsers.docs) {
     batch.update(u.ref, {
-      week_id:       newWeek,
-      best_endless:  0,
-      total_endless: 0,
-      updated_at:    admin.firestore.FieldValue.serverTimestamp(),
+      week_id:    newWeek,
+      mode_best:  {},
+      updated_at: admin.firestore.FieldValue.serverTimestamp(),
     });
     ops += 1;
     if (ops >= 400) {

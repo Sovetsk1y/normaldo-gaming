@@ -223,6 +223,14 @@ func _set_story(qm: Node, completed: int, claimed: int) -> void:
 		k.append(i < claimed)
 	qm.set("story_completed", c)
 	qm.set("story_claimed", k)
+	# Бесконечный режим открывает ПРОГРЕСС ЭПИЗОДОВ, а не галочка сюжетного
+	# задания: задание — награда за победу, а открытие режима — состояние. Здесь
+	# двигаем их вместе, потому что в игре они и двигаются вместе — задание
+	# «Кампания пройдена» засчитывается ровно там, где растёт `episodes_done`.
+	var save : Node = get_root().get_node_or_null("SaveData")
+	if save != null:
+		save.set("episodes_done",
+			3 if completed > int(qm.ENDLESS_UNLOCK_QUEST_IDX) else 0)
 
 func _open(hud: Node, focus: int = -1) -> Node:
 	var scr : Node = load("res://scripts/achievements_screen.gd").new()
@@ -444,13 +452,13 @@ func _test_endless(hud: Node, qm: Node) -> void:
 	await _close(scr)
 
 	_set_story(qm, qm.STORY_QUESTS.size(), 0)
-	_check(bool(qm.is_endless_unlocked()), "после победы над боссом режим открыт")
+	_check(bool(qm.is_endless_unlocked()), "после прохождения кампании режим открыт")
 	var scr2 : Node = await _open(hud)
 	var vis2 : Array = scr2.call("_visible_chapters")
 	_check(vis2.size() == qm.CHAPTERS.size(),
 		"с открытым режимом видны все главы: %d" % vis2.size())
 	# Награда-режим показана словами, а не суммой.
-	var ci_endless : int = scr2.call("_chapter_of", 6)
+	var ci_endless : int = scr2.call("_chapter_of", int(qm.ENDLESS_UNLOCK_QUEST_IDX))
 	scr2.call("_on_select_chapter", ci_endless)
 	await process_frame
 	_check(_count(_texts(scr2.get("_page_body"), []), "БЕСКОНЕЧНЫЙ") == 1,

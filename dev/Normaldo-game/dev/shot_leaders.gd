@@ -23,15 +23,10 @@ func _initialize() -> void:
 	var save : Node = get_root().get_node_or_null("SaveData")
 	save.dollars = 1024
 	save.tokens  = 83
-	# Таблица открыта только в бесконечном режиме — иначе поверх ляжет замок.
-	var qm : Node = get_root().get_node_or_null("QuestManager")
-	if qm != null:
-		# Признак открытия — сюжетное задание, отдельного флага нет.
-		var done : Array = qm.get("story_completed")
-		var idx  : int   = int(qm.ENDLESS_UNLOCK_QUEST_IDX)
-		while done.size() <= idx:
-			done.append(false)
-		done[idx] = true
+	# Кадр снимаем с ДВУМЯ пройденными эпизодами: так на полосе видны сразу и
+	# открытые вкладки, и закрытые с замком — а это ровно то, что на этом экране
+	# и надо проверять глазами.
+	save.set("episodes_done", 2)
 
 	var screen : Node = load("res://scripts/leaderboard_screen.gd").new()
 	screen.call("setup", hud, metric)

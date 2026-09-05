@@ -29,9 +29,9 @@ func _initialize() -> void:
 		quit(1)
 		return
 
-	print("── Замок бесконечного режима ──")
-	await _test_lock(hud, qm)
-	_unlock(qm)
+	print("── Замки на вкладках ──")
+	await _test_locks(hud)
+	_unlock()
 	print("── Подиум и список ──")
 	await _test_podium(hud, mock)
 	print("── Своя позиция ──")
@@ -52,18 +52,18 @@ func _initialize() -> void:
 
 # ── Хелперы ───────────────────────────────────────────────────────────────────
 
-func _unlock(qm: Node) -> void:
-	var done : Array = qm.get("story_completed")
-	var idx  : int   = int(qm.ENDLESS_UNLOCK_QUEST_IDX)
-	while done.size() <= idx:
-		done.append(false)
-	done[idx] = true
+# Что открыто, решает ПРОГРЕСС ЭПИЗОДОВ, а не галочка сюжетного задания: три
+# пройденных эпизода открывают и третью вкладку, и бесконечный режим.
+func _episodes_done(n: int) -> void:
+	var save : Node = get_root().get_node_or_null("SaveData")
+	if save != null:
+		save.set("episodes_done", n)
 
-func _lock(qm: Node) -> void:
-	var done : Array = qm.get("story_completed")
-	var idx  : int   = int(qm.ENDLESS_UNLOCK_QUEST_IDX)
-	if done.size() > idx:
-		done[idx] = false
+func _unlock() -> void:
+	_episodes_done(3)
+
+func _lock() -> void:
+	_episodes_done(0)
 
 func _open(hud: Node, metric: int = 0) -> Node:
 	var scr : Node = load("res://scripts/leaderboard_screen.gd").new()
@@ -87,19 +87,44 @@ func _texts(node: Node, out: Array) -> Array:
 
 # ── Тесты ─────────────────────────────────────────────────────────────────────
 
-# Таблица открывается только после бесконечного режима. Если замок однажды
-# отвалится, игрок увидит чужие рекорды до того, как ему дадут в них попасть.
-func _test_lock(hud: Node, qm: Node) -> void:
-	_lock(qm)
+# Вкладка открыта ровно тогда, когда открыт её режим: смотреть чужие рекорды
+# там, куда ещё нельзя попасть, — значит видеть спойлер и не мочь на него
+# ответить. Раньше на этом стояла модалка на весь экран, и закрыт был лидерборд
+# ЦЕЛИКОМ, включая эпизод 1, который открыт всегда.
+func _test_locks(hud: Node) -> void:
+	_lock()
 	var scr : Node = await _open(hud)
-	_check(is_instance_valid(scr.get("_lock_overlay")), "на закрытой таблице лежит замок")
+	var open_at_zero : Array = []
+	for m in 4:
+		if bool(scr.call("_is_mode_unlocked", m)):
+			open_at_zero.append(m)
+	_check(open_at_zero == [0], "без пройденных эпизодов открыт только первый: %s" % [open_at_zero])
+
+	# Нажатие по закрытой вкладке не переключает, а объясняет.
+	scr.call("_on_tab", 2)
+	await process_frame
+	_check(int(scr.get("_active_metric")) == 0, "закрытая вкладка не открывается по нажатию")
+	_check(is_instance_valid(scr.get("_toast_node")), "и вместо неё показана подсказка")
 	await _close(scr)
 
-	_unlock(qm)
+	_episodes_done(1)
 	var scr2 : Node = await _open(hud)
-	_check(not is_instance_valid(scr2.get("_lock_overlay")),
-		"после открытия бесконечного режима замка нет")
+	var open_at_one : Array = []
+	for m in 4:
+		if bool(scr2.call("_is_mode_unlocked", m)):
+			open_at_one.append(m)
+	_check(open_at_one == [0, 1], "пройденный эпизод открывает следующую вкладку: %s" % [open_at_one])
 	await _close(scr2)
+
+	_unlock()
+	var scr3 : Node = await _open(hud)
+	var open_all : Array = []
+	for m in 4:
+		if bool(scr3.call("_is_mode_unlocked", m)):
+			open_all.append(m)
+	_check(open_all == [0, 1, 2, 3], "пройденная кампания открывает всё, включая бесконечный: %s"
+		% [open_all])
+	await _close(scr3)
 
 # Первая тройка живёт на подиуме и НЕ дублируется в списке — иначе она занимает
 # место дважды на экране, где каждая строка на счету.
@@ -133,7 +158,7 @@ func _test_podium(hud: Node, mock: Node) -> void:
 # Своя позиция видна всегда и обязана совпадать с данными. Отдельно ловим старую
 # ошибку: в демо-режиме экран писал «101 место», хотя мок говорит 47-е.
 func _test_my_strip(hud: Node, mock: Node) -> void:
-	for metric in [0, 1]:
+	for metric in [0, 3]:
 		var scr : Node = await _open(hud, metric)
 		var lbl : Label = scr.get("_my_strip_lbl")
 		_check(is_instance_valid(lbl) and lbl.text != "",
@@ -145,14 +170,22 @@ func _test_my_strip(hud: Node, mock: Node) -> void:
 
 func _test_tabs(hud: Node) -> void:
 	var scr : Node = await _open(hud, 0)
+	# Вкладок ровно четыре — три эпизода и бесконечный. «Горы пицц» среди них
+	# нет: она мерила усидчивость, а не игру.
+	var caps : Array = []
+	for l in (scr.get("_tab_lbl") as Array):
+		caps.append(String((l as Label).text))
+	_check(caps == ["ЭПИЗОД 1", "ЭПИЗОД 2", "ЭПИЗОД 3", "БЕСКОНЕЧНЫЙ"],
+		"на полосе четыре вкладки по режимам: %s" % [caps])
+
 	var first : Array = (scr.get("_podium_ranks") as Array).duplicate()
 	var names_before : Array = _texts(scr.get("_podium_root"), [])
-	scr.call("_on_tab_total")
+	scr.call("_on_tab", 3)
 	for _i in 20:
 		await process_frame
-	_check(int(scr.get("_active_metric")) == 1, "вкладка переключилась на «гора пицц»")
+	_check(int(scr.get("_active_metric")) == 3, "вкладка переключилась на бесконечный")
 	var names_after : Array = _texts(scr.get("_podium_root"), [])
-	_check(names_before != names_after, "подиум перестроился под другую метрику")
+	_check(names_before != names_after, "подиум перестроился под другой режим")
 	_check((scr.get("_podium_ranks") as Array) == first,
 		"на другой вкладке подиум это снова места 1–3")
 	await _close(scr)

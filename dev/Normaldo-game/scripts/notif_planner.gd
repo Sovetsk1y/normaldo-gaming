@@ -308,6 +308,13 @@ func _plan_d() -> Array:
 # the spec lands on the schedule. Even if a later replan wipes the pending
 # row before the OS fires it, we trade reliability for never double-pushing
 # the same milestone — feels worse to nag than to miss once.
+# Текст E1 по числу пройденных эпизодов: [заголовок, тело].
+const E1_BY_EPISODE : Array = [
+	["Нога Ниндзя зевает",   "Серьёзно, он уже зевает. Сделай ему больно."],
+	["Крокодил не мигает",   "Второй эпизод ждёт. Он тоже ждёт, и он голоднее."],
+	["Хозяин клуба звонит",  "Последний эпизод. Трубку он не положит."],
+]
+
 func _plan_e() -> Array:
 	var specs     : Array = []
 	var last_seen : int   = int(SaveData.last_session_end_at)
@@ -325,13 +332,18 @@ func _plan_e() -> Array:
 		SaveData._save()
 
 	if last_seen > 0:
-		# E1 — generic "boss is still waiting" reminder for players who haven't
-		# beaten Нога Ниндзя yet. Two-day cooldown matches the rhythm of A2.
+		# E1 — «босс всё ещё ждёт» для тех, кто не добил кампанию. Двухдневный
+		# кулдаун держит ритм A2.
+		#
+		# Босса НАЗЫВАЕМ ПО ИМЕНИ — того, что стоит следующим. Кампания разбита
+		# на эпизоды, и общий текст про ногу ниндзя врал бы всем, кто её уже
+		# прошёл: игрок победил ниндзю неделю назад, а телефон пишет, что тот
+		# зевает.
 		if not QuestManager.is_endless_unlocked():
+			var e1 : Array = E1_BY_EPISODE[clampi(int(SaveData.episodes_done), 0,
+				E1_BY_EPISODE.size() - 1)]
 			specs.append(_spec("notif_e1", _on_day_at(last_seen + 2 * DAY, 18),
-				"Нога Ниндзя зевает",
-				"Серьёзно, он уже зевает. Сделай ему больно.",
-				"E"))
+				String(e1[0]), String(e1[1]), "E"))
 
 		# E3 — story quest done but reward not collected from Книга учителя.
 		var idx : int = _first_unclaimed_story_quest()

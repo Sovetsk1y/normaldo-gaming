@@ -119,8 +119,7 @@ func _init_or_sync_user() -> void:
 		SaveData.display_name = server_name
 	SaveData.chosen_avatar_skin = str(data.get("avatar_skin", SaveData.chosen_avatar_skin))
 	SaveData.chosen_avatar_fat  = int(data.get("avatar_fat",  SaveData.chosen_avatar_fat))
-	SaveData.best_endless    = int(data.get("best_endless", 0))
-	SaveData.total_endless   = int(data.get("total_endless", 0))
+	SaveData.mode_best       = (data.get("mode_best", {}) as Dictionary).duplicate()
 	SaveData.current_week_id = str(data.get("week_id", ""))
 	var rewards := data.get("pending_rewards", []) as Array
 	SaveData.pending_rewards = rewards
@@ -130,7 +129,10 @@ func _init_or_sync_user() -> void:
 
 # ─── Public API ──────────────────────────────────────────────────────────────
 
-func submit_score(score: int, run_seconds: float) -> Dictionary:
+# Результат забега уходит В ТАБЛИЦУ СВОЕГО РЕЖИМА. Раньше режим был один и
+# аргумента не требовалось; теперь их четыре, и без явного `mode` рекорд эпизода
+# лёг бы в таблицу бесконечного — то есть в чужой зачёт, где дистанция другая.
+func submit_score(mode: int, score: int, run_seconds: float) -> Dictionary:
 	if not is_ready():
 		await _await_ready()
 	var avatar_skin := SaveData.chosen_avatar_skin
@@ -140,6 +142,7 @@ func submit_score(score: int, run_seconds: float) -> Dictionary:
 	if avatar_fat < 0:
 		avatar_fat = 0
 	var resp := await _call_function("submitScore", {
+		"mode":        _mode_name(mode),
 		"score":       score,
 		"run_seconds": run_seconds,
 		"avatar_skin": avatar_skin,
@@ -147,25 +150,25 @@ func submit_score(score: int, run_seconds: float) -> Dictionary:
 	})
 	if resp.ok:
 		var data : Dictionary = resp.data
-		SaveData.best_endless    = int(data.get("best_endless",  SaveData.best_endless))
-		SaveData.total_endless   = int(data.get("total_endless", SaveData.total_endless))
+		if data.has("mode_best"):
+			SaveData.mode_best = (data.get("mode_best", {}) as Dictionary).duplicate()
 		SaveData.current_week_id = str(data.get("week_id", SaveData.current_week_id))
 		SaveData._save()
 	return resp
 
-func fetch_leaderboard(metric: int, limit: int = 100) -> Dictionary:
+func fetch_leaderboard(mode: int, limit: int = 100) -> Dictionary:
 	if not is_ready():
 		await _await_ready()
 	return await _call_function("getLeaderboard", {
-		"metric": _metric_name(metric),
+		"metric": _mode_name(mode),
 		"limit":  limit,
 	})
 
-func fetch_window(metric: int, radius: int = 5) -> Dictionary:
+func fetch_window(mode: int, radius: int = 5) -> Dictionary:
 	if not is_ready():
 		await _await_ready()
 	return await _call_function("getWindow", {
-		"metric": _metric_name(metric),
+		"metric": _mode_name(mode),
 		"radius": radius,
 	})
 
@@ -258,8 +261,8 @@ func restore_account(recovery_code: String) -> Dictionary:
 
 # ─── Internals ───────────────────────────────────────────────────────────────
 
-func _metric_name(metric: int) -> String:
-	return "best" if metric == LeaderboardMock.Metric.BEST else "total"
+func _mode_name(mode: int) -> String:
+	return LeaderboardMock.mode_key(mode)
 
 func _set_state(s: int) -> void:
 	if _state == s: return

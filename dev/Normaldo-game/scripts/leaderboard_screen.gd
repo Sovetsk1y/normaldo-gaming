@@ -66,10 +66,11 @@ var _overlay      : Control = null
 var _timer_lbl    : Label     = null
 var _scroll       : ScrollContainer = null
 var _content      : Control   = null
-var _tab_best_bg  : Panel = null
-var _tab_total_bg : Panel = null
-var _tab_best_lbl : Label     = null
-var _tab_total_lbl: Label     = null
+# Вкладки режимов. Их четыре (три эпизода и бесконечный), поэтому не четыре
+# пары именованных полей, а два массива по индексу режима: пара полей на вкладку
+# была терпима при двух вкладках и превращается в восемь при четырёх.
+var _tab_bg   : Array = []
+var _tab_lbl  : Array = []
 var _my_pos_btn   : Node2D    = null
 var _podium_root  : Control   = null
 # Что именно отрисовано сейчас: подиум и список по номерам мест. Пригождается и
@@ -77,7 +78,6 @@ var _podium_root  : Control   = null
 var _podium_ranks : Array     = []
 var _list_ranks   : Array     = []
 var _my_strip_lbl : Label     = null
-var _lock_overlay : Node2D    = null
 var _toast_node   : Node2D    = null
 
 var _reset_seconds_left : float = 0.0
@@ -113,13 +113,11 @@ func _ready() -> void:
 		.set_trans(SLIDE_TRANS).set_ease(SLIDE_EASE_IN)
 	if _hud != null and _hud.has_method("_on_leaders_open_anim_start"):
 		_hud._on_leaders_open_anim_start(SLIDE_TIME, SLIDE_TRANS, SLIDE_EASE_IN)
-	# Lock overlay (endless not unlocked yet) is built AFTER the slide-down
-	# completes so the modal doesn't pop in mid-pan and look glitchy.
-	if not QuestManager.is_endless_unlocked():
-		tw.finished.connect(func():
-			if is_instance_valid(self):
-				_build_lock_overlay(get_viewport().get_visible_rect().size)
-		)
+	# Раньше весь экран накрывался модалкой «ЛИДЕРБОРД ЗАКРЫТ», пока не открыт
+	# бесконечный режим: таблица была одна, и до конца кампании смотреть было
+	# нечего. Теперь таблиц четыре, и первая — эпизод 1 — открыта с первого
+	# забега; закрыты бывают ОТДЕЛЬНЫЕ вкладки, и говорит об этом замок на самой
+	# вкладке, а не заслонка на весь экран.
 
 func _process(delta: float) -> void:
 	_reset_seconds_left = maxf(0.0, _reset_seconds_left - delta)
@@ -225,25 +223,36 @@ func _build(vp: Vector2) -> void:
 	# ── Вкладки-пилюли ─────────────────────────────────────────────────────
 	# Активная отличается ФОРМОЙ (залитая против контурной), а не оттенком фона:
 	# по одному оттенку выбранную вкладку не видно.
+	#
+	# Вкладок четыре — по одной на режим. Полоса стала теснее (196 против 268),
+	# и подписи поэтому короткие: «ЭПИЗОД 2», а не «Рекорд второго эпизода».
+	# Что означает каждая, объясняет одна общая «?»-пилюля справа от полосы:
+	# четыре одинаковых знака вопроса — это не помощь, а сыпь.
 	var lay := _layout(vp)
-	var tab_w : float = 268.0
 	var tab_h : float = float(lay["tabs_h"])
 	var tab_y : float = float(lay["tabs_y"])
-	var gap   : float = 14.0
-	var tabs_x : float = (vp.x - tab_w * 2.0 - gap) * 0.5
+	var tab_w : float = 196.0
+	var gap   : float = 10.0
+	var n     : int   = LeaderboardMock.MODES.size()
+	var strip_w : float = tab_w * float(n) + gap * float(n - 1)
+	var tabs_x  : float = (vp.x - strip_w) * 0.5
 
-	_tab_best_bg = _tab_pill(Vector2(tabs_x, tab_y), Vector2(tab_w, tab_h))
-	_tab_best_lbl = _tab_label("РЕКОРД ЗАБЕГА", Vector2(tabs_x, tab_y), Vector2(tab_w, tab_h))
-	_tab_button(Vector2(tabs_x, tab_y), Vector2(tab_w, tab_h), _on_tab_best)
-	_build_help_pill(Vector2(tabs_x + tab_w - 26.0, tab_y + (tab_h - 18.0) * 0.5),
-		Color(1.00, 0.85, 0.35), LeaderboardMock.Metric.BEST)
-
-	var tx2 : float = tabs_x + tab_w + gap
-	_tab_total_bg = _tab_pill(Vector2(tx2, tab_y), Vector2(tab_w, tab_h))
-	_tab_total_lbl = _tab_label("ГОРА ПИЦЦ", Vector2(tx2, tab_y), Vector2(tab_w, tab_h))
-	_tab_button(Vector2(tx2, tab_y), Vector2(tab_w, tab_h), _on_tab_total)
-	_build_help_pill(Vector2(tx2 + tab_w - 26.0, tab_y + (tab_h - 18.0) * 0.5),
-		Color(1.00, 0.85, 0.35), LeaderboardMock.Metric.TOTAL)
+	_tab_bg.clear()
+	_tab_lbl.clear()
+	for i in n:
+		var mode : int = int(LeaderboardMock.MODES[i])
+		var at := Vector2(tabs_x + (tab_w + gap) * float(i), tab_y)
+		var sz := Vector2(tab_w, tab_h)
+		_tab_bg.append(_tab_pill(at, sz))
+		_tab_lbl.append(_tab_label(LeaderboardMock.mode_label(mode), at, sz))
+		# На закрытой вкладке рисуется замок. Без него закрытая вкладка выглядит
+		# рабочей и по нажатию молча ничего не делает — а тусклой её не считать:
+		# неактивная вкладка тоже тусклая.
+		if not _is_mode_unlocked(mode):
+			_draw_padlock(_slide_root, at + Vector2(9.0, (tab_h - 14.0) * 0.5), 12.0)
+		_tab_button(at, sz, _on_tab.bind(mode))
+	_build_help_pill(Vector2(tabs_x + strip_w + 10.0, tab_y + (tab_h - 18.0) * 0.5),
+		Color(1.00, 0.85, 0.35), 0)
 
 	# Подиум первой тройки — витрина экрана; список идёт с 4-го места.
 	_podium_root = Control.new()
@@ -587,9 +596,9 @@ func _build_dev_prize_btn(vp: Vector2) -> void:
 # тусклым. Различие по форме, а не по оттенку фона: по оттенку выбранную
 # вкладку не видно ни на солнце, ни дальтонику.
 func _refresh_tab_visual() -> void:
-	var best_on : bool = _active_metric == LeaderboardMock.Metric.BEST
-	_set_tab_style(_tab_best_bg,  _tab_best_lbl,  best_on)
-	_set_tab_style(_tab_total_bg, _tab_total_lbl, not best_on)
+	for i in _tab_bg.size():
+		var mode : int = int(LeaderboardMock.MODES[i])
+		_set_tab_style(_tab_bg[i], _tab_lbl[i], mode == _active_metric)
 
 func _set_tab_style(pill: Panel, lbl: Label, active: bool) -> void:
 	if not is_instance_valid(pill) or not is_instance_valid(lbl):
@@ -608,28 +617,30 @@ func _set_tab_style(pill: Panel, lbl: Label, active: bool) -> void:
 		lbl.add_theme_constant_override("outline_size", 3)
 		lbl.add_theme_constant_override("shadow_outline_size", 3)
 
-func _on_tab_best() -> void:
-	if not QuestManager.is_endless_unlocked():
-		_show_lock_toast()
-		return
-	if _active_metric == LeaderboardMock.Metric.BEST:
-		return
-	_active_metric = LeaderboardMock.Metric.BEST
-	_view_mode = 0
-	_refresh_tab_visual()
-	if _server_rows.has(_active_metric):
-		_rebuild_list()
-	else:
-		_show_loading_state()
-	_fetch_from_server_async()
+# ── Что открыто ──────────────────────────────────────────────────────────────
+# У каждого режима СВОЯ таблица, и открыта она ровно тогда, когда открыт сам
+# режим: смотреть чужие рекорды там, куда ещё нельзя попасть, — значит видеть
+# спойлер и не иметь возможности на него ответить.
+#
+# Эпизод 1 открыт всегда: с него игра и начинается. Эпизод N — после того как
+# пройден N−1. Бесконечный — после всей кампании.
+func _is_mode_unlocked(mode: int) -> bool:
+	if mode == LeaderboardMock.Mode.ENDLESS:
+		return QuestManager.is_endless_unlocked()
+	return SaveData.episodes_done >= mode
 
-func _on_tab_total() -> void:
-	if not QuestManager.is_endless_unlocked():
-		_show_lock_toast()
+func _mode_lock_hint(mode: int) -> String:
+	if mode == LeaderboardMock.Mode.ENDLESS:
+		return "Пройди все эпизоды"
+	return "Сначала пройди эпизод %d" % mode
+
+func _on_tab(mode: int) -> void:
+	if not _is_mode_unlocked(mode):
+		_show_lock_toast(_mode_lock_hint(mode))
 		return
-	if _active_metric == LeaderboardMock.Metric.TOTAL:
+	if _active_metric == mode:
 		return
-	_active_metric = LeaderboardMock.Metric.TOTAL
+	_active_metric = mode
 	_view_mode = 0
 	_refresh_tab_visual()
 	if _server_rows.has(_active_metric):
@@ -641,8 +652,8 @@ func _on_tab_total() -> void:
 # ── My position ──────────────────────────────────────────────────────────────
 
 func _on_my_position() -> void:
-	if not QuestManager.is_endless_unlocked():
-		_show_lock_toast()
+	if not _is_mode_unlocked(_active_metric):
+		_show_lock_toast(_mode_lock_hint(_active_metric))
 		return
 	# Try the server-side window first (real ranks)
 	if LeaderboardClient.is_ready():
@@ -856,114 +867,10 @@ func _fmt_duration(secs: float) -> String:
 	if h > 0: return "%dч %dм" % [h, m]
 	return "%dм" % m
 
-# ── Lock overlay ─────────────────────────────────────────────────────────────
-
-func _build_lock_overlay(vp: Vector2) -> void:
-	_lock_overlay = Node2D.new()
-	_lock_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
-	_lock_overlay.z_index = 5
-	# Fade in after the slide-down: build everything at modulate.a = 0 and
-	# tween up, so the modal arrives smoothly instead of snapping into view.
-	_lock_overlay.modulate.a = 0.0
-	add_child(_lock_overlay)
-	var tw_in := create_tween()
-	tw_in.tween_property(_lock_overlay, "modulate:a", 1.0, 0.25)\
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-
-	# Dim cover sits over the central zone (where rows live), leaving the top
-	# chrome visible so the user can still tap "back".
-	var scale_y : float = vp.y / CANVAS_H
-	var content_top : float = ZONE_Y * scale_y
-	var dim := ColorRect.new()
-	dim.color    = Color(0.02, 0.01, 0.0, 0.88)
-	dim.size     = Vector2(vp.x, vp.y - content_top)
-	dim.position = Vector2(0.0, content_top)
-	_lock_overlay.add_child(dim)
-
-	var dim_btn := Button.new()
-	dim_btn.flat       = true
-	dim_btn.focus_mode = Control.FOCUS_NONE
-	dim_btn.size       = dim.size
-	dim_btn.position   = dim.position
-	dim_btn.pressed.connect(_show_lock_toast)
-	_lock_overlay.add_child(dim_btn)
-
-	var panel_w := 380.0
-	var panel_h := 180.0
-	var panel_x := (vp.x - panel_w) * 0.5
-	var panel_y := content_top + (vp.y - content_top - panel_h) * 0.5
-
-	var panel := ColorRect.new()
-	panel.color    = Color(0.10, 0.08, 0.05, 0.96)
-	panel.size     = Vector2(panel_w, panel_h)
-	panel.position = Vector2(panel_x, panel_y)
-	_lock_overlay.add_child(panel)
-
-	var stripe := ColorRect.new()
-	stripe.color    = Color(0.55, 0.85, 1.0, 0.70)
-	stripe.size     = Vector2(panel_w, 2.0)
-	stripe.position = Vector2(panel_x, panel_y)
-	_lock_overlay.add_child(stripe)
-
-	_draw_padlock(_lock_overlay, Vector2(panel_x + (panel_w - 38.0) * 0.5, panel_y + 14.0), 38.0)
-
-	var title_lbl := Label.new()
-	title_lbl.add_theme_font_override("font", UI_FONT)
-	title_lbl.add_theme_font_size_override("font_size", 16)
-	_apply_text_fx(title_lbl)
-	title_lbl.text                 = "ЛИДЕРБОРД ЗАКРЫТ"
-	title_lbl.modulate             = Color(0.85, 0.95, 1.0)
-	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_lbl.size                 = Vector2(panel_w, 24.0)
-	title_lbl.position             = Vector2(panel_x, panel_y + 64.0)
-	_lock_overlay.add_child(title_lbl)
-
-	var desc_lbl := Label.new()
-	desc_lbl.add_theme_font_override("font", UI_FONT)
-	desc_lbl.add_theme_font_size_override("font_size", 11)
-	_apply_text_fx(desc_lbl)
-	desc_lbl.text                 = "Открой Бесконечный режим —\nпобеди NinjaFoot в кампании"
-	desc_lbl.modulate             = Color(0.65, 0.70, 0.78)
-	desc_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	desc_lbl.autowrap_mode        = TextServer.AUTOWRAP_WORD
-	desc_lbl.size                 = Vector2(panel_w - 32.0, 40.0)
-	desc_lbl.position             = Vector2(panel_x + 16.0, panel_y + 92.0)
-	_lock_overlay.add_child(desc_lbl)
-
-	var btn_w := 160.0
-	var btn_h := 32.0
-	var btn_x := panel_x + (panel_w - btn_w) * 0.5
-	var btn_y := panel_y + panel_h - btn_h - 12.0
-
-	var btn_bg := ColorRect.new()
-	btn_bg.color    = Color(0.18, 0.18, 0.36, 0.95)
-	btn_bg.size     = Vector2(btn_w, btn_h)
-	btn_bg.position = Vector2(btn_x, btn_y)
-	_lock_overlay.add_child(btn_bg)
-
-	var btn_lbl := Label.new()
-	btn_lbl.add_theme_font_override("font", UI_FONT)
-	btn_lbl.add_theme_font_size_override("font_size", 13)
-	_apply_text_fx(btn_lbl)
-	btn_lbl.text                 = "К СЮЖЕТУ"
-	btn_lbl.modulate             = Color(0.85, 0.90, 1.0)
-	btn_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	btn_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	btn_lbl.size                 = Vector2(btn_w, btn_h)
-	btn_lbl.position             = Vector2(btn_x, btn_y)
-	btn_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	_lock_overlay.add_child(btn_lbl)
-
-	var btn := Button.new()
-	btn.flat       = true
-	btn.focus_mode = Control.FOCUS_NONE
-	btn.size       = Vector2(btn_w, btn_h)
-	btn.position   = Vector2(btn_x, btn_y)
-	btn.pressed.connect(_on_close)
-	_lock_overlay.add_child(btn)
-
-	if is_instance_valid(_my_pos_btn):
-		_my_pos_btn.visible = false
+# ── Замок ────────────────────────────────────────────────────────────────────
+# Рисованный замок на закрытой вкладке. Раньше он стоял на модалке «ЛИДЕРБОРД
+# ЗАКРЫТ», накрывавшей весь экран; модалки больше нет (эпизод 1 открыт с первого
+# забега), а сам замок остался — теперь он помечает отдельные вкладки.
 
 func _draw_padlock(parent: Node, pos: Vector2, sz: float) -> void:
 	var col := Color(0.85, 0.95, 1.0)
@@ -1000,7 +907,7 @@ func _draw_padlock(parent: Node, pos: Vector2, sz: float) -> void:
 	key.position = Vector2(pos.x + (sz - sz * 0.18) * 0.5, body_y + body_h * 0.25)
 	parent.add_child(key)
 
-func _show_lock_toast() -> void:
+func _show_lock_toast(text: String = "Сначала открой Бесконечный режим") -> void:
 	var vp := get_viewport().get_visible_rect().size
 	if is_instance_valid(_toast_node):
 		_toast_node.queue_free()
@@ -1026,7 +933,7 @@ func _show_lock_toast() -> void:
 	lbl.add_theme_font_override("font", UI_FONT)
 	lbl.add_theme_font_size_override("font_size", 11)
 	_apply_text_fx(lbl)
-	lbl.text                 = "Сначала открой Бесконечный режим"
+	lbl.text                 = text
 	lbl.modulate             = Color(1.0, 0.85, 0.65)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
@@ -1076,15 +983,13 @@ func _build_help_pill(pos: Vector2, accent: Color, metric: int) -> void:
 	btn.pressed.connect(_show_metric_tooltip.bind(metric))
 	_overlay.add_child(btn)
 
-func _show_metric_tooltip(metric: int) -> void:
-	var title : String
-	var body  : String
-	if metric == LeaderboardMock.Metric.BEST:
-		title = "РЕКОРД ЗАБЕГА"
-		body  = "Лучший результат за один забег в Бесконечном режиме за неделю."
-	else:
-		title = "ГОРА ПИЦЦ"
-		body  = "Сумма пицц за все твои забеги в Бесконечном режиме за неделю."
+func _show_metric_tooltip(_metric: int) -> void:
+	# Одна подсказка на всю полосу вкладок: объяснять надо не каждую по
+	# отдельности, а САМО РАЗБИЕНИЕ — почему таблиц четыре и чем они разные.
+	var title : String = "ЧЕТЫРЕ ТАБЛИЦЫ"
+	var body  : String = "Своя таблица у каждого эпизода и у Бесконечного режима. " \
+		+ "В зачёт идёт лучший забег за неделю. Эпизоды одинаковой длины у всех, " \
+		+ "поэтому счёт в них сравним честно; в Бесконечном сравнивается, кто уехал дальше."
 	var vp := get_viewport().get_visible_rect().size
 	if is_instance_valid(_toast_node):
 		_toast_node.queue_free()
@@ -1243,12 +1148,6 @@ func _on_close() -> void:
 	var tw := create_tween().set_parallel(true)
 	tw.tween_property(_slide_root, "position", Vector2(0.0, vp.y), SLIDE_TIME)\
 		.set_trans(SLIDE_TRANS).set_ease(SLIDE_EASE_OUT)
-	# Lock overlay lives outside _slide_root (added directly to self), so the
-	# slide-down doesn't carry it. Tween its y in lockstep so the padlock
-	# panel exits the screen together with the leaderboard chrome.
-	if is_instance_valid(_lock_overlay):
-		tw.tween_property(_lock_overlay, "position:y", vp.y, SLIDE_TIME)\
-			.set_trans(SLIDE_TRANS).set_ease(SLIDE_EASE_OUT)
 	tw.chain().tween_callback(Callable(self, "queue_free"))
 	if _hud != null and _hud.has_method("_on_leaders_close_anim_start"):
 		_hud._on_leaders_close_anim_start(SLIDE_TIME, SLIDE_TRANS, SLIDE_EASE_OUT)

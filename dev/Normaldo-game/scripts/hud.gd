@@ -4,6 +4,8 @@ class_name HUD
 # Master toggle for all dev-only UI. Flip ENABLED in dev_flags.gd to restore.
 const DevFlags = preload("res://scripts/dev_flags.gd")
 
+const SPAWNER_SCRIPT = preload("res://scripts/spawner.gd")
+
 # UI typeface for the main-menu mockup (button captions, nick, balance, prompt).
 const UI_FONT          := preload("res://assets/fonts/RussoOne-Regular.ttf")
 
@@ -194,12 +196,25 @@ var _quest_badge       : CanvasItem = null
 var _achieve_badge     : CanvasItem = null
 var _skins_badge       : CanvasItem = null
 
-static var _start_endless : bool = false
+# ── Что запускает следующий забег ────────────────────────────────────────────
+# 1…3 — ЭПИЗОД кампании: один уровень со своим боссом, после победы забег
+# кончается и открывается следующий эпизод. 0 — БЕСКОНЕЧНЫЙ: все три уровня
+# подряд, по кругу, пока не умрёшь.
+#
+# Раньше здесь стоял `_start_endless : bool`: режимов было два и хватало флага.
+# Их стало четыре, и флаг пришлось бы читать вместе с «а какой уровень», то есть
+# держать в двух местах то, что решается одним числом.
+static var _start_episode : int = 1
 # Death-screen "ЗАНОВО" sets this before reloading the scene so the menu is
-# skipped on boot and the same mode (campaign / endless / boss test) launches
+# skipped on boot and the same mode (эпизод / бесконечный / boss test) launches
 # straight away.
 static var _restart_into_run : bool = false
-static var _restart_endless  : bool = false
+static var _restart_episode  : int  = 1
+
+# Номер эпизода ТЕКУЩЕГО забега — снимок `_start_episode` на старте. Сам
+# `_start_episode` к концу забега уже сброшен, а экран смерти и отправка
+# результата в таблицу спрашивают именно «какой режим только что играли».
+var _run_episode : int = 1
 
 var _go_fill_rect       : ColorRect = null
 var _go_shimmer_rect    : ColorRect = null
@@ -239,7 +254,9 @@ var _settings_gear_root: Node2D    = null
 # Main-menu mode selector (Эпизод 1 ↔ Бесконечный). State lives across menu
 # rebuilds so re-opening preserves the player's choice. Refs are kept so we
 # can swap the sprite + caption in-place when the player taps.
-var _mode_btn_endless     : bool         = false
+# Позиция чипа режима: 1…3 — эпизод, 0 — бесконечный. Ставится при сборке меню
+# в `_default_mode_position()`.
+var _mode_btn_pos         : int          = 1
 var _mode_btn_icon_atlas  : AtlasTexture = null
 var _mode_btn_glow_atlas  : AtlasTexture = null
 var _mode_btn_icon_rect   : TextureRect  = null
@@ -327,8 +344,7 @@ func _ready() -> void:
 		# finished. Flags are consumed here so subsequent reloads behave
 		# normally (e.g. dev hotkeys reaching this code path).
 		HUD._restart_into_run = false
-		HUD._start_endless    = HUD._restart_endless
-		HUD._restart_endless  = false
+		HUD._start_episode    = HUD._restart_episode
 		call_deferred("_start_game")
 	else:
 		_show_menu()
@@ -2168,7 +2184,10 @@ func _build_menu_mode_btn(vp: Vector2) -> void:
 	_mode_btn_caption.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	visual_root.add_child(_mode_btn_caption)
 
-	# Reflect the current persistent mode state.
+	# Чип встаёт на СЛЕДУЮЩИЙ неотыгранный эпизод (а после всей кампании — на
+	# бесконечный) при каждой сборке меню: вернувшись из забега, игрок видит то,
+	# что ему играть дальше, и ни одного нажатия на это не тратит.
+	_mode_btn_pos = _default_mode_position()
 	_apply_mode_btn_visuals()
 
 	# Hit area. Press animation reuses _menu_btn_press_anim for consistency.
@@ -2185,13 +2204,62 @@ func _build_menu_mode_btn(vp: Vector2) -> void:
 	hit.mouse_exited.connect(_menu_btn_press_anim.bind(visual_root, false))
 	_menu_overlay.add_child(hit)
 
+# ── Чип режима: перебор ТОЛЬКО ОТКРЫТЫХ позиций ──────────────────────────────
+# Разбив кампанию на эпизоды, легко получить неудобство: чтобы дойти до
+# последнего эпизода — а тем более до бесконечного за ним, — игроку пришлось бы
+# щёлкать чип по разу на каждую позицию, включая те, которые он давно прошёл и
+# возвращаться в них не собирается.
+#
+# Решение из двух половин:
+#
+#   1. ЧИП САМ ВСТАЁТ НА НУЖНОЕ. Открывая меню, игрок видит СЛЕДУЮЩИЙ
+#      неотыгранный эпизод, а пройдя всю кампанию — бесконечный режим. То есть
+#      обычный путь «зашёл и нажал ИГРАТЬ» стоит НОЛЬ нажатий на чип, всегда.
+#   2. ПЕРЕБОР ИДЁТ ПО ОТКРЫТОМУ. Нажатие переводит чип на следующую ОТКРЫТУЮ
+#      позицию по кругу: закрытых в кольце нет вообще, поэтому нечего
+#      «прощёлкивать». Переиграть первый эпизод после прохождения кампании —
+#      это одно нажатие, а не три.
+#
+# Замка на чипе больше нет: показывать закрытую позицию, чтобы объяснить, что
+# она закрыта, — это и есть та самая лишняя остановка.
+
+# Сколько в кампании эпизодов. Спрашивается у спавнера, а не пишется числом:
+# таблица уровней уже один раз меняла длину (пять → три), и второй источник
+# этой длины разошёлся бы с ней молча.
+func _episode_count() -> int:
+	return SPAWNER_SCRIPT.CAMPAIGN_LEVELS.size()
+
+# Позиции чипа: 1…3 — эпизоды, 0 — бесконечный. Порядок кольца — по возрастанию
+# трудности, бесконечный последним.
+func _mode_positions() -> Array:
+	var out : Array = []
+	for ep in range(1, _episode_count() + 1):
+		if _is_episode_unlocked(ep):
+			out.append(ep)
+	if QuestManager.is_endless_unlocked():
+		out.append(0)
+	return out
+
+# Эпизод 1 открыт всегда, эпизод N — после того как пройден N−1.
+func _is_episode_unlocked(ep: int) -> bool:
+	return ep <= 1 or SaveData.episodes_done >= ep - 1
+
+# Куда встать при входе в меню: первый непройденный эпизод, а пройдены все —
+# бесконечный.
+func _default_mode_position() -> int:
+	for ep in range(1, _episode_count() + 1):
+		if SaveData.episodes_done < ep:
+			return ep
+	return 0 if QuestManager.is_endless_unlocked() else _episode_count()
+
 func _on_mode_btn_pressed() -> void:
-	# Toggle chapter1 ↔ endless. If endless isn't unlocked yet, surface the
-	# locked popup instead of toggling.
-	if not _mode_btn_endless and not QuestManager.is_endless_unlocked():
-		_show_endless_locked_popup()
+	var ring : Array = _mode_positions()
+	if ring.size() <= 1:
+		# Открыт ровно один режим — перебирать нечего. Молчаливое нажатие тут
+		# честнее всплывающего окна: окно объясняло бы то, что и так видно.
 		return
-	_mode_btn_endless = not _mode_btn_endless
+	var i : int = ring.find(_mode_btn_pos)
+	_mode_btn_pos = int(ring[(i + 1) % ring.size()]) if i >= 0 else int(ring[0])
 	_apply_mode_btn_visuals()
 
 # Swap the AtlasTexture's source PNG + the caption text based on the current
@@ -2204,67 +2272,22 @@ func _apply_mode_btn_visuals() -> void:
 	# it by 2 to keep it on the plate. Single source of truth for the typo.
 	const MODE_FONT_CHAPTER1 : int = 14
 	const MODE_FONT_ENDLESS  : int = 12
-	if _mode_btn_endless:
+	if _mode_btn_pos == 0:
 		_mode_btn_icon_atlas.atlas = MODE_BTN_ENDLESS
 		_mode_btn_glow_atlas.atlas = MODE_BTN_ENDLESS_GLOW
 		_mode_btn_caption.text     = "БЕСКОНЕЧНЫЙ"
 		_mode_btn_caption.add_theme_font_size_override("font_size", MODE_FONT_ENDLESS)
 	else:
+		# Своей картинки у эпизодов 2 и 3 пока нет — берём табличку первого и
+		# меняем подпись. Номер на чипе читается по подписи, а не по рисунку,
+		# так что это работает; отдельные таблички — вопрос к художнику.
 		_mode_btn_icon_atlas.atlas = MODE_BTN_CHAPTER1
 		_mode_btn_glow_atlas.atlas = MODE_BTN_CHAPTER1_GLOW
-		_mode_btn_caption.text     = "ЭПИЗОД 1"
+		_mode_btn_caption.text     = "ЭПИЗОД %d" % _mode_btn_pos
 		_mode_btn_caption.add_theme_font_size_override("font_size", MODE_FONT_CHAPTER1)
 
-func _show_endless_locked_popup() -> void:
-	var vp := get_viewport().get_visible_rect().size
-	var popup := Control.new()
-	popup.size         = vp
-	popup.position     = Vector2.ZERO
-	popup.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(popup)
-
-	var dim := ColorRect.new()
-	dim.color        = Color(0, 0, 0, 0.70)
-	dim.size         = vp
-	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	popup.add_child(dim)
-
-	const PANEL_W : float = 320.0
-	const PANEL_H : float = 90.0
-	var panel := ColorRect.new()
-	panel.color = Color(0.08, 0.07, 0.12, 0.98)
-	panel.size  = Vector2(PANEL_W, PANEL_H)
-	panel.position = Vector2((vp.x - PANEL_W) * 0.5, (vp.y - PANEL_H) * 0.5)
-	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	popup.add_child(panel)
-
-	var stripe := ColorRect.new()
-	stripe.color    = Color(0.55, 0.30, 1.0, 0.85)
-	stripe.size     = Vector2(PANEL_W, 2.0)
-	stripe.position = panel.position
-	stripe.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	popup.add_child(stripe)
-
-	var lbl := Label.new()
-	lbl.add_theme_font_size_override("font_size", 14)
-	_apply_menu_caption_fx(lbl)
-	lbl.text                 = "Откроется после\nпрохождения Эпизода 1"
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.size                 = Vector2(PANEL_W, PANEL_H)
-	lbl.position             = panel.position
-	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	popup.add_child(lbl)
-
-	# Whole-screen Button on top — any tap dismisses the popup.
-	var dismiss := Button.new()
-	dismiss.flat         = true
-	dismiss.focus_mode   = Control.FOCUS_NONE
-	dismiss.size         = vp
-	dismiss.position     = Vector2.ZERO
-	dismiss.mouse_filter = Control.MOUSE_FILTER_STOP
-	dismiss.pressed.connect(func(): popup.queue_free())
-	popup.add_child(dismiss)
+# Окно «Откроется после прохождения Эпизода 1» удалено вместе с замком на чипе:
+# закрытых позиций в кольце больше нет, и объяснять по нажатию стало нечего.
 
 func _on_play_tapped() -> void:
 	if _menu_tapped:
@@ -2274,180 +2297,16 @@ func _on_play_tapped() -> void:
 		_chest_tooltip.queue_free()
 		_chest_tooltip = null
 	# Mode is chosen via the mode-selector chip; we just honour its state.
-	HUD._start_endless = _mode_btn_endless and QuestManager.is_endless_unlocked()
+	HUD._start_episode = _mode_btn_pos
+	if _mode_btn_pos == 0 and not QuestManager.is_endless_unlocked():
+		HUD._start_episode = 1
 	_start_game()
 
-func _show_mode_select() -> void:
-	var vp := get_viewport().get_visible_rect().size
-
-	var popup := Node2D.new()
-	add_child(popup)
-
-	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.75)
-	dim.size  = vp
-	dim.position = Vector2.ZERO
-	popup.add_child(dim)
-
-	var btn_close := Button.new()
-	btn_close.flat = true
-	btn_close.focus_mode = Control.FOCUS_NONE
-	btn_close.size = vp
-	btn_close.position = Vector2.ZERO
-	btn_close.pressed.connect(func():
-		popup.queue_free()
-	)
-	popup.add_child(btn_close)
-
-	var panel_w := 260.0
-	var panel_h := 180.0
-	var panel_x := (vp.x - panel_w) * 0.5
-	var panel_y := (vp.y - panel_h) * 0.5
-
-	var panel := ColorRect.new()
-	panel.color = Color(0.06, 0.05, 0.04, 0.96)
-	panel.size = Vector2(panel_w, panel_h)
-	panel.position = Vector2(panel_x, panel_y)
-	popup.add_child(panel)
-
-	var title := Label.new()
-	title.add_theme_font_override("font", UI_FONT)
-	title.add_theme_font_size_override("font_size", 18)
-	title.text = "ВЫБЕРИ РЕЖИМ"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.modulate = Color(1.0, 0.85, 0.35)
-	title.size = Vector2(panel_w, 40)
-	title.position = Vector2(panel_x, panel_y + 12)
-	popup.add_child(title)
-
-	var btn_w := 280.0
-	var btn_h := 44.0
-	var btn_x := panel_x + (panel_w - btn_w) * 0.5
-	var btn_gap := 16.0
-
-	# Приключение
-	var adv_btn := Button.new()
-	adv_btn.add_theme_font_override("font", UI_FONT)
-	adv_btn.add_theme_font_size_override("font_size", 16)
-	adv_btn.text = "ПРИКЛЮЧЕНИЕ"
-	adv_btn.size = Vector2(btn_w, btn_h)
-	adv_btn.position = Vector2(btn_x, panel_y + 60)
-	adv_btn.pressed.connect(func():
-		popup.queue_free()
-		_show_chapter_select()
-	)
-	popup.add_child(adv_btn)
-
-	# Бесконечный
-	var endless_btn := Button.new()
-	endless_btn.add_theme_font_override("font", UI_FONT)
-	endless_btn.add_theme_font_size_override("font_size", 16)
-	endless_btn.text = "БЕСКОНЕЧНЫЙ"
-	endless_btn.size = Vector2(btn_w, btn_h)
-	endless_btn.position = Vector2(btn_x, panel_y + 60 + btn_h + btn_gap)
-	endless_btn.pressed.connect(func():
-		popup.queue_free()
-		HUD._start_endless = true
-		_menu_tapped = true
-		_start_game()
-	)
-	popup.add_child(endless_btn)
-
-func _show_chapter_select() -> void:
-	var vp := get_viewport().get_visible_rect().size
-
-	var popup := Node2D.new()
-	add_child(popup)
-
-	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.75)
-	dim.size  = vp
-	dim.position = Vector2.ZERO
-	popup.add_child(dim)
-
-	var btn_close := Button.new()
-	btn_close.flat = true
-	btn_close.focus_mode = Control.FOCUS_NONE
-	btn_close.size = vp
-	btn_close.position = Vector2.ZERO
-	btn_close.pressed.connect(func():
-		popup.queue_free()
-	)
-	popup.add_child(btn_close)
-
-	var panel_w := 320.0
-	var panel_h := 200.0
-	var panel_x := (vp.x - panel_w) * 0.5
-	var panel_y := (vp.y - panel_h) * 0.5
-
-	var panel := ColorRect.new()
-	panel.color = Color(0.06, 0.05, 0.04, 0.96)
-	panel.size = Vector2(panel_w, panel_h)
-	panel.position = Vector2(panel_x, panel_y)
-	popup.add_child(panel)
-
-	var title := Label.new()
-	title.add_theme_font_override("font", UI_FONT)
-	title.add_theme_font_size_override("font_size", 18)
-	title.text = "ВЫБЕРИ ГЛАВУ"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.modulate = Color(1.0, 0.85, 0.35)
-	title.size = Vector2(panel_w, 40)
-	title.position = Vector2(panel_x, panel_y + 12)
-	popup.add_child(title)
-
-	var btn_w := 200.0
-	var btn_h := 38.0
-	var btn_x := panel_x + (panel_w - btn_w) * 0.5
-	var btn_y := panel_y + 60
-	var btn_gap := 12.0
-
-	# Check if endless mode is unlocked (quest 7 completed)
-	var endless_unlocked = QuestManager.story_completed[6] if QuestManager.story_completed.size() > 6 else false
-
-	# Chapter 1 - always available
-	var ch1_btn := Button.new()
-	ch1_btn.add_theme_font_override("font", UI_FONT)
-	ch1_btn.add_theme_font_size_override("font_size", 14)
-	ch1_btn.text = "ГЛАВА 1 — ПЕРВЫЙ ПОЛЁТ"
-	ch1_btn.size = Vector2(btn_w, btn_h)
-	ch1_btn.position = Vector2(btn_x, btn_y)
-	ch1_btn.pressed.connect(func():
-		popup.queue_free()
-		HUD._start_endless = false
-		_menu_tapped = true
-		_start_game()
-	)
-	popup.add_child(ch1_btn)
-
-	# Chapter 2 - check if quest chain allows it
-	var ch2_btn := Button.new()
-	ch2_btn.add_theme_font_override("font", UI_FONT)
-	ch2_btn.add_theme_font_size_override("font_size", 14)
-	ch2_btn.text = "ГЛАВА 2 — СКОРО"
-	ch2_btn.size = Vector2(btn_w, btn_h)
-	ch2_btn.position = Vector2(btn_x, btn_y + btn_h + btn_gap)
-	ch2_btn.disabled = true
-	popup.add_child(ch2_btn)
-
-	# Endless mode
-	var endless_btn := Button.new()
-	endless_btn.add_theme_font_override("font", UI_FONT)
-	endless_btn.add_theme_font_size_override("font_size", 14)
-	if endless_unlocked:
-		endless_btn.text = "БЕСКОНЕЧНЫЙ РЕЖИМ"
-	else:
-		endless_btn.text = "БЕСКОНЕЧНЫЙ 🔒"
-	endless_btn.size = Vector2(btn_w, btn_h)
-	endless_btn.position = Vector2(btn_x, btn_y + (btn_h + btn_gap) * 2)
-	if endless_unlocked:
-		endless_btn.pressed.connect(func():
-			popup.queue_free()
-			HUD._start_endless = true
-			_menu_tapped = true
-			_start_game()
-		)
-	popup.add_child(endless_btn)
+# Выбор режима когда-то жил в двух всплывающих окнах — «Приключение или
+# Бесконечный», а за ним «выбор главы». Ни одно из них не вызывалось уже давно:
+# режим выбирается ЧИПОМ в меню (см. `_build_menu_mode_btn`), и это единственный
+# путь в забег. Окна удалены — мёртвый экран с кнопкой «ГЛАВА 2 — СКОРО» пережил
+# бы ещё пару правок режимов и разошёлся бы с игрой окончательно.
 
 func _on_boss_test_tapped() -> void:
 	if _menu_tapped:
@@ -6090,14 +5949,25 @@ func _start_game() -> void:
 	_refresh_fat_icons()
 	_rebuild_skin_panels()
 	_slide_in_hud()
-	var is_campaign := not _boss_test_mode and not _start_endless
-	var is_endless  := _start_endless
+	# Режим забега снимается ОДИН РАЗ и запоминается: `_start_episode` статичен и
+	# к концу забега уже сброшен, а спросить «что мы играли» надо и экрану
+	# смерти, и отправке результата в таблицу.
+	_run_episode = HUD._start_episode
+	_next_level  = -1
+	var is_endless  := _run_episode == 0
+	var is_campaign := not _boss_test_mode and not is_endless
 	if spawner:
 		if _boss_test_mode:
 			spawner.boss_test_mode = true
-		elif not _start_endless:
+		else:
+			# Эпизод и бесконечный — ОДНА И ТА ЖЕ машинерия уровней: буквы,
+			# карточки, боссы. Разница ровно в одном — кончается ли цепочка
+			# после последнего уровня или заходит на новый круг.
 			spawner.campaign_mode = true
-		HUD._start_endless = false
+			spawner.endless_chain = is_endless
+			spawner.call("set_start_level", 0 if is_endless else _run_episode - 1)
+			if bg and bg.has_method("set_level"):
+				bg.call("set_level", 1 if is_endless else _run_episode)
 		spawner.set_process(true)
 	if bg:
 		bg.start_scrolling()
@@ -7008,11 +6878,17 @@ func _on_boss_time() -> void:
 		_summon_boss("ninja")
 
 # ── Конец уровня ─────────────────────────────────────────────────────────────
-# Слово NORMALDO выложено. На уровне с боссом выходит босс, и следующий уровень
-# начнётся после победы; на уровне без босса — сразу карточка следующего.
+# Слово NORMALDO выложено, выходит босс, и что будет после победы, решает ЭТО
+# число: номер следующего уровня или −1, если следующего нет.
 #
-# Пятый уровень — последний: его босс кончает кампанию, а не ведёт дальше.
-var _next_level : int = 0
+#   ЭПИЗОД — всегда −1: в нём ровно один уровень, и его босс кончает забег.
+#   БЕСКОНЕЧНЫЙ — никогда не −1: после третьего уровня круг заходит на первый.
+#
+# По умолчанию −1, и это важно: босса поднимает не только конец уровня, но и
+# дев-кнопка с режимом теста босса, а они `_next_level` не выставляют. Ноль по
+# умолчанию читался бы там как «дальше первый уровень», и победа над боссом из
+# дев-кнопки вместо экрана итогов уводила бы в карточку уровня.
+var _next_level : int = -1
 
 func _on_level_cleared(boss: String, next_level: int) -> void:
 	_next_level = next_level
@@ -7058,25 +6934,35 @@ func _summon_boss(kind: String) -> void:
 
 func _on_boss_defeated() -> void:
 	await _run_win_word()
-	# Босс ПОСЛЕДНЕГО уровня кончает кампанию; босс любого другого — ведёт на
-	# следующий уровень, и забег продолжается тем же забегом: жир, доллары и
-	# счётчик пиццы переходят дальше. Уровень внутри эпизода, разорванный на
-	# отдельные забеги, перестал бы быть уровнем.
-	if _next_level > 0:
+	# В БЕСКОНЕЧНОМ бой — не конец, а шов: за ним карточка следующего уровня, и
+	# забег продолжается тем же забегом, с тем же жиром, деньгами и счётчиком
+	# пиццы. Цепочка там замкнута в кольцо, поэтому `_next_level` не кончается
+	# никогда, и выйти отсюда можно только смертью.
+	#
+	# В ЭПИЗОДЕ бой — именно конец: эпизод и есть один уровень со своим боссом.
+	# `_next_level` там всегда −1.
+	if _next_level >= 0:
 		_slide_in_hud()
 		_show_level_card(_next_level)
 		return
-	# Boss defeat → endless mode unlock + the standard death-screen flow with
-	# an extra "ENDLESS UNLOCKED" callout (set via _endless_unlock_pending).
+	# Эпизод пройден: он засчитывается, открывается следующий, а пройденный
+	# третий открывает бесконечный режим.
 	_run_outcome = "boss_defeated"
 	var unlocked_before : bool = QuestManager.is_endless_unlocked()
+	if _run_episode > 0:
+		SaveData.episodes_done = maxi(SaveData.episodes_done, _run_episode)
+		SaveData._save()
 	Analytics.event("boss_defeated", {
 		"first_time":     not unlocked_before,
 		"time_in_run":    int(_elapsed_time),
+		"episode":        _run_episode,
 	})
 	QuestManager.notify_boss_defeated()
-	QuestManager.notify_campaign_complete()
+	if SaveData.episodes_done >= _episode_count():
+		QuestManager.notify_campaign_complete()
 	_endless_unlock_pending = (not unlocked_before) and QuestManager.is_endless_unlocked()
+	if _endless_unlock_pending:
+		Analytics.event("endless_unlocked", { "episodes_done": int(SaveData.episodes_done) })
 	_timer_running = false
 	# Boss is dead — slide the HUD back in (mirrors the run-start slide).
 	_slide_in_hud()
@@ -7274,7 +7160,7 @@ func _show_victory() -> void:
 	btn_endless.position = Vector2(btns_x, btn_y)
 	btn_endless.pressed.connect(func():
 		_play_btn_sfx()
-		HUD._start_endless = true
+		HUD._start_episode = 0
 		_restart()
 	)
 	add_child(btn_endless)
@@ -7361,9 +7247,12 @@ func _on_normaldo_died(total_pizzas: int, death_pos: Vector2) -> void:
 	_go_best_before = SaveData.get_skin_best_for(SaveData.active_skin)
 	SaveData.note_run_finished(total_pizzas)
 	var level_rewards := SaveData.add_xp(total_pizzas, "run_end")
-	# Submit endless run to leaderboard backend (fire-and-forget; doesn't block UI)
-	if QuestManager._run_is_endless and QuestManager.is_endless_unlocked():
-		_submit_endless_score_async(total_pizzas, _elapsed_time)
+	# Результат уходит в таблицу СВОЕГО режима — эпизоды тоже, а не один
+	# бесконечный: у каждого режима своя таблица (см. LeaderboardMock.Mode).
+	# Отправка не блокирует интерфейс.
+	if not _boss_test_mode:
+		_submit_score_async(LeaderboardMock.mode_for_episode(_run_episode),
+			total_pizzas, _elapsed_time)
 	_show_game_over(total_pizzas, level_rewards, xp_before, level_before)
 	_maybe_prompt_notif_permission()
 
@@ -7505,18 +7394,17 @@ func _build_notif_modal_btn(parent: Node, label_text: String,
 		on_press.call())
 	parent.add_child(btn)
 
-func _submit_endless_score_async(score: int, run_seconds: float) -> void:
+func _submit_score_async(mode: int, score: int, run_seconds: float) -> void:
 	if not LeaderboardClient.is_ready():
 		return
-	var resp = await LeaderboardClient.submit_score(score, run_seconds)
+	var resp = await LeaderboardClient.submit_score(mode, score, run_seconds)
 	if not resp.ok:
 		push_warning("[LB] submit_score failed: %s" % str(resp.get("error", "")))
 		return
-	print("[LB] submit_score: rank_best=%d rank_total=%d best=%d total=%d" % [
-		int(resp.data.get("rank_best", 0)),
-		int(resp.data.get("rank_total", 0)),
-		int(resp.data.get("best_endless", 0)),
-		int(resp.data.get("total_endless", 0)),
+	print("[LB] submit_score: mode=%s rank=%d best=%d" % [
+		LeaderboardMock.mode_key(mode),
+		int(resp.data.get("rank", 0)),
+		int(resp.data.get("best", 0)),
 	])
 
 # ── Экран смерти ─────────────────────────────────────────────────────────────
@@ -7542,7 +7430,10 @@ func _show_game_over(total_pizzas: int, level_rewards: Array, xp_before: int, le
 	var sx  : float = vp.x / MENU_CANVAS_W
 	var sy  : float = vp.y / MENU_CANVAS_H
 	var _pm := Node.PROCESS_MODE_ALWAYS
-	var show_rank_block := QuestManager._run_is_endless and QuestManager.is_endless_unlocked()
+	# Блок места показываем ВСЕГДА, кроме дев-теста босса: таблица есть у каждого
+	# режима, а не у одного бесконечного, и место в эпизоде — такой же результат
+	# забега, как и в нём.
+	var show_rank_block := not _boss_test_mode
 
 	var left  := Rect2(GO_LEFT_X  * sx, GO_COL_Y * sy, GO_LEFT_W  * sx, GO_COL_H * sy)
 	var right := Rect2(GO_RIGHT_X * sx, GO_COL_Y * sy, GO_RIGHT_W * sx, GO_COL_H * sy)
@@ -8587,7 +8478,11 @@ func _restart() -> void:
 # the scene. _ready picks the flag up and jumps straight into the run.
 func _restart_into_new_run() -> void:
 	HUD._restart_into_run = true
-	HUD._restart_endless  = QuestManager._run_is_endless and QuestManager.is_endless_unlocked()
+	# «ЗАНОВО» повторяет ТОТ ЖЕ режим. Бесконечный — только если он всё ещё
+	# открыт (дев-кнопка сброса прогресса умеет его закрыть обратно).
+	HUD._restart_episode = _run_episode
+	if _run_episode == 0 and not QuestManager.is_endless_unlocked():
+		HUD._restart_episode = 1
 	get_tree().paused = false
 	get_tree().reload_current_scene()
 
@@ -9031,16 +8926,16 @@ func _build_go_rank_block(panel_x: float, panel_y: float, panel_w: float, pm: in
 	if panel_h <= 0.0:
 		rows_y = panel_y + 270.0
 
-	_build_go_rank_row(rows_x, rows_y, rows_w,
-		"Рекорд забега",
-		LeaderboardMock.get_player_rank(LeaderboardMock.Metric.BEST),
-		LeaderboardMock.get_player_delta(LeaderboardMock.Metric.BEST),
-		LeaderboardMock.get_player_is_new(LeaderboardMock.Metric.BEST), pm)
-	_build_go_rank_row(rows_x, rows_y + 20.0, rows_w,
-		"Гора пицц",
-		LeaderboardMock.get_player_rank(LeaderboardMock.Metric.TOTAL),
-		LeaderboardMock.get_player_delta(LeaderboardMock.Metric.TOTAL),
-		LeaderboardMock.get_player_is_new(LeaderboardMock.Metric.TOTAL), pm)
+	# Строка ОДНА — про тот режим, который только что играли. Раньше их было
+	# две, «Рекорд забега» и «Гора пицц», и обе про бесконечный: два взгляда на
+	# один и тот же забег. Теперь у каждого режима своя таблица, и на экране
+	# смерти осмысленна ровно та, куда сейчас ушёл результат.
+	var mode : int = LeaderboardMock.mode_for_episode(_run_episode)
+	_build_go_rank_row(rows_x, rows_y + 10.0, rows_w,
+		LeaderboardMock.mode_label(mode).capitalize(),
+		LeaderboardMock.get_player_rank(mode),
+		LeaderboardMock.get_player_delta(mode),
+		LeaderboardMock.get_player_is_new(mode), pm)
 
 	# Hit area spans both rows — tap anywhere to open the full leaderboard.
 	var btn := Button.new()
@@ -9169,7 +9064,7 @@ func _on_death_exit_tapped() -> void:
 	_restart()
 
 func _on_death_rank_tapped() -> void:
-	_show_leaderboard(LeaderboardMock.Metric.BEST)
+	_show_leaderboard(LeaderboardMock.mode_for_episode(_run_episode))
 
 # ── Prize claim modal (Phase 1 mock) ─────────────────────────────────────────
 
@@ -9187,8 +9082,16 @@ func _show_unclaimed_pending_rewards(rewards: Array) -> void:
 	for i in rewards.size():
 		var r = rewards[i]
 		if r is Dictionary and not bool(r.get("claimed", false)):
-			var metric := str(r.get("metric", "best"))
-			var label := "Рекорд забега" if metric == "best" else "Гора пицц"
+			# Приз приходит с сервера с именем РЕЖИМА («ep2», «endless»), а
+			# подписать его надо словами. Старые призы прошлых недель могут
+			# нести ещё «best»/«total» — на них подпись остаётся пустой строкой
+			# из `mode_label`, и модалка просто показывает место без названия
+			# режима, вместо того чтобы врать «Рекорд забега».
+			var metric := str(r.get("metric", ""))
+			var label := ""
+			var mi : int = LeaderboardMock.MODE_KEYS.find(metric)
+			if mi >= 0:
+				label = LeaderboardMock.mode_label(mi).capitalize()
 			_show_prize_claim_modal({
 				"metric":       metric,
 				"metric_label": label,
@@ -9263,7 +9166,8 @@ func _show_prize_claim_modal(reward: Dictionary) -> void:
 	place_lbl.add_theme_font_override("font", UI_FONT)
 	place_lbl.add_theme_font_size_override("font_size", 18)
 	_apply_menu_caption_fx(place_lbl)
-	place_lbl.text                 = "%s — #%d МЕСТО" % [metric_label, place]
+	place_lbl.text = ("#%d МЕСТО" % place) if metric_label.is_empty() \
+		else ("%s — #%d МЕСТО" % [metric_label, place])
 	place_lbl.modulate             = Color(1.0, 0.88, 0.40)
 	place_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	place_lbl.size                 = Vector2(panel_w, 24.0)
@@ -9450,79 +9354,11 @@ func _on_phase_entered(phase_idx: int) -> void:
 	})
 	if QuestManager._run_is_campaign:
 		QuestManager.notify_campaign_phase(phase_idx)
-		return
-	if not QuestManager._run_is_endless:
-		return
-	var spawner := get_parent().get_node_or_null("Spawner")
-	if not spawner or not is_instance_valid(spawner):
-		return
-	var phases : Array = spawner.ENDLESS_PHASES
-	if phase_idx < 0 or phase_idx >= phases.size():
-		return
-	var phase_name : String = phases[phase_idx]["name"]
-	var is_madness = phase_idx >= spawner.CALM_WAVE_PHASES_FROM
-	_show_phase_toast(phase_name, is_madness)
+	# Тост с названием фазы («Безумие») был у старого бесконечного: он шёл по
+	# своей таблице ENDLESS_PHASES, а у её фаз были имена. Бесконечный теперь —
+	# это цепочка уровней на CAMPAIGN_PHASES, у которых имён нет и не должно
+	# быть: место в ритме объясняет карточка уровня, а не подпись к фазе.
 
-func _show_phase_toast(phase_name: String, is_madness: bool) -> void:
-	var vp := get_viewport().get_visible_rect().size
-	if is_instance_valid(_toast_node):
-		_toast_node.queue_free()
-	_toast_node = Node2D.new()
-	_toast_node.process_mode = Node.PROCESS_MODE_ALWAYS
-	add_child(_toast_node)
-
-	var toast_w := 240.0
-	var toast_h := 52.0
-	var toast_x := (vp.x - toast_w) * 0.5
-	var toast_y := vp.y * 0.22
-
-	var stripe_col := Color(1.0, 0.30, 0.30) if is_madness else Color(0.45, 0.85, 0.25)
-	var bg_col     := Color(0.18, 0.04, 0.04, 0.92) if is_madness else Color(0.06, 0.10, 0.04, 0.92)
-	var name_col   := Color(1.0, 0.55, 0.40) if is_madness else Color(0.95, 0.95, 0.55)
-
-	var bg := ColorRect.new()
-	bg.color    = bg_col
-	bg.size     = Vector2(toast_w, toast_h)
-	bg.position = Vector2(toast_x, toast_y - 40.0)
-	_toast_node.add_child(bg)
-
-	var stripe_top := ColorRect.new()
-	stripe_top.color    = stripe_col
-	stripe_top.size     = Vector2(toast_w, 2.0)
-	stripe_top.position = bg.position
-	_toast_node.add_child(stripe_top)
-
-	var stripe_bot := ColorRect.new()
-	stripe_bot.color    = stripe_col
-	stripe_bot.size     = Vector2(toast_w, 2.0)
-	stripe_bot.position = bg.position + Vector2(0.0, toast_h - 2.0)
-	_toast_node.add_child(stripe_bot)
-
-	var label := Label.new()
-	label.add_theme_font_override("font", UI_FONT)
-	label.add_theme_font_size_override("font_size", 22)
-	label.text                 = phase_name.to_upper()
-	label.modulate             = name_col
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	label.size                 = Vector2(toast_w, toast_h)
-	label.position             = bg.position
-	_toast_node.add_child(label)
-
-	var target_y := toast_y
-	var tw := _toast_node.create_tween().set_parallel(true)
-	tw.tween_property(bg,         "position:y", target_y,                 0.30).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property(stripe_top, "position:y", target_y,                 0.30).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property(stripe_bot, "position:y", target_y + toast_h - 2.0, 0.30).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property(label,      "position:y", target_y,                 0.30).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-
-	tw.chain().tween_interval(1.8)
-	tw.chain().tween_property(_toast_node, "modulate:a", 0.0, 0.35)
-	tw.chain().tween_callback(_toast_node.queue_free)
-
-# Quest-reminder strip shown right after a run starts. Walks daily quest
-# slots, skips anything already done or on cooldown, and plays a chained
-# slide-up-hold-slide-down animation for each remaining quest.
 func _show_run_intro_quests() -> void:
 	if is_instance_valid(_intro_quest_seq):
 		_intro_quest_seq.queue_free()
