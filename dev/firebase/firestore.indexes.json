@@ -1,7 +1,29 @@
 {
+  "_comment": [
+    "Составные индексы под запрос таблицы лидеров.",
+    "",
+    "`getLeaderboard` (и `weeklyReset`) сортируют по ДВУМ полям сразу:",
+    "score по убыванию, updated_at по возрастанию — чтобы при равном счёте выше",
+    "стоял тот, кто взял его раньше. Такому запросу Firestore сам индекс не",
+    "заводит: однополевые он создаёт автоматически, составной надо объявить.",
+    "Без объявления запрос падает с FAILED_PRECONDITION, а функция отвечает 500.",
+    "",
+    "Имя коллекции здесь — это РЕЖИМ: путь `leaderboards/{week}/{mode}`, и",
+    "последний сегмент даёт collectionGroup. Поэтому индексов ровно столько,",
+    "сколько режимов.",
+    "",
+    "Раньше тут стояли `best` и `total` — две метрики до разбиения таблицы по",
+    "режимам. Клиент и функции переехали на ep1…endless, а этот файл остался, и",
+    "новые коллекции оказались без индексов. Старые записи никуда не делись, но",
+    "их больше никто не запрашивает: индексы им не нужны.",
+    "",
+    "Файл выкатывается ОТДЕЛЬНО от функций:",
+    "  firebase deploy --only firestore:indexes",
+    "`--only functions` его не трогает — на этом и погорело."
+  ],
   "indexes": [
     {
-      "collectionGroup": "best",
+      "collectionGroup": "ep1",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "score", "order": "DESCENDING" },
@@ -9,7 +31,23 @@
       ]
     },
     {
-      "collectionGroup": "total",
+      "collectionGroup": "ep2",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "score", "order": "DESCENDING" },
+        { "fieldPath": "updated_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ep3",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "score", "order": "DESCENDING" },
+        { "fieldPath": "updated_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "endless",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "score", "order": "DESCENDING" },
