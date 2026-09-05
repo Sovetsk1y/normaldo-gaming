@@ -93,6 +93,11 @@ func _offscreen() -> bool:
 		or position.y < -OFFSCREEN_M or position.y > vp.y + OFFSCREEN_M
 
 func _process(delta: float) -> void:
+	if _falling:
+		_fall_vel = KnockFall.step(self, _spr, _fall_vel, _fall_spin, delta)
+		if KnockFall.is_gone(self):
+			queue_free()
+		return
 	# Покачивание — только пока ЛЕТИТ. В наводке и рывке спрайт разворачивается
 	# к цели (`_aim_rot`), и качать его там значило бы драться с прицелом.
 	if _state == "fly":
@@ -197,3 +202,18 @@ func _nearest_target_ahead() -> Node2D:
 			bd = d
 			best = n
 	return best
+
+# Сбитый вор падает, как любой предмет, — см. `knock_fall.gd`. Ему это идёт
+# отдельно: вор летит ЗА кошельком, и «сбил на подлёте» должно читаться как
+# сорванная кража, а не как исчезновение.
+var _falling   : bool    = false
+var _fall_vel  : Vector2 = Vector2.ZERO
+var _fall_spin : float   = 0.0
+
+func knock_down() -> void:
+	if _falling:
+		return
+	_falling   = true
+	collision_layer = 0
+	_fall_vel  = KnockFall.launch_velocity(speed)
+	_fall_spin = KnockFall.launch_spin()

@@ -94,6 +94,11 @@ func _build_glow() -> void:
 	add_child(_glow)
 
 func _process(delta: float) -> void:
+	if _falling:
+		_fall_vel = KnockFall.step(self, _sprite, _fall_vel, _fall_spin, delta)
+		if KnockFall.is_gone(self):
+			queue_free()
+		return
 	if vel != Vector2.ZERO:
 		position += vel * delta
 	else:
@@ -109,3 +114,18 @@ func _process(delta: float) -> void:
 	if _spin:
 		_sprite.rotation += delta * 2.2
 	ItemAura.pulse(_glow, p)
+
+# Сбитый предмет-эффект падает, как любой другой, — см. `knock_fall.gd`.
+var _falling   : bool    = false
+var _fall_vel  : Vector2 = Vector2.ZERO
+var _fall_spin : float   = 0.0
+
+func knock_down() -> void:
+	if _falling:
+		return
+	_falling   = true
+	collision_layer = 0
+	_fall_vel  = KnockFall.launch_velocity(speed)
+	_fall_spin = KnockFall.launch_spin()
+	if is_instance_valid(_glow):
+		_glow.visible = false

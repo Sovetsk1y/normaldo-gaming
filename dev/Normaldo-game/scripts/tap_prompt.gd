@@ -26,9 +26,13 @@ const FINGERS : Dictionary = {
 	       preload("res://assets/ui/reactions/finger_r2.png")],
 }
 
-const FINGER_H   : float = 74.0    # высота пальца на экране
-const FINGER_GAP : float = 10.0    # зазор между надписью и пальцем
-const DROP       : float = 20.0    # ход пальца вниз
+# Габариты пальца — В ДОЛЯХ ШИРИНЫ НАДПИСИ, а не в пикселях. Подсказка стоит и
+# на мини-играх во весь экран, и на дорожном конусе в три лейна, то есть вдвое
+# мельче; фиксированные 74 px давали на конусе пальцы больше самой надписи.
+# Доли подобраны так, чтобы при ширине 190 (мини-игры) числа остались прежними.
+const FINGER_H_K   : float = 0.39   # высота пальца
+const FINGER_GAP_K : float = 0.053  # зазор между надписью и пальцем
+const DROP_K       : float = 0.105  # ход пальца вниз
 const DOWN_T     : float = 0.15
 const HOLD_T     : float = 0.08
 const UP_T       : float = 0.19
@@ -40,6 +44,7 @@ var _blink : Tween = null
 var _tap_spr : Sprite2D = null
 var _half_w : float = 0.0
 var _half_h : float = 0.0
+var _drop   : float = 0.0
 
 # Габариты ПОДСКАЗКИ ЦЕЛИКОМ, вместе с пальцами. Нужны тому, кто её ставит:
 # подсказка ездит за пачкой пиццы, пачка паркуется у правого края и в середине
@@ -60,20 +65,23 @@ func setup(width: float = 190.0) -> void:
 	_half_w = width * 0.5
 	_half_h = TAP_TEX.get_height() * _tap_spr.scale.y * 0.5
 
+	var finger_h : float = width * FINGER_H_K
+	_drop = width * DROP_K
 	for side in [-1.0, 1.0]:
 		var frames : Array = FINGERS[side]
 		var f := Sprite2D.new()
 		f.texture        = frames[0]
 		f.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-		var k : float = FINGER_H / float((frames[0] as Texture2D).get_height())
+		var k : float = finger_h / float((frames[0] as Texture2D).get_height())
 		f.scale    = Vector2(k, k)
 		f.position = Vector2(
-			side * (width * 0.5 + FINGER_GAP + (frames[0] as Texture2D).get_width() * k * 0.5),
-			-DROP * 0.5)
+			side * (width * 0.5 + width * FINGER_GAP_K
+				+ (frames[0] as Texture2D).get_width() * k * 0.5),
+			-_drop * 0.5)
 		add_child(f)
 		_half_w = maxf(_half_w,
 			absf(f.position.x) + (frames[0] as Texture2D).get_width() * k * 0.5)
-		_half_h = maxf(_half_h, absf(f.position.y) + DROP + FINGER_H * 0.5)
+		_half_h = maxf(_half_h, absf(f.position.y) + _drop + finger_h * 0.5)
 		_taps.append(_tap_cycle(f, frames))
 
 	# Мигание всей подсказки целиком: картинка и пальцы дышат вместе, иначе на
@@ -89,7 +97,7 @@ func setup(width: float = 190.0) -> void:
 func _tap_cycle(f: Sprite2D, frames: Array) -> Tween:
 	var y0 : float = f.position.y
 	var tw := f.create_tween().set_loops()
-	tw.tween_property(f, "position:y", y0 + DROP, DOWN_T) \
+	tw.tween_property(f, "position:y", y0 + _drop, DOWN_T) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tw.tween_callback(func():
 		if is_instance_valid(f):

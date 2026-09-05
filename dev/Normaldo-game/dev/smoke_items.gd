@@ -235,19 +235,54 @@ func _test_cone_tap() -> void:
 	if cone == null:
 		game.queue_free()
 		return
-	var tap : Sprite2D = cone.get("_tap_img")
-	var lbl : Label    = cone.get("_lbl")
-	_check(is_instance_valid(tap) and tap.visible, "и просит тапать картинкой TAP!")
+	# Подсказка — ОБЩИЙ КИРПИЧ с мини-играми (`tap_prompt.gd`): картинка TAP! и
+	# два тапающих пальца. Проверяется именно он, а не своя картинка: своя у
+	# конуса когда-то была, и просьба на нём читалась слабее, чем в мини-играх,
+	# где приём ровно тот же.
+	var tap : Node2D = cone.get("_prompt")
+	var lbl : Label  = cone.get("_lbl")
+	_check(is_instance_valid(tap) and tap.visible, "и просит тапать общей подсказкой")
+	var fingers := 0
+	for c in tap.get_children():
+		if c is Sprite2D and String((c as Sprite2D).texture.resource_path).contains("finger"):
+			fingers += 1
+	_check(fingers == 2, "и по бокам у неё два тапающих пальца: %d" % fingers)
 	_check(is_instance_valid(lbl) and lbl.visible and lbl.text != "",
 		"а число под ней говорит, сколько ещё раз: «%s»" % lbl.text)
 	# НАД числом, а не поверх него: цифра стоит в центре конуса.
 	_check(tap.position.y < lbl.position.y,
-		"картинка выше числа: %.0f против %.0f" % [tap.position.y, lbl.position.y])
+		"подсказка выше числа: %.0f против %.0f" % [tap.position.y, lbl.position.y])
+
+	# ЧИСЛО НЕ РАСТЁТ ПРИ СЖАТИИ. Меньший конус не может быть крепче большего,
+	# из которого он получился, — а до правки новое число бралось заново
+	# случайным из 5…10, и трёхрядный за пять тапов сжимался в двухрядный за
+	# десять.
+	var before : int = int(cone.get("_num"))
+	for _i in before:
+		cone.call("_tap")
+	_check(int(cone.get("_rows")) == 2, "конус сжался на ряд: %d" % int(cone.get("_rows")))
+	_check(int(cone.get("_num")) < before,
+		"и просит МЕНЬШЕ тапов, чем большой: %d против %d" % [int(cone.get("_num")), before])
 
 	cone.set("_rows", 1)
 	cone.call("_resize")
 	_check(not tap.visible and not lbl.visible,
 		"сжатый до одного ряда конус просить перестаёт")
+
+	# И СБИТЫЙ ПАДАЕТ, как любой другой предмет. Раньше `knock_down` у конуса не
+	# было вовсе, и `_kill_item` сносил его через `queue_free()`: трёхрядная
+	# махина просто исчезала из кадра.
+	#
+	# Проверяется ПОСЛЕДНИМ: падение уносит подсказку с собой, и после него
+	# спрашивать её видимость уже не у кого.
+	_check(cone.has_method("knock_down"), "конус умеет падать")
+	var y0 : float = cone.position.y
+	cone.call("knock_down")
+	for _i in 20:
+		await process_frame
+	var y1 : float = cone.position.y if is_instance_valid(cone) else y0
+	_check(is_instance_valid(cone) and y1 > y0,
+		"сбитый конус уходит вниз: %.0f → %.0f" % [y0, y1])
 	game.queue_free()
 	await process_frame
 
