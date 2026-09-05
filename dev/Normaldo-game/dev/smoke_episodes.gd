@@ -14,7 +14,7 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 19
+const EXPECTED_CHECKS : int = 21
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -134,6 +134,11 @@ func _test_finish() -> void:
 		"победа над боссом первого эпизода засчитала его: %d" % int(_save.get("episodes_done")))
 	_check(not _qm.call("is_endless_unlocked"),
 		"и бесконечный за один эпизод не открылся")
+	# Глава книги закрывается ИМЕННО этим эпизодом. Раньше её закрывала общая
+	# победа над боссом — с тремя боссами такое задание закрывалось бы первым же
+	# из них, и книга шла бы впереди игры.
+	_check(bool((_qm.get("story_completed") as Array)[_quest_idx("episode_done:1")]),
+		"и задание книги за первый эпизод закрылось")
 
 # В БЕСКОНЕЧНОМ третий босс не кончает забег, а переводит его в хвост: фон
 # замирает, спавнер уходит в супер хард. Ошибка тут громкая для игрока и тихая
@@ -160,6 +165,19 @@ func _test_hardcore_entry() -> void:
 	_check(not bool(bg.get("_scrolling")), "и фон остановился")
 	_check(int(_save.get("episodes_done")) == done_before,
 		"бесконечный не засчитывает эпизоды: %d" % int(_save.get("episodes_done")))
+	_check(bool((_qm.get("story_completed") as Array)[_quest_idx("hardcore_reached")]),
+		"и задание книги «Всё и сразу» закрылось хвостом")
+
+# Индекс сюжетного задания по его условию. По номеру искать нельзя: главы
+# книги перетасовывались уже дважды, и тест, прибитый к числу, переживает
+# перестановку молча — проверяя не то задание.
+func _quest_idx(cond: String) -> int:
+	var qs : Array = _qm.STORY_QUESTS
+	for i in qs.size():
+		if (qs[i] as Dictionary).get("cond", "") == cond:
+			return i
+	_check(false, "в книге нет задания с условием %s" % cond)
+	return 0
 
 func _finish() -> void:
 	print("")

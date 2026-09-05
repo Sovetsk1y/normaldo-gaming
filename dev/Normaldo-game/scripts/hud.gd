@@ -6930,7 +6930,10 @@ func _on_boss_defeated() -> void:
 		"time_in_run":    int(_elapsed_time),
 		"episode":        _run_episode,
 	})
-	QuestManager.notify_boss_defeated()
+	# Задания книги идут ПО ЭПИЗОДАМ: у каждого свой босс и своя глава, и главу
+	# закрывает именно этот эпизод, а не «любой босс». Общего задания «победи
+	# босса» больше нет — оно было написано, когда босс в игре был один.
+	QuestManager.notify_episode_done(_run_episode)
 	if SaveData.episodes_done >= _episode_count():
 		QuestManager.notify_campaign_complete()
 	_endless_unlock_pending = (not unlocked_before) and QuestManager.is_endless_unlocked()
@@ -7014,6 +7017,7 @@ func _enter_hardcore() -> void:
 		bg.call("stop_scrolling")
 
 	Analytics.event("hardcore_entered", { "time_in_run": int(_elapsed_time) })
+	QuestManager.notify_hardcore()
 	await _show_shout("СУПЕР ХАРД", "ВСЁ И СРАЗУ", HARDCORE_CARD_T,
 		Color(1.0, 0.42, 0.30), Color(1.0, 0.80, 0.55))
 

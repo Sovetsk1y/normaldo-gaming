@@ -1,44 +1,54 @@
 extends Node
 
 # ─── Story quest definitions ──────────────────────────────────────────────────
+# ── Книга учителя: главы ─────────────────────────────────────────────────────
+# Главы идут ПО ИГРЕ, а не по темам: первый полёт, три эпизода кампании по
+# порядку, бесконечный за ними и коллекция в конце. Раньше глав про эпизоды не
+# было вовсе — вся кампания умещалась в одну «Канализацию», а бесконечный
+# выдавался наградой за первого босса. Книга рассказывала про игру, которой уже
+# нет.
+#
+# В главе не больше четырёх заданий: страница разворота вмещает ровно столько
+# (см. dev/smoke_book.gd), а пятое ушло бы под сгиб.
 const CHAPTERS : Array = [
-	{ "title": "Глава 1 — Первый полёт",  "quests": [0, 1, 2] },
-	{ "title": "Глава 2 — Канализация",   "quests": [3, 4, 5, 6] },
-	{ "title": "Глава 3 — Жир как броня", "quests": [7, 8, 9, 10] },
-	{ "title": "Глава 4 — Бесконечность", "quests": [11, 12, 13] },
-	{ "title": "Глава 5 — Новый образ",   "quests": [14, 15, 16] },
-	{ "title": "Глава 6 — Легенда",       "quests": [17] },
+	{ "title": "Глава 1 — Первый полёт",   "quests": [0, 1, 2] },
+	{ "title": "Глава 2 — Канализация",    "quests": [3, 4, 5] },
+	{ "title": "Глава 3 — Улица",          "quests": [6, 7, 8] },
+	{ "title": "Глава 4 — Дорога в клуб",  "quests": [9, 10, 11, 12] },
+	{ "title": "Глава 5 — Бесконечность",  "quests": [13, 14, 15, 16] },
+	{ "title": "Глава 6 — Легенда",        "quests": [17, 18, 19, 20] },
 ]
 
 const STORY_QUESTS : Array = [
-	# ch1
+	# ch1 — первый полёт
 	{ "title": "Лети, Нормальдо!", "desc": "Запусти первый забег",              "cond": "run_started",       "reward_d": 200,  "reward_t": 0 },
 	{ "title": "Первый укус",      "desc": "Съешь 100 пицц за один забег",      "cond": "pizzas_run:100",    "reward_d": 400,  "reward_t": 0 },
-	{ "title": "Чуть пополнел",    "desc": "Достигни состояния Стройный",            "cond": "fat_reached:1",     "reward_d": 0,    "reward_t": 1 },
-	# ch2
+	{ "title": "Чуть пополнел",    "desc": "Достигни состояния Стройный",       "cond": "fat_reached:1",     "reward_d": 0,    "reward_t": 1 },
+	# ch2 — эпизод 1, канализация, нога ниндзя
 	{ "title": "Первая минута",    "desc": "Выживи 60 сек в кампании",          "cond": "campaign_time:60",  "reward_d": 500,  "reward_t": 0 },
-	{ "title": "На скорости",      "desc": "Выживи 3 минуты в кампании",        "cond": "campaign_time:180", "reward_d": 0,    "reward_t": 1 },
 	{ "title": "Не оглядывайся",   "desc": "Дойди до босса",                    "cond": "boss_reached",      "reward_d": 800,  "reward_t": 2 },
-	{ "title": "Ногой об голову",  "desc": "Победи NinjaFoot",                  "cond": "boss_defeated",     "reward_d": 0,    "reward_t": 0 },
-	# ch3
+	{ "title": "Ногой об голову",  "desc": "Пройди эпизод 1 — победи Ногу Ниндзя", "cond": "episode_done:1", "reward_d": 0,    "reward_t": 2 },
+	# ch3 — эпизод 2, улица, крокодил
+	{ "title": "На скорости",      "desc": "Выживи 3 минуты в кампании",        "cond": "campaign_time:180", "reward_d": 0,    "reward_t": 1 },
+	{ "title": "Жирнеем",          "desc": "Достигни состояния Жир",            "cond": "fat_reached:2",     "reward_d": 500,  "reward_t": 0 },
+	{ "title": "Зубы на улице",    "desc": "Пройди эпизод 2 — победи Крокодила", "cond": "episode_done:2",   "reward_d": 1000, "reward_t": 2 },
+	# ch4 — эпизод 3, двор перед клубом, хозяин клуба
 	{ "title": "Растём",           "desc": "Прокачай скин до 2-го уровня",      "cond": "skin_level:2",      "reward_d": 0,    "reward_t": 1 },
-	{ "title": "Жирнеем",          "desc": "Достигни состояния Жир",             "cond": "fat_reached:2",     "reward_d": 500,  "reward_t": 0 },
 	{ "title": "Пятёрочка",        "desc": "Прокачай скин до 5-го уровня",      "cond": "skin_level:5",      "reward_d": 0,    "reward_t": 2 },
-	{ "title": "Убер-режим",       "desc": "Достигни Убер жир",                  "cond": "fat_reached:3",     "reward_d": 800,  "reward_t": 1 },
-	# ch4
+	{ "title": "Убер-режим",       "desc": "Достигни Убер жир",                 "cond": "fat_reached:3",     "reward_d": 800,  "reward_t": 1 },
+	{ "title": "Кто тут хозяин",   "desc": "Пройди эпизод 3 — победи Хозяина клуба", "cond": "episode_done:3", "reward_d": 1500, "reward_t": 3 },
+	# ch5 — бесконечность
 	# Первым в главе стоит то, что саму главу и открывает. Раньше бесконечный
-	# выдавала победа над первым боссом («Ногой об голову»), и глава про
-	# бесконечность начиналась с задания «запусти бесконечный режим» — то есть с
-	# середины разговора. Теперь режим открывает ПРОЙДЕННАЯ КАМПАНИЯ, и глава
-	# начинается ровно с этого.
-	{ "title": "Кампания пройдена",    "desc": "Пройди все три эпизода",           "cond": "campaign_complete", "reward_d": 0,    "reward_t": 3, "reward_endless": true },
+	# выдавала победа над ПЕРВЫМ боссом, и глава про бесконечность начиналась с
+	# задания «запусти бесконечный режим» — то есть с середины разговора.
+	{ "title": "Кампания пройдена",    "desc": "Пройди все три эпизода",            "cond": "campaign_complete", "reward_d": 0,    "reward_t": 3, "reward_endless": true },
 	{ "title": "Пробуй бесконечность", "desc": "Запусти бесконечный режим",         "cond": "endless_started",   "reward_d": 400,  "reward_t": 0 },
-	{ "title": "Выживший",         "desc": "Выживи 5 минут в бесконечном режиме",          "cond": "endless_time:300",  "reward_d": 1000, "reward_t": 2 },
-	# ch5
+	{ "title": "Всё и сразу",          "desc": "Дойди до СУПЕР ХАРДА в бесконечном", "cond": "hardcore_reached", "reward_d": 1500, "reward_t": 3 },
+	{ "title": "Выживший",             "desc": "Выживи 5 минут в бесконечном режиме", "cond": "endless_time:300", "reward_d": 1000, "reward_t": 2 },
+	# ch6 — коллекция и мастерство
 	{ "title": "Новый облик",      "desc": "Купи любой скин в магазине",        "cond": "skin_bought",       "reward_d": 0,    "reward_t": 1 },
 	{ "title": "Дёргай ручку",     "desc": "Сыграй в автомат",                  "cond": "slot_played",       "reward_d": 200,  "reward_t": 0 },
 	{ "title": "Три в ряд",        "desc": "Получи совпадение ×3 в автомате",   "cond": "slot_triple",       "reward_d": 0,    "reward_t": 2 },
-	# ch6
 	{ "title": "Мастер улиц",      "desc": "Достигни 10-го уровня скина",       "cond": "skin_level:10",     "reward_d": 3000, "reward_t": 5 },
 ]
 
@@ -131,7 +141,7 @@ var _story_campaign180_done : bool = false
 # Сюжетное задание, за которым числится награда «бесконечный режим». Сам режим
 # открывается не им, а прогрессом эпизодов (см. `is_endless_unlocked`) — этот
 # индекс нужен книге, чтобы подписать награду словами, и дев-сбросу.
-const ENDLESS_UNLOCK_QUEST_IDX : int = 11  # "Кампания пройдена"
+const ENDLESS_UNLOCK_QUEST_IDX : int = 13  # "Кампания пройдена"
 
 func _ready() -> void:
 	story_completed.resize(STORY_QUESTS.size())
@@ -163,7 +173,8 @@ func is_endless_cond(cond_key: String) -> bool:
 	return cond_key == "endless_today" \
 		or cond_key == "endless_secs" \
 		or cond_key == "endless_started" \
-		or cond_key == "endless_time"
+		or cond_key == "endless_time" \
+		or cond_key == "hardcore_reached"
 
 # ─── Day reset ────────────────────────────────────────────────────────────────
 func _check_day_reset() -> void:
@@ -540,6 +551,20 @@ func notify_campaign_phase(phase: int) -> void:
 	_check_daily_cond("campaign_nodmg")
 	quests_updated.emit()
 
+# Эпизод пройден. Условие с номером, а не отдельное на каждый: сюжетная ветка
+# уже умеет «больше или равно» (см. `_check_story`), и пройденный третий эпизод
+# закрывает задания за первый и второй, если игрок дошёл до них без книги.
+func notify_episode_done(episode: int) -> void:
+	if episode <= 0:
+		return
+	_check_story("episode_done:%d" % episode)
+	quests_updated.emit()
+
+# Дошёл до хвоста бесконечного.
+func notify_hardcore() -> void:
+	_check_story("hardcore_reached")
+	quests_updated.emit()
+
 func notify_campaign_complete() -> void:
 	_run_complete = true
 	_check_story("campaign_complete")
@@ -548,10 +573,6 @@ func notify_campaign_complete() -> void:
 
 func notify_boss_reached() -> void:
 	_check_story("boss_reached")
-	quests_updated.emit()
-
-func notify_boss_defeated() -> void:
-	_check_story("boss_defeated")
 	quests_updated.emit()
 
 func notify_endless_time(secs: float) -> void:
