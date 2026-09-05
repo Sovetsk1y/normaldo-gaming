@@ -1,0 +1,159 @@
+extends SceneTree
+
+# Headless-проверка СТАТУС-ЭФФЕКТОВ.
+#   godot --headless --path . --script res://dev/smoke_status.gd
+#
+# Проверяется не «красиво ли», а два контракта, которые ломаются молча:
+#   1. У каждого состояния есть свой значок, и он ВКЛЮЧАЕТСЯ вместе с
+#      состоянием и ГАСНЕТ вместе с ним. Не погасший значок — это уже не
+#      украшение, а вранье: игрок читает «я замедлен», когда он уже нет.
+#   2. Кадры всех эффектов на месте. Папку легко потерять при переносе
+#      ассетов, а `attach` в этом случае молча вернёт null — на экране просто
+#      ничего не появится, и заметить это можно только глазами и случайно.
+
+var _fails  : int = 0
+var _checks : int = 0
+const EXPECTED_CHECKS : int = 14
+
+# Все эффекты, которые обязаны лежать на диске. Список ЗДЕСЬ, а не читается из
+# папки: тест, спрашивающий у папки, что в ней лежит, согласен с любой папкой.
+const WANT : Array = ["slow", "curse", "shield", "armor", "heal", "stun",
+	"shock", "rage", "blessed", "charm"]
+
+func _check(ok: bool, what: String) -> void:
+	_checks += 1
+	if ok:
+		print("  ok   ", what)
+	else:
+		_fails += 1
+		print("  FAIL ", what)
+
+var _n : Node2D = null
+
+func _initialize() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	await process_frame
+	_n = game.get_node_or_null("Normaldo")
+	if _n == null:
+		print("  FAIL сцена не собралась")
+		quit(1)
+		return
+
+	print("── Кадры на диске ──")
+	_test_assets()
+	print("── Состояние включает и гасит значок ──")
+	await _test_slow()
+	await _test_confusion()
+	print("── Мгновенные значки ──")
+	await _test_burst()
+	print("── Смена режима снимает всё ──")
+	await _test_clear()
+	_finish()
+
+func _test_assets() -> void:
+	var missing : Array = []
+	for name in WANT:
+		for i in StatusFx.FRAMES:
+			var p : String = (StatusFx.DIR % name) + "%02d.png" % i
+			if not ResourceLoader.exists(p):
+				missing.append("%s/%02d" % [name, i])
+	_check(missing.is_empty(), "все %d кадров у %d эффектов на месте: %s"
+		% [StatusFx.FRAMES, WANT.size(), "нет " + str(missing) if missing else "да"])
+	var sf := StatusFx._sprite_frames("slow")
+	_check(sf != null and sf.get_frame_count("default") == StatusFx.FRAMES,
+		"кадры собираются в анимацию: %d" % (sf.get_frame_count("default") if sf else -1))
+	_check(sf != null and sf.get_animation_loop("default"),
+		"и она зациклена — статус висит, пока висит состояние")
+
+# Замедление: банан кладёт значок, время его снимает.
+func _test_slow() -> void:
+	_check(not _has("slow"), "на старте значка замедления нет")
+	_n.call("apply_slow", 0.5)
+	await _wait_frames(3)
+	_check(_has("slow"), "замедлили — значок появился")
+	_check(_fx("slow").get_parent() == _n.get_parent(),
+		"он у РОДИТЕЛЯ, а не ребёнок головы: голову красят в фиолетовый и качают")
+	# Значок обязан ехать за головой, иначе он читается как предмет рядом.
+	var was : Vector2 = _fx("slow").global_position
+	_n.position += Vector2(60.0, 0.0)
+	await _wait_frames(2)
+	_check(_fx("slow").global_position != was
+			and _fx("slow").global_position.distance_to(_n.global_position) < 1.0,
+		"и едет ровно за головой")
+	await _wait_real(1.0)
+	_check(not _has("slow"), "замедление кончилось — значок погас")
+
+# Проклятие шамана: то же самое, но состояние живёт своим таймером.
+func _test_confusion() -> void:
+	_n.call("apply_invert", 0.4)
+	await _wait_frames(3)
+	_check(_has("curse"), "перевёрнутое управление — свой значок")
+	await _wait_real(1.0)
+	_check(not _has("curse"), "и он гаснет вместе с реверсом")
+
+# Мгновенные значки: появляются и убирают себя сами.
+func _test_burst() -> void:
+	var host : Node = _n.get_parent()
+	var before : int = _count_fx(host)
+	StatusFx.burst(host, _n.global_position, "shield", 90.0)
+	await _wait_frames(2)
+	_check(_count_fx(host) == before + 1, "щит появился одним узлом")
+	# Круг анимации — FRAMES/FPS секунд РЕАЛЬНОГО времени.
+	await _wait_real(float(StatusFx.FRAMES) / StatusFx.FPS + 0.5)
+	_check(_count_fx(host) == before, "и убрал себя сам, без чужой помощи")
+
+func _test_clear() -> void:
+	_n.call("apply_slow", 5.0)
+	_n.call("apply_invert", 5.0)
+	# Замедление включает значок не в момент вызова, а на ближайшем такте: оно
+	# ловится по ПЕРЕХОДУ состояния в `_physics_process`, а не событием. Один
+	# такт тут и ждём — иначе тест проверяет момент до включения.
+	await _wait_frames(3)
+	_check(_has("slow") and _has("curse"), "два состояния — два значка")
+	_n.call("begin_slots_mode")
+	_check(not _has("slow") and not _has("curse"),
+		"уход в мини-игру снял оба: там этих состояний нет")
+
+# ── Мелочи ───────────────────────────────────────────────────────────────────
+
+func _fx(name: String) -> Node2D:
+	var d : Dictionary = _n.get("_status_fx")
+	var n = d.get(name)
+	return n if (n != null and is_instance_valid(n)) else null
+
+func _has(name: String) -> bool:
+	return _fx(name) != null
+
+func _count_fx(host: Node) -> int:
+	var n := 0
+	for c in host.get_children():
+		if c is AnimatedSprite2D:
+			n += 1
+	return n
+
+func _wait_frames(k: int) -> void:
+	for _i in k:
+		get_root().get_tree().paused = false
+		await process_frame
+
+# Ждём РЕАЛЬНОЕ время: и таймеры состояний, и таймер самоуничтожения значка
+# живут в секундах, а не в кадрах.
+func _wait_real(sec: float) -> void:
+	var t0 : int = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < int(sec * 1000.0):
+		get_root().get_tree().paused = false
+		await process_frame
+
+func _finish() -> void:
+	print("")
+	if _checks < EXPECTED_CHECKS:
+		print("ПРОВАЛ: проверок %d из %d — тест не отработал" % [_checks, EXPECTED_CHECKS])
+		quit(1)
+		return
+	if _fails == 0:
+		print("ВСЁ ЗЕЛЁНОЕ (проверок: %d)" % _checks)
+	else:
+		print("ПРОВАЛОВ: ", _fails)
+	quit(1 if _fails > 0 else 0)

@@ -164,14 +164,12 @@ func _test_state(game: Node, normaldo: Node, save: Node, spawner: Node) -> void:
 
 	# Опечатка в теге резиста молча выключает его навсегда: `_area_tag` просто
 	# никогда не вернёт такую строку, резист не сработает, а метки не будет.
-	# Поэтому сверяем теги ВСЕХ скинов со словарём, который умеет разбирать
-	# `normaldo._area_tag` (список ниже повторяет его).
-	var known : Array = [
-		"fire", "glove", "snake", "bum", "dog", "thief", "compass", "cone",
-		"handcuffs", "black_ace", "loser_ticket", "ninja", "safe", "cocktail",
-		"cop", "poison", "bird", "helm", "shaman", "slowing",
-		"banana", "beer", "trash", "stone",
-	]
+	# Поэтому сверяем теги ВСЕХ скинов с тем, что `_area_tag` умеет разбирать.
+	#
+	# Список берём ИЗ САМОГО normaldo.gd. Здесь стояла его копия, и она честно
+	# разошлась с оригиналом в первый же раз, когда список пополнили: тест ловил
+	# не «тег не разбирается», а «тег не переписали в тест».
+	var known : Array = normaldo.TAG_GROUPS + normaldo.TAG_EXTRA
 	var bad : Array = []
 	var reg : Node = get_root().get_node_or_null("SkinRegistry")
 	for sk in reg.SKINS:

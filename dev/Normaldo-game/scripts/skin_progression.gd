@@ -35,6 +35,7 @@ const ITEM_NAMES : Dictionary = {
 	"bum": "бомж", "snake": "змея", "thief": "вор", "compass": "компас",
 	"glove": "перчатка", "dog": "собака", "cop": "коп", "handcuffs": "наручники",
 	"poison": "яд", "bird": "птица", "helm": "штурвал", "shaman": "шаман",
+	"bottle": "бутылка",
 	"black_ace": "чёрная карта", "loser_ticket": "чек лузера",
 }
 
@@ -110,7 +111,11 @@ func _init() -> void:
 		},
 		"wizard": {
 			2: _FAT_MAX, 3: _money(100, 2), 4: _imm("snake"), 5: _money(100, 2),
-			6: _imm("poison"), 7: _money(100, 2), 8: _imm("bum"), 9: _money(100, 3),
+			# Было `poison` — яд из раскладки убран, и резист висел наградой ни
+			# за что. Бутылка ближе магу и по смыслу: он варит зелья покрепче,
+			# чем разлитое под ноги пойло, — и она есть на втором уровне, то
+			# есть награда встречается в игре, а не числится на бумаге.
+			6: _imm("bottle"), 7: _money(100, 2), 8: _imm("bum"), 9: _money(100, 3),
 			10: _perk("time_slow", "ОСТАНОВКА ВРЕМЕНИ",
 				"Раз в 30 секунд время само замедляется на 3 секунды"),
 		},
@@ -235,6 +240,7 @@ const RESIST_ICONS : Dictionary = {
 	"cocktail": preload("res://assets/items/cocktail.png"),
 	"cop": preload("res://assets/items/cop.png"),
 	"poison": preload("res://assets/items/poison.png"),
+	"bottle": preload("res://assets/items/letter_bottle.png"),
 	"bird": preload("res://assets/items/bird.png"),
 	"helm": preload("res://assets/skills/ship_wheel.png"),
 	"shaman": preload("res://assets/items/shaman.png"),

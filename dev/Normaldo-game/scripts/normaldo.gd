@@ -419,6 +419,10 @@ func _refresh_fat_sprite() -> Vector2:
 func play_fat_morph() -> void:
 	if not is_instance_valid(_sprite):
 		return
+	# Оба вызова этой функции означают ОДНО: жир вырос. Худеет Нормальдо без
+	# морфа, поэтому зелёный плюс здесь никогда не соврёт «поправился», когда на
+	# самом деле отняли.
+	StatusFx.burst(get_parent(), global_position, "heal", _art_px() * 1.6)
 	_morphing = true
 	var spr := _sprite
 	var start_rot := spr.rotation
@@ -607,6 +611,9 @@ func begin_fat_boss() -> void:
 	_touch_count      = 0
 	_slow_remaining   = 0.0
 	_magnet_remaining = 0.0
+	# Мини-игра — другой режим целиком: висящее с забега замедление или
+	# проклятие там означало бы состояние, которого в ней нет.
+	_status_clear()
 	_cleanup_attract_sparks()
 	if is_instance_valid(_gauge) and _gauge.has_method("hide_gauge"):
 		_gauge.hide_gauge()
@@ -678,6 +685,7 @@ func begin_slots_mode() -> void:
 	_touch_count      = 0
 	_slow_remaining   = 0.0
 	_magnet_remaining = 0.0
+	_status_clear()
 	_region_max_x     = -1.0
 	_ignored_touches.clear()
 	# Make sure resists / active / passive are configured for this skin so they
@@ -1125,8 +1133,16 @@ func _physics_process(delta: float) -> void:
 		_speed_boost_remaining -= delta
 	if _invert_remaining > 0.0:
 		_invert_remaining -= delta
-		if _invert_remaining <= 0.0 and _music_reversed:
-			_set_music_reversed(false)
+		if _invert_remaining <= 0.0:
+			_status_off("curse")
+			if _music_reversed:
+				_set_music_reversed(false)
+	# Значки статусов живут у родителя и потому не едут за головой сами —
+	# двигаем их здесь, в том же такте, что и саму голову: значок, отстающий на
+	# кадр, читается как отдельный предмет рядом.
+	if not _status_fx.is_empty():
+		_status_sync()
+
 	var is_slowed := _slow_remaining > 0.0
 	if is_slowed != _was_slowed:
 		_was_slowed = is_slowed
@@ -1198,9 +1214,10 @@ func _physics_process(delta: float) -> void:
 
 func _on_slow_start() -> void:
 	_sway_t = 0.0
+	_status_on("slow")
 
 func _on_slow_end() -> void:
-	pass
+	_status_off("slow")
 
 # ── Proximity (mouth open/close) ──────────────────────────────────────────────
 
@@ -1487,6 +1504,16 @@ func apply_invert(duration: float) -> void:
 	_invert_remaining = maxf(_invert_remaining, duration)
 	start_skill_cd("compass", _invert_remaining)   # кружок-кулдаун в HUD
 	_show_floating_text("РЕВЕРС!", Color(0.85, 0.5, 1.0))
+	# Строка уезжает за полсекунды, а управление перевёрнуто три: всё время
+	# между этим игрок думал, что игра сломалась. Значок висит ровно столько,
+	# сколько держится состояние.
+	#
+	# Значок именно ПРОКЛЯТИЯ: этим словом игра и называет эффект шамана (см.
+	# hazard_item.gd), и брать под него картинку с другим названием значит
+	# рассказывать про два разных эффекта. Пробовали «путаницу» — у неё рисунок
+	# занимает малую долю кадра, и над головой висела дымка, которой в потоке не
+	# видно.
+	_status_on("curse", 2.0)
 	if not _music_reversed:
 		_set_music_reversed(true)
 
@@ -1519,19 +1546,31 @@ func hazard_hit(dmg: int = 1) -> void:
 
 # ── Skill system helpers ──────────────────────────────────────────────────────
 
+# Группы, по которым опознаётся предмет для резиста. Список расширен под
+# иммунитеты из лестницы скинов (см. skin_progression.gd) — раньше тегов было
+# четыре, и «иммунитет к вору» было просто не на что навесить.
+#
+# Порядок важен: коктейль, яд и бутылка лежат ЕЩЁ и в slowing/obstacle, поэтому
+# их собственные группы обязаны проверяться раньше общих.
+#
+# Константа, а не список внутри функции: опечатка в теге резиста молча выключает
+# его навсегда — `_area_tag` просто никогда не вернёт такую строку. Сверяет это
+# `dev/smoke_run_hud.gd`, и он читает список ОТСЮДА. Своя копия там уже была, и
+# она разошлась с этой в первый же раз, когда список пополнили.
+const TAG_GROUPS : Array = ["fire", "glove", "snake", "bum", "dog", "thief",
+	"compass", "cone", "handcuffs", "black_ace", "loser_ticket", "ninja",
+	"safe", "cocktail", "cop", "poison", "bird", "helm", "shaman",
+	"bottle", "slowing"]
+
+# Теги, которые `_area_tag` возвращает НЕ по имени группы: замедляющие
+# разделяются на банан и пиво по звуку, бочка и камень опознаются по картинке.
+const TAG_EXTRA : Array = ["banana", "beer", "trash", "stone"]
+
 func _area_tag(area: Area2D) -> String:
 	var t = area.get("skin_tag")
 	if t != null and str(t) != "": return str(t)
 	if area.has_meta("item_tag"): return str(area.get_meta("item_tag"))
-	# По группам. Список расширен под иммунитеты из лестницы скинов
-	# (см. skin_progression.gd) — раньше тегов было четыре, и «иммунитет к вору»
-	# было просто не на что навесить.
-	# Порядок важен: коктейль и яд лежат ЕЩЁ и в slowing/obstacle, поэтому их
-	# собственные группы обязаны проверяться раньше общих.
-	for grp in ["fire", "glove", "snake", "bum", "dog", "thief", "compass", "cone",
-			"handcuffs", "black_ace", "loser_ticket", "ninja",
-			"safe", "cocktail", "cop", "poison", "bird", "helm", "shaman",
-			"slowing"]:
+	for grp in TAG_GROUPS:
 		if area.is_in_group(grp):
 			# Замедляющие делятся на банан и пиво — их различает звук предмета.
 			if grp == "slowing":
@@ -1667,6 +1706,11 @@ func _trigger_resist(tag: String, area: Area2D) -> void:
 	_skill_audio.volume_db = -6.0
 	_skill_audio.play()
 	_vfx_resist_break(area.global_position)
+	# Щит на ГОЛОВЕ, а не на предмете. Резист — это свойство Нормальдо, и
+	# показывать его там, где разлетелся предмет, значит рассказывать про
+	# предмет: игрок видел разбитую бочку и не понимал, почему у него не отняли
+	# жир. Осколки остаются на месте удара, щит вспыхивает на том, кого он спас.
+	StatusFx.burst(get_parent(), global_position, "shield", _art_px() * 2.0)
 	_show_floating_text("РЕЗИСТ!", Color(0.95, 0.32, 0.28))
 	# Выкрик — не вместо строки, а вместе с ней: строка говорит, ЧТО произошло,
 	# рисунок — как к этому относится Нормальдо.
@@ -2062,7 +2106,11 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 			# Викинг: кулак проходит дугой вплотную перед собой. Позы каста у
 			# него нет (см. _POSE_SKIP) — кулак ровно один, и он движется.
 			# Радиус и кулак у него СВОИ: «взрывной кулак» обязан сносить три
-			# цели, а не одну (см. VIKING_MELEE_RADIUS).
+			# цели, а не одну (см. VIKING_MELEE_RADIUS). Взрыв у него теперь и
+			# виден: по площади на три цели, а выглядел он ровно как одиночный
+			# тычок Тайсона.
+			StatusFx.burst(get_parent(), global_position + dir.normalized() * _art_px() * 0.6,
+				"rage", _art_px() * 1.9)
 			_cast_melee(dir, 92.0, true, VIKING_MELEE_RADIUS, VIKING_FIST_PX)
 			_play_skill_sfx(SkinSkills.COUNTER)
 		"glove_punch":
@@ -2070,6 +2118,10 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 			# целиком, и второй кулак поверх рисунка только мешал. Вместо
 			# снаряда — доворот головы к точке тапа.
 			_snap_face_to(dir)
+			# Ярость на кулаке: удар нарисован позой, и без вспышки он читается
+			# как смена картинки, а не как замах.
+			StatusFx.burst(get_parent(), global_position + dir.normalized() * _art_px() * 0.5,
+				"rage", _art_px() * 1.4)
 			_cast_melee(dir, 78.0, false)
 			_play_skill_sfx(SkinSkills.COUNTER)
 		"shovel_throw":
@@ -2463,6 +2515,10 @@ func _cast_electric_dash(target: Vector2) -> void:
 	_dash_from   = global_position
 	_dash_prev   = global_position
 	_dash_trail  = _make_dash_trail()
+	# Молния бьёт в ТОЧКЕ СТАРТА, а не летит вместе с головой: рывок и так
+	# оставляет след, а вспышка на месте отрыва показывает, ОТКУДА он ушёл, —
+	# без неё на экране просто телепорт.
+	StatusFx.burst(get_parent(), global_position, "shock", _art_px() * 1.8)
 	_show_floating_text("ЗЗЗАП!", DASH_COL)
 	_play_skill_sfx(SkinSkills.DODGE)
 	var vp := get_viewport_rect().size
@@ -3011,6 +3067,67 @@ func _vfx_particles(skill_type: String) -> void:
 	tw.tween_interval(p.lifetime + 0.1)
 	tw.tween_callback(p.queue_free)
 
+# ── Статусы на голове ────────────────────────────────────────────────────────
+# Состояния Нормальдо (замедлен, проклят, под пассивкой) до сих пор были видны
+# косвенно: по фиолетовому оттенку, по одной уехавшей строке, по тому, что
+# голова хуже слушается. Игрок в потоке этого не читает — он читает картинку НА
+# голове. Каждому состоянию свой значок (см. status_fx.gd).
+var _status_fx : Dictionary = {}     # имя эффекта -> узел
+
+# Эффекты живут у РОДИТЕЛЯ, а не детьми головы, по двум причинам: голова во
+# время замедления красится в фиолетовый, и `modulate` покрасил бы вместе с ней
+# значок; и голова качается — кольцо вокруг качающейся головы читается как
+# сползшее, а не как кольцо.
+func _status_on(name: String, k: float = 1.7, dy: float = 0.0,
+		tint : Color = Color(1, 1, 1)) -> void:
+	if _status_fx.has(name) and is_instance_valid(_status_fx[name]):
+		return
+	var host := get_parent()
+	if host == null:
+		return
+	var n := StatusFx.attach(host, name, _art_px() * k, Vector2.ZERO, 39, tint)
+	if n == null:
+		return
+	n.set_meta("dy", dy)
+	_status_fx[name] = n
+	_status_sync()
+
+func _status_off(name: String) -> void:
+	var n = _status_fx.get(name)
+	if n != null and is_instance_valid(n):
+		n.queue_free()
+	_status_fx.erase(name)
+
+func _status_clear() -> void:
+	for k in _status_fx.keys():
+		_status_off(str(k))
+
+func _status_sync() -> void:
+	for k in _status_fx.keys():
+		var n = _status_fx[k]
+		if n == null or not is_instance_valid(n):
+			_status_fx.erase(k)
+			continue
+		n.global_position = global_position + Vector2(0.0, float(n.get_meta("dy", 0.0)))
+
+# Размер РИСУНКА головы на экране. Кадр 1000×1000 в основном пустой (см.
+# `_worn_crown_y`), поэтому значок статуса меряется по непрозрачной рамке, а не
+# по кадру: иначе на одном скине он колечко на макушке, на другом — во весь
+# экран. `get_image` на каждый вызов дорог, а статусы включаются и гаснут часто,
+# поэтому меряем раз на текстуру.
+var _art_px_cache : Dictionary = {}
+
+func _art_px() -> float:
+	if _sprite == null or _sprite.texture == null:
+		return 120.0
+	var key : String = _sprite.texture.resource_path
+	var base : float = float(_art_px_cache.get(key, -1.0))
+	if base < 0.0:
+		var used : Rect2i = _sprite.texture.get_image().get_used_rect()
+		base = float(maxi(used.size.x, used.size.y))
+		_art_px_cache[key] = base
+	return maxf(base * _sprite.scale.x, 40.0)
+
 func _vfx_dodge_flash() -> void:
 	var tw := create_tween()
 	tw.tween_property(_sprite, "modulate", Color(0.40, 0.80, 1.00), 0.05)
@@ -3263,6 +3380,12 @@ func _pulse_fat() -> void:
 	shake_tw.tween_property(_sprite, "position:x", 0.0, 0.024)
 
 func _flash_hit() -> void:
+	# Звёздочки над головой — на КАЖДЫЙ удар, потому что это единственная точка,
+	# через которую проходят все ветки урона (обычный удар, огонь, второй шанс,
+	# дев-бессмертие). Вешать их по местам столкновений значило бы забыть
+	# половину.
+	StatusFx.burst(get_parent(), global_position + Vector2(0.0, -_art_px() * 0.55),
+		"stun", _art_px() * 1.1)
 	var tween := create_tween()
 	tween.set_loops(5)
 	tween.tween_property(_sprite, "modulate", Color(1.0, 0.25, 0.25), 0.12)
@@ -3381,6 +3504,10 @@ func _begin_scars(duration: float, gated: bool) -> void:
 	if gated:
 		start_skill_cd("scars_recharge", 60.0)
 	_show_floating_text("НЕУЯЗВИМ!", Color(0.65, 0.25, 1.0))
+	# Маска на голове говорит «маска надета», а не «удары не проходят». Пластины
+	# брони поверх — это уже про урон, и гаснут они ровно тогда, когда окно
+	# неуязвимости кончилось.
+	_status_on("armor", 1.9)
 	if not is_instance_valid(_scars_mask):
 		_spawn_scars_mask()
 	get_tree().create_timer(duration).timeout.connect(func():
@@ -3479,6 +3606,7 @@ func _end_scars() -> void:
 	_scars_active = false
 	_scars_token += 1
 	_invincible   = false
+	_status_off("armor")
 	_skill_cd.erase("passive:scars")   # badge vanishes
 	_drop_scars_mask()
 
@@ -3534,6 +3662,7 @@ func _show_x3_popup(pos: Vector2) -> void:
 func _die() -> void:
 	_dead = true
 	_touching = false
+	_status_clear()
 	_gauge.hide_gauge()
 	_sprite.modulate = Color(0.8, 0.0, 0.0, 0.5)
 	var death_stream = load("res://assets/audio/death.mp3")
@@ -3681,6 +3810,11 @@ func _on_area_entered(area: Area2D) -> void:
 			_collect_dollar()
 		area.queue_free()
 	elif area.is_in_group("money_bag"):
+		# Мешок — самая редкая добыча в потоке, и до сих пор он отличался от
+		# доллара только тем, что долларов из него сыпалось много. Нимб на
+		# подборе отмечает САМ момент: игрок понимает, что поймал не мелочь,
+		# ещё до того, как деньги долетят до счётчика.
+		StatusFx.burst(get_parent(), global_position, "blessed", _art_px() * 2.0)
 		var mult := 2 if (SaveData.active_skin == "pirate") else 1
 		if mult > 1:
 			_vfx_particles(SkinSkills.TRANSFORM)
