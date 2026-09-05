@@ -1097,23 +1097,36 @@ func _on_dev_prize_test() -> void:
 
 # ── Server fetch ─────────────────────────────────────────────────────────────
 
+# Сколько ждём авторизацию, прежде чем сдаться. Стояло ПОЛСЕКУНДЫ, и это было
+# мало по устройству дела: на холодном запуске клиент успевает сходить к Google
+# за анонимным входом и обратно к своим функциям за профилем — два похода по
+# сети, каждый со своим таймаутом в 12 секунд. Экран сдавался раньше, чем связь
+# успевала состояться, и писал «нет связи» там, где связь просто не успела.
+const AUTH_WAIT_SEC : float = 8.0
+
 func _fetch_from_server_async() -> void:
 	if _fetch_busy:
 		return
 	if not LeaderboardClient.is_ready():
-		# Auth still pending — wait, then retry
-		await get_tree().create_timer(0.5).timeout
+		var t0 : int = Time.get_ticks_msec()
+		while not LeaderboardClient.is_ready() \
+				and Time.get_ticks_msec() - t0 < int(AUTH_WAIT_SEC * 1000.0):
+			await get_tree().create_timer(0.2).timeout
+			if not is_instance_valid(self):
+				return
 		if not LeaderboardClient.is_ready():
-			_show_empty_state("Таблица не пришла: нет связи с сервером.\nПопробуй позже — результат забега уже засчитан.")
+			_show_empty_state("Таблица не пришла: не удалось войти на сервер.",
+				LeaderboardClient.last_error())
 			return
 	_fetch_busy = true
 	var captured_metric := _active_metric
 	var resp = await LeaderboardClient.fetch_leaderboard(captured_metric, 100)
 	_fetch_busy = false
 	if not resp.ok:
-		push_warning("[Leaderboard] fetch failed: %s" % str(resp.get("error", "")))
+		var why : String = LeaderboardClient.explain(resp)
+		Logger.warn("Leaderboard", "getLeaderboard failed: %s" % why)
 		if captured_metric == _active_metric:
-			_show_empty_state("Таблица не пришла: сервер не ответил.\nПопробуй позже — результат забега уже засчитан.")
+			_show_empty_state("Таблица не пришла: %s." % why, "")
 		return
 	_server_rows[captured_metric]  = resp.data.get("rows", [])
 	_server_total[captured_metric] = int(resp.data.get("total_players", 0))
@@ -1123,7 +1136,11 @@ func _fetch_from_server_async() -> void:
 # Сервер не ответил (нет сети, не поднялась авторизация, ошибка) — так и
 # говорим. Здесь стояла подстановка двухсот выдуманных строк, неотличимых от
 # настоящих; экран, который врёт молча, хуже экрана, который честно пуст.
-func _show_empty_state(reason: String) -> void:
+# `reason` — что случилось человеческим языком, `detail` — техническая причина
+# мелким шрифтом. Раньше строка была одна на все беды («сервер не ответил»), и по
+# ней нельзя было ни починить, ни понять, к кому идти: нет сети, не развёрнута
+# функция и отказ в доступе выглядели одинаково.
+func _show_empty_state(reason: String, detail: String = "") -> void:
 	for c in _content.get_children():
 		c.queue_free()
 	_build_podium([])
@@ -1134,7 +1151,7 @@ func _show_empty_state(reason: String) -> void:
 	lbl.add_theme_font_override("font", UI_FONT)
 	lbl.add_theme_font_size_override("font_size", 14)
 	_apply_text_fx(lbl)
-	lbl.text                 = reason
+	lbl.text                 = reason + "\nПопробуй позже — результат забега уже засчитан."
 	lbl.modulate             = Color(0.62, 0.62, 0.68)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
@@ -1142,6 +1159,19 @@ func _show_empty_state(reason: String) -> void:
 	lbl.size                 = Vector2(vp_w, _scroll.size.y)
 	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	_content.add_child(lbl)
+	if detail != "":
+		var det := Label.new()
+		det.add_theme_font_override("font", UI_FONT)
+		det.add_theme_font_size_override("font_size", 10)
+		_apply_text_fx(det)
+		det.text                 = detail
+		det.modulate             = Color(0.45, 0.45, 0.52)
+		det.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		det.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
+		det.size                 = Vector2(vp_w, 40.0)
+		det.position             = Vector2(0.0, _scroll.size.y * 0.5 + 34.0)
+		det.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+		_content.add_child(det)
 
 func _show_loading_state() -> void:
 	for c in _content.get_children():

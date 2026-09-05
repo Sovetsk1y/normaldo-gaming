@@ -268,9 +268,39 @@ func _set_state(s: int) -> void:
 	_state = s
 	state_changed.emit(s)
 
+# Последняя причина отказа — словами. Держим её, потому что экран лидеров без
+# неё показывал одну строку «сервер не ответил» на пять разных бед: нет сети,
+# не поднялась авторизация, функция не развёрнута, сервер отказал, сервер
+# ответил не-JSON. По такой строке нельзя ни починить, ни даже понять, к кому
+# идти.
+var _last_error : String = ""
+
+func last_error() -> String:
+	return _last_error
+
 func _fail(op: String, err) -> void:
+	_last_error = "%s: %s" % [op, str(err)]
 	push_error("[LeaderboardClient] %s failed: %s" % [op, str(err)])
 	_set_state(State.ERROR)
+
+# Причина отказа вызова, годная для показа человеку. Коды HTTP переводятся в то,
+# что они на самом деле означают для этого клиента.
+func explain(resp: Dictionary) -> String:
+	var status : int = int(resp.get("status", 0))
+	var err : String = str(resp.get("error", ""))
+	if status == 404:
+		return "функция не развёрнута на сервере (404)"
+	if status == 401 or status == 403:
+		return "сервер отказал в доступе (%d)" % status
+	if status >= 500:
+		return "сервер ответил ошибкой (%d)" % status
+	if err.begins_with("http_result="):
+		return "нет связи с сервером (%s)" % err
+	if err.begins_with("request enqueue failed"):
+		return "запрос не ушёл (%s)" % err
+	if status > 0:
+		return "%d: %s" % [status, err]
+	return err
 
 func _await_ready() -> void:
 	if _state == State.READY: return
@@ -298,10 +328,12 @@ func _call_function(name: String, data: Dictionary) -> Dictionary:
 	var body := JSON.stringify({"data": data})
 	var resp := await _http_json(url, headers, body)
 	if not resp.ok:
+		_last_error = "%s: %s" % [name, explain(resp)]
 		return resp
 	# Callable wraps payload as { result: {...} } or { error: {...} }
 	var raw : Dictionary = resp.data
 	if raw.has("error"):
+		_last_error = "%s: %s" % [name, str(raw["error"])]
 		return {"ok": false, "error": raw["error"], "status": resp.get("status", 0)}
 	return {"ok": true, "data": raw.get("result", {})}
 
