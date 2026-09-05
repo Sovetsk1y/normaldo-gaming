@@ -22,7 +22,7 @@ const LEVELS : int = 3
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 43
+const EXPECTED_CHECKS : int = 44
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -101,7 +101,9 @@ const LAYOUT : Dictionary = {
 	"cone":       [0, 1, 2],
 	"roadsign":   [0],
 	"snake":      [0],
-	"poison":     [0],
+	# Яда в раскладке нет намеренно — см. `spawner.HAZ_LEVEL`. Строка здесь не
+	# удалена, а превращена в проверку ОТСУТСТВИЯ: вернувшись случайной правкой
+	# веса, он бы иначе просто тихо залетел обратно.
 	"helm":       [1],
 	"bottle":     [1],
 	"bird":       [1],
@@ -150,6 +152,11 @@ func _test_pools() -> void:
 			elif not want.has(lvl) and here:
 				stray.append("%s залетел на %d" % [item, lvl + 1])
 	_check(missing.is_empty(), "каждый предмет есть на своих уровнях: %s" % [missing])
+	var poison_back : Array = []
+	for lvl in LEVELS:
+		if (seen[lvl] as Dictionary).has("poison"):
+			poison_back.append(lvl + 1)
+	_check(poison_back.is_empty(), "яда в потоке нет ни на одном уровне: %s" % [poison_back])
 	_check(stray.is_empty(), "и не залетает на чужие: %s" % [stray])
 
 	var all_ok := true

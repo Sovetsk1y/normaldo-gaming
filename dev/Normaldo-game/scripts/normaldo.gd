@@ -3395,7 +3395,8 @@ func _begin_scars(duration: float, gated: bool) -> void:
 # `width_k` — доля ШИРИНЫ ГОЛОВЫ, которую занимает вещь; `pos` — в тех же
 # единицах, то есть в долях кадра головы, а не в пикселях экрана: голова у
 # скинов разного размера, и пиксельный отступ уехал бы у каждого второго.
-func _spawn_worn(tex: Texture2D, width_k: float, pos: Vector2) -> Sprite2D:
+func _spawn_worn(tex: Texture2D, width_k: float, pos: Vector2,
+		sink: float = -1.0) -> Sprite2D:
 	var w := Sprite2D.new()
 	w.texture        = tex
 	w.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -3403,16 +3404,57 @@ func _spawn_worn(tex: Texture2D, width_k: float, pos: Vector2) -> Sprite2D:
 	var head : Vector2 = _sprite.texture.get_size()
 	w.scale    = Vector2.ONE * (head.x * width_k / tex.get_size().x)
 	w.position = Vector2(pos.x * head.x, pos.y * head.y)
+	if sink >= 0.0:
+		w.position.y = _worn_crown_y(w, sink)
 	w.modulate = Color(1, 1, 1, 0.0)
 	_sprite.add_child(w)
 	var tw := w.create_tween()
 	tw.tween_property(w, "modulate:a", 1.0, 0.14)
 	return w
 
-# Шляпа сидит НАД головой и уже, чем маска: маска — это лицо, её кладут поверх
-# морды, а шляпа надевается сверху и морду закрывать не должна.
+# ── Посадка «на макушку», а не «на долю кадра» ────────────────────────────────
+# Кадр Нормальдо — квадрат 1000×1000, и рисунок занимает в нём хорошо если
+# треть: у классика он один, у викинга с рогами другой, у пирата со шляпой
+# третий. Доля кадра поэтому ничего не говорит о том, где макушка, и одна цифра
+# садилась по-разному на каждом скине — на ком-то шляпа лежала на голове, на
+# ком-то висела над ней.
+#
+# Считаем от НЕПРОЗРАЧНОЙ РАМКИ рисунка: берём её верх и опускаем вещь на `sink`
+# долей высоты рисунка вниз. Тогда «шляпа надета на 18% головы» означает одно и
+# то же на всех скинах, чем бы ни был набит кадр вокруг.
+func _worn_crown_y(w: Sprite2D, sink: float) -> float:
+	var head : Vector2 = _sprite.texture.get_size()
+	var used : Rect2i  = _sprite.texture.get_image().get_used_rect()
+	if used.size.y <= 0:
+		return -head.y * 0.5
+	var art_top : float = float(used.position.y) - head.y * 0.5
+	var art_h   : float = float(used.size.y)
+	# У САМОЙ ВЕЩИ кадр тоже с полями: у шляпы это 536×615, из которых рисунок
+	# занимает меньше половины по высоте. Считать от её геометрической середины
+	# значило бы повторить ту же ошибку с другой стороны — берём нижнюю кромку
+	# её РИСУНКА, то есть край полей шляпы, которым она и садится на голову.
+	var w_tex  : Vector2 = w.texture.get_size()
+	var w_used : Rect2i  = w.texture.get_image().get_used_rect()
+	if w_used.size.y <= 0:
+		return art_top + art_h * sink - w_tex.y * w.scale.y * 0.5
+	var w_bottom : float = (float(w_used.end.y) - w_tex.y * 0.5) * w.scale.y
+	return art_top + art_h * sink - w_bottom
+
+# Шляпа надевается СВЕРХУ и уже, чем маска: маска — это лицо, её кладут поверх
+# морды, а шляпа морду закрывать не должна.
+#
+# По вертикали она садится не по доле кадра, а по МАКУШКЕ РИСУНКА (см.
+# `_worn_crown_y`): HAT_SINK — насколько глубоко она надета, в долях высоты
+# рисунка.
+#
+# 0.42, а не «примерно ноль», потому что в непрозрачную рамку самой шляпы входят
+# ЖЁЛТЫЕ ЛУЧИ вокруг неё, и свисают они заметно ниже полей. Якорь по низу
+# рисунка ставит на голову луч, а поля оставляет висеть — цифра и добирает эту
+# разницу. Подобрана по кадру (`dev/shot_worn.gd`), а не выведена: где именно
+# кончается луч, знает только художник.
 const HAT_WIDTH_K : float = 0.74
-const HAT_POS     : Vector2 = Vector2(0.02, -0.46)
+const HAT_POS     : Vector2 = Vector2(0.02, -0.33)
+const HAT_SINK    : float = 0.42
 var _hat_worn  : Sprite2D = null
 var _hat_token : int = 0
 
@@ -3420,7 +3462,7 @@ func _wear_hat(duration: float) -> void:
 	_hat_token += 1
 	var tok := _hat_token
 	if not is_instance_valid(_hat_worn):
-		_hat_worn = _spawn_worn(_MAGIC_HAT_TEX, HAT_WIDTH_K, HAT_POS)
+		_hat_worn = _spawn_worn(_MAGIC_HAT_TEX, HAT_WIDTH_K, HAT_POS, HAT_SINK)
 	# Подобрал вторую шляпу — эффект продлевается, и старый таймер снимать её
 	# больше не должен: по токену он поймёт, что он уже не последний.
 	get_tree().create_timer(duration).timeout.connect(func() -> void:
