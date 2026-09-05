@@ -3953,40 +3953,10 @@ func _build_shop_section_header(hbox: HBoxContainer, text: String, ch: float, vp
 	wrapper.add_child(lbl)
 
 # ── NEW skins screen: grid of small cells + slide-up detail ───────────────────
-const _RESIST_TEX : Dictionary = {
-	"trash":    preload("res://assets/items/trash_bin.png"),
-	"stone":    preload("res://assets/items/stone.png"),
-	"glove":    preload("res://assets/items/boxing_glove.png"),
-	"snake":    preload("res://assets/items/snake.png"),
-	"fire":     preload("res://assets/items/fire2/animations/The_flames_flicker_and_dance_rhythmically_with_th/unknown/frame_002.png"),
-	"bomb":     preload("res://assets/items/bomb.png"),
-	"molotov":  preload("res://assets/items/molotov1.png"),
-	"shuriken": preload("res://assets/items/shuriken.png"),
-	"bum":      preload("res://assets/items/homeless1.png"),
-	"banana":   preload("res://assets/items/banana_peel.png"),
-	# Резисты теперь выдаёт лестница уровней и предметов в ней вдвое больше —
-	# без этих иконок половина кружков в карточке скина была бы пустой.
-	"beer":         preload("res://assets/items/beer.png"),
-	"cone":         preload("res://assets/items/cone.png"),
-	"dog":          preload("res://assets/items/angry_dog.png"),
-	"thief":        preload("res://assets/items/thief1.png"),
-	"compass":      preload("res://assets/items/compass.png"),
-	"handcuffs":    preload("res://assets/items/handcuffs.png"),
-	"black_ace":    preload("res://assets/items/black_ace.png"),
-	"loser_ticket": preload("res://assets/items/loser_ticket.png"),
-	"safe":         preload("res://assets/items/safe.png"),
-	"cocktail":     preload("res://assets/items/cocktail.png"),
-	"cop":          preload("res://assets/items/cop.png"),
-	"poison":       preload("res://assets/items/poison.png"),
-	"bird":         preload("res://assets/items/bird.png"),
-	"helm":         preload("res://assets/skills/ship_wheel.png"),
-	"shaman":       preload("res://assets/items/shaman.png"),
-}
-const _RESIST_NAME : Dictionary = {
-	"trash": "Бочка", "stone": "Камень", "glove": "Перчатка", "snake": "Змея",
-	"fire": "Огонь", "bomb": "Бомба", "molotov": "Молотов", "shuriken": "Сюрикен",
-	"bum": "Бомж", "banana": "Банан",
-}
+# Картинка и имя резиста живут в SkinProgression, рядом с лестницей, которая эти
+# резисты выдаёт. Своих копий тут больше нет: их было две — здесь и в
+# `skill_badges.gd`, — и вторая отстала на пятнадцать предметов, из-за чего
+# половина кружков в забеге рисовалась пустыми чёрными дисками.
 var _circle_cache : Texture2D = null
 var _lock_cache   : Texture2D = null
 
@@ -4109,7 +4079,7 @@ func _ability_items(skin_id: String) -> Array:
 		var nm  : String = SkinProgression.item_name(tag)
 		var unlocked : bool = bool(r.get("unlocked", true))
 		var lv : int = int(r.get("level", 0))
-		items.append({ "ring": RING_RESIST, "tex": _RESIST_TEX.get(tag), "mod": Color(1, 1, 1), "star": "",
+		items.append({ "ring": RING_RESIST, "tex": SkinProgression.resist_icon(tag), "mod": Color(1, 1, 1), "star": "",
 			"kind": "РЕЗИСТ" if unlocked else "РЕЗИСТ · %d УРОВЕНЬ" % lv,
 			"kind_col": RING_RESIST if unlocked else Color(0.62, 0.40, 0.38),
 			"locked": not unlocked,
@@ -4751,7 +4721,7 @@ func _resist_badge(parent: Control, x: float, y: float, sz: float, item: String,
 	disc.texture = _circle_tex(); disc.modulate = Color(0.10, 0.09, 0.12, 0.98)
 	disc.size = Vector2(sz - 4.0, sz - 4.0); disc.position = Vector2(x + 2.0, y + 2.0); disc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(disc)
-	var tex = _RESIST_TEX.get(item)
+	var tex = SkinProgression.resist_icon(item)
 	if tex != null:
 		var ic := _make_icon(tex, sz * 0.62)
 		ic.position = Vector2(x + (sz - sz * 0.62) * 0.5, y + (sz - sz * 0.62) * 0.5)
@@ -5169,7 +5139,7 @@ func _build_reward_card(vbox: VBoxContainer, lvl: int, cw: float, skin_id: Strin
 			bc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			panel.add_child(bc)
 			_ability_badge(bc, 0.0, 0.0, 52.0, Color(0.88, 0.18, 0.16),
-				_RESIST_TEX.get(tag), Color(1, 1, 1), "")
+				SkinProgression.resist_icon(tag), Color(1, 1, 1), "")
 			_reward_caption(panel, pw, "НОВЫЙ РЕЗИСТ!",
 				"%s — разбиваешь без вреда" % SkinProgression.item_name(tag).to_upper())
 		"perk":
@@ -5269,7 +5239,7 @@ func _skin_desc_text(skin_id: String) -> String:
 	if not resists.is_empty():
 		var names : Array = []
 		for r in resists:
-			names.append(_RESIST_NAME.get(r["item"], r["item"]))
+			names.append(SkinProgression.item_name(String(r["item"])))
 		lines.append("● Резисты: %s" % ", ".join(names))
 	var pas := SkinSkills.get_passive(skin_id)
 	if not pas.is_empty():
@@ -5718,7 +5688,7 @@ func _show_skin_levels_popup(parent_overlay: Control, skin_id: String = "") -> v
 				rwd_col  = Color(0.60, 1.00, 0.60)
 			"immunity":
 				var tag : String = String(rw.get("item", ""))
-				slot_tex = _RESIST_TEX.get(tag)
+				slot_tex = SkinProgression.resist_icon(tag)
 				rwd_text = "РЕЗИСТ: %s" % SkinProgression.item_name(tag).to_upper()
 				rwd_col  = Color(1.00, 0.55, 0.50)
 			"perk":
@@ -8283,7 +8253,7 @@ func _show_level_reward_popup(new_level: int, reward_d: int, reward_t: int) -> v
 			var tag : String = String(rw.get("item", ""))
 			unlock_title = "+ РЕЗИСТ"
 			unlock_desc  = "%s разбивается без вреда" % SkinProgression.item_name(tag).to_upper()
-			unlock_tex   = _RESIST_TEX.get(tag)
+			unlock_tex   = SkinProgression.resist_icon(tag)
 			unlock_col   = Color(1.00, 0.62, 0.55)
 			unlock_bg    = Color(0.28, 0.10, 0.10, 0.92)
 		"perk":

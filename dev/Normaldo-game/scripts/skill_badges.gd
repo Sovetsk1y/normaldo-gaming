@@ -24,25 +24,13 @@ const RING_RESIST := Color(0.90, 0.20, 0.18)
 const RING_ACTIVE := Color(0.35, 1.00, 0.45)
 const RING_PASS   := Color(0.32, 0.58, 1.00)
 
-const _RESIST_TEX : Dictionary = {
-	"trash":  preload("res://assets/items/trash_bin.png"),
-	"stone":  preload("res://assets/items/stone.png"),
-	"glove":  preload("res://assets/items/boxing_glove.png"),
-	"snake":  preload("res://assets/items/snake.png"),
-	"fire":   preload("res://assets/items/fire2/animations/The_flames_flicker_and_dance_rhythmically_with_th/unknown/frame_002.png"),
-	"bum":    preload("res://assets/items/homeless1.png"),
-	"banana": preload("res://assets/items/banana_peel.png"),
-	"bomb":   preload("res://assets/items/bomb.png"),
-	"molotov":preload("res://assets/items/molotov1.png"),
-	"shuriken":preload("res://assets/items/shuriken.png"),
-}
 var _active_badge : Control = null   # the active-ability circle, for deny pulses
 
-const _RESIST_NAME : Dictionary = {
-	"trash": "Бочка", "stone": "Камень", "glove": "Перчатка", "snake": "Змея",
-	"fire": "Огонь", "bum": "Бомж", "banana": "Банан", "bomb": "Бомба",
-	"molotov": "Молотов", "shuriken": "Сюрикен",
-}
+# Картинка и имя резиста берутся у SkinProgression — там они одни на всю игру.
+# Здесь была СВОЯ копия обеих таблиц, и она отстала от лестницы на пятнадцать
+# предметов: кружки собаки, птицы, сейфа и ещё дюжины рисовались пустыми
+# чёрными дисками, хотя на экране деталей скина те же резисты показывались
+# правильно.
 
 func setup(nrm: Node) -> void:
 	for c in get_children():
@@ -58,8 +46,14 @@ func setup(nrm: Node) -> void:
 		for tag in items:
 			if tag == "":
 				continue
-			var nm : String = _RESIST_NAME.get(tag, str(tag))
-			specs.append({ "key": "resist:" + str(tag), "tex": _RESIST_TEX.get(tag),
+			var nm : String = SkinProgression.item_name(str(tag))
+			var icon : Texture2D = SkinProgression.resist_icon(str(tag))
+			# НЕТ КАРТИНКИ — НЕТ КРУЖКА. Пустой чёрный диск не сообщает ничего и
+			# читается как поломка; отсутствие кружка честнее. Дойти сюда можно
+			# только новым резистом без иконки — за этим следит smoke_skins.
+			if icon == null:
+				continue
+			specs.append({ "key": "resist:" + str(tag), "tex": icon,
 				"sym": "", "mod": Color(1, 1, 1), "ring": RING_RESIST,
 				"title": "РЕЗИСТ · " + nm, "desc": "Ломает «" + nm + "» без урона. Откат " + str(cd) + " c." })
 

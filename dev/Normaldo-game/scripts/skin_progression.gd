@@ -201,6 +201,47 @@ func money_for(skin_id: String, level: int) -> Vector2i:
 		return Vector2i.ZERO
 	return Vector2i(int(r.get("dollars", 0)), int(r.get("tokens", 0)))
 
+# ── Картинка резиста ─────────────────────────────────────────────────────────
+# Кружок резиста — и в карточке скина, и в интерфейсе забега — рисуется
+# картинкой предмета. Таблица ОДНА и живёт здесь, рядом с именами предметов и
+# самой лестницей, которая эти резисты и выдаёт.
+#
+# Копий было ДВЕ: своя в `hud.gd` и своя в `skill_badges.gd`. Первую пополняли
+# по мере роста лестницы, вторую забыли — и из двадцати одного резиста в ней
+# осталось десять. Остальные пятнадцать рисовались в забеге ПУСТЫМ ЧЁРНЫМ
+# КРУЖКОМ: рамка есть, внутри ничего, и понять, чей он, нельзя. На экране
+# деталей скина те же резисты при этом показывались правильно — оттуда и
+# жалоба «у двух чёрные круги, хотя на скрине деталей там есть спрайты».
+const RESIST_ICONS : Dictionary = {
+	"trash": preload("res://assets/items/trash_bin.png"),
+	"stone": preload("res://assets/items/stone.png"),
+	"glove": preload("res://assets/items/boxing_glove.png"),
+	"snake": preload("res://assets/items/snake.png"),
+	"fire": preload("res://assets/items/fire2/animations/The_flames_flicker_and_dance_rhythmically_with_th/unknown/frame_002.png"),
+	"bomb": preload("res://assets/items/bomb.png"),
+	"molotov": preload("res://assets/items/molotov1.png"),
+	"shuriken": preload("res://assets/items/shuriken.png"),
+	"bum": preload("res://assets/items/homeless1.png"),
+	"banana": preload("res://assets/items/banana_peel.png"),
+	"beer": preload("res://assets/items/beer.png"),
+	"cone": preload("res://assets/items/cone.png"),
+	"dog": preload("res://assets/items/angry_dog.png"),
+	"thief": preload("res://assets/items/thief1.png"),
+	"compass": preload("res://assets/items/compass.png"),
+	"handcuffs": preload("res://assets/items/handcuffs.png"),
+	"black_ace": preload("res://assets/items/black_ace.png"),
+	"loser_ticket": preload("res://assets/items/loser_ticket.png"),
+	"safe": preload("res://assets/items/safe.png"),
+	"cocktail": preload("res://assets/items/cocktail.png"),
+	"cop": preload("res://assets/items/cop.png"),
+	"poison": preload("res://assets/items/poison.png"),
+	"bird": preload("res://assets/items/bird.png"),
+	"helm": preload("res://assets/skills/ship_wheel.png"),
+	"shaman": preload("res://assets/items/shaman.png"),
+}
+
+func resist_icon(item: String) -> Texture2D:
+	return RESIST_ICONS.get(item, null)
 func item_name(item: String) -> String:
 	return String(ITEM_NAMES.get(item, item))
 

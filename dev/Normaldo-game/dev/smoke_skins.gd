@@ -22,6 +22,8 @@ func _initialize() -> void:
 	_test_ladder(prog, reg)
 	print("── Резисты по уровням ──")
 	_test_resists(prog, skil, save)
+	print("── Кружки резистов ──")
+	_test_resist_icons(prog, skil, reg)
 	print("── Размер головы ──")
 	_test_heads(reg)
 	print("── Карточка скина ──")
@@ -111,6 +113,38 @@ func _test_resists(prog: Node, skil: Node, save: Node) -> void:
 # и забыть её пересчитать: тогда он молча отрисуется по старой логике «ширина
 # кадра» и снова окажется мельче остальных. Сверку самой таблицы со спрайтами
 # делает dev/tools/measure_heads.py --check, здесь ловим именно пропуск.
+# ── Кружки резистов ──────────────────────────────────────────────────────────
+# Кружок резиста рисуется КАРТИНКОЙ ПРЕДМЕТА (`hud._RESIST_TEX`). Нет картинки —
+# рисуется пустой чёрный кружок: рамка есть, внутри ничего. На экране забега это
+# выглядит поломкой, и найти причину нельзя — кружок не говорит, чей он.
+#
+# Ломается молча с двух сторон: добавили резист в лестницу и забыли картинку;
+# переименовали предмет — картинка осталась под старым ключом. Поэтому
+# проверяется не список картинок, а РЕАЛЬНЫЙ ПУТЬ: у каждого скина спрашиваются
+# его резисты, и у каждого обязана найтись картинка и имя словами.
+# Спрашиваем АВТОЛОАД, а не hud.gd: `preload` большого скрипта в тесте-SceneTree
+# не компилируется — он ссылается на автолоады, которых в этот момент ещё нет, и
+# тест не падает, а тихо разваливается, продолжая печатать «ВСЁ ЗЕЛЁНОЕ».
+func _test_resist_icons(prog: Node, skil: Node, reg: Node) -> void:
+	var missing : Array = []
+	var noname  : Array = []
+	var total := 0
+	# В SKINS лежат СЛОВАРИ описаний скинов, а не строки: id берётся полем.
+	for d in reg.SKINS:
+		var sid := String((d as Dictionary).get("id", ""))
+		for r in skil.all_resists(sid):
+			var tag := String(r.get("item", ""))
+			if tag == "":
+				continue
+			total += 1
+			if prog.resist_icon(tag) == null:
+				missing.append("%s → %s" % [sid, tag])
+			var nm := String(prog.item_name(tag))
+			if nm == "" or nm == tag:
+				noname.append("%s → %s" % [sid, tag])
+	_check(missing.is_empty(), "у всех %d резистов есть картинка: %s" % [total, missing])
+	_check(noname.is_empty(), "и у всех есть имя словами: %s" % [noname])
+
 func _test_heads(reg: Node) -> void:
 	var metrics : Node = get_root().get_node_or_null("SkinMetrics")
 	var missing : Array = []
