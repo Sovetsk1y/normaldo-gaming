@@ -62,6 +62,34 @@ function requireAuth(ctxAuth: {uid: string} | undefined): string {
   return ctxAuth.uid;
 }
 
+// Запрос таблицы сортирует по двум полям сразу, а такому запросу Firestore
+// нужен ОБЪЯВЛЕННЫЙ составной индекс (см. `firestore.indexes.json`). Пока
+// индекса нет — или пока он строится после выкатки, а это минуты — драйвер
+// кидает gRPC-код 9 FAILED_PRECONDITION, и наружу это уходило голым 500.
+//
+// 500 клиенту не сообщает ничего: игрок видел «таблица не пришла» и не мог
+// отличить «сервер сломан навсегда» от «подожди минуту». Здесь код 9
+// превращается в отдельный ответ, который клиент показывает словами.
+//
+// Ловим ИМЕННО код 9 и пробрасываем всё остальное: глушить любую ошибку
+// запроса под вывеской «ещё готовится» — значит прятать настоящие поломки.
+const GRPC_FAILED_PRECONDITION = 9;
+
+async function runIndexed<T>(what: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if ((err as {code?: number})?.code === GRPC_FAILED_PRECONDITION) {
+      console.error(`index missing/building for ${what}:`, err);
+      throw new HttpsError(
+        "failed-precondition",
+        "Leaderboard index is not ready yet",
+      );
+    }
+    throw err;
+  }
+}
+
 async function computeRank(weekId: string, mode: Mode, score: number): Promise<number> {
   if (score <= 0) return 0; // unranked
   const snap = await db.collection(`leaderboards/${weekId}/${mode}`)
@@ -225,11 +253,12 @@ export const getLeaderboard = onCall(async (request) => {
   const limit = Math.min(Number(request.data?.limit ?? TOP_LIMIT), TOP_LIMIT);
   const weekId = getCurrentWeekId();
 
-  const snap = await db.collection(`leaderboards/${weekId}/${mode}`)
-    .orderBy("score", "desc")
-    .orderBy("updated_at", "asc")
-    .limit(limit)
-    .get();
+  const snap = await runIndexed(`leaderboards/${weekId}/${mode}`, () =>
+    db.collection(`leaderboards/${weekId}/${mode}`)
+      .orderBy("score", "desc")
+      .orderBy("updated_at", "asc")
+      .limit(limit)
+      .get());
 
   const rows = snap.docs.map((doc, idx) => ({
     rank:         idx + 1,
