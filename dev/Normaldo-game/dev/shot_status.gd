@@ -3,7 +3,7 @@ extends SceneTree
 # Кадр СТАТУС-ЭФФЕКТОВ на живом Нормальдо.
 #   xvfb-run -a godot --path . --script res://dev/shot_status.gd -- <папка> <эффект>
 #
-# эффект: slow | invert | hourglass | armor | shield | heal | stun | shock |
+# эффект: sphere | slow | invert | hourglass | armor | heal | stun | shock |
 #         rage | blessed
 #
 # Глазами проверяется ровно одно: РАЗМЕР И ЧИТАЕМОСТЬ значка на голове. Он
@@ -48,6 +48,10 @@ func _initialize() -> void:
 		"invert":    normaldo.call("apply_invert", 30.0)
 		"hourglass": normaldo.call("_mark_world_slow", 30.0)
 		"armor":     normaldo.call("apply_casey_mask", 30.0)
+		"sphere":
+			# Сфера резиста считается шейдером, а не проигрывается кадрами, —
+			# и снимается она через тот же вход, что зовёт сам резист.
+			normaldo.call("_sphere_flash", 2.3)
 		_:
 			# Мгновенные — через тот же вход, что и в игре: он не просто вешает
 			# картинку, а надувает её и гасит, и кадр обязан показывать это, а не

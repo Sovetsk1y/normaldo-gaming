@@ -13,13 +13,13 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 18
+const EXPECTED_CHECKS : int = 23
 
 # Все эффекты, которые обязаны лежать на диске. Список ЗДЕСЬ, а не читается из
 # папки: тест, спрашивающий у папки, что в ней лежит, согласен с любой папкой.
 # Имена СОСТОЯНИЙ, а не папок: папку под состоянием можно поменять (часы и
 # шары уже менялись местами), а состояние остаётся тем же.
-const WANT : Array = ["slow", "invert", "hourglass", "shield", "armor", "heal",
+const WANT : Array = ["slow", "invert", "hourglass", "armor", "heal",
 	"stun", "shock", "rage", "blessed", "charm"]
 
 # Состояние без записи в ART грузилось бы по своему имени, а папки с таким
@@ -60,6 +60,8 @@ func _initialize() -> void:
 	await _test_burst()
 	print("── Вспышка едет за головой ──")
 	await _test_flash_follows()
+	print("── Сфера резиста ──")
+	await _test_sphere()
 	print("── Смена режима снимает всё ──")
 	await _test_clear()
 	_finish()
@@ -116,27 +118,54 @@ func _test_confusion() -> void:
 func _test_burst() -> void:
 	var host : Node = _n.get_parent()
 	var before : int = _count_fx(host)
-	StatusFx.burst(host, _n.global_position, "shield", 90.0)
+	StatusFx.burst(host, _n.global_position, "stun", 90.0)
 	await _wait_frames(2)
-	_check(_count_fx(host) == before + 1, "щит появился одним узлом")
+	_check(_count_fx(host) == before + 1, "значок появился одним узлом")
 	# Круг анимации — FRAMES/FPS секунд РЕАЛЬНОГО времени.
 	await _wait_real(float(StatusFx.FRAMES) / StatusFx.FPS + 0.5)
 	_check(_count_fx(host) == before, "и убрал себя сам, без чужой помощи")
 
-# Щит резиста и нимб мешка — знаки ГОЛОВЫ, и держатся они на ней весь круг
-# анимации. Раньше они вешались в точке события и оставались висеть в пустоте:
+# Нимб мешка, плюс жира и звёзды удара — знаки ГОЛОВЫ, и держатся они на ней
+# весь круг анимации. Раньше они вешались в точке события и оставались висеть в пустоте:
 # за полсекунды голова уезжает через пол-экрана, и знак читался как чужой
 # предмет позади.
 func _test_flash_follows() -> void:
-	_n.call("_status_flash", "shield", 2.0, 0.0)
+	_n.call("_status_flash", "heal", 2.0, 0.0)
 	await _wait_frames(2)
-	_check(_has("shield"), "щит появился")
+	_check(_has("heal"), "значок появился")
 	_n.position += Vector2(120.0, -40.0)
 	await _wait_frames(2)
-	_check(_fx("shield").global_position.distance_to(_n.global_position) < 1.0,
+	_check(_fx("heal").global_position.distance_to(_n.global_position) < 1.0,
 		"и поехал вместе с головой, а не остался на месте удара")
 	await _wait_real(float(StatusFx.FRAMES) / StatusFx.FPS + 0.5)
-	_check(not _has("shield"), "и снял себя сам, доиграв круг")
+	_check(not _has("heal"), "и снял себя сам, доиграв круг")
+
+# Щит резиста — не значок из набора, а СФЕРА, считаемая шейдером. Проверяется
+# то, что у значка проверить было нечем: она и правда появляется отдельным
+# узлом с материалом, надувается через `open_amount` и уходит сама.
+func _test_sphere() -> void:
+	_n.call("_sphere_flash", 2.3)
+	await _wait_frames(2)
+	var s = _fx("sphere")
+	_check(s != null, "сфера появилась")
+	if s == null:
+		return
+	_check(s.material is ShaderMaterial,
+		"и она считается шейдером, а не проигрывается кадрами")
+	# Надувается: сразу после запуска она ещё не раскрыта полностью.
+	var open0 : float = float((s.material as ShaderMaterial).get_shader_parameter("open_amount"))
+	await _wait_real(0.25)
+	var open1 : float = float((s.material as ShaderMaterial).get_shader_parameter("open_amount"))
+	_check(open1 > open0, "надувается: %.2f → %.2f" % [open0, open1])
+	# Едет за головой, как и все знаки головы.
+	_n.position += Vector2(70.0, 0.0)
+	await _wait_frames(2)
+	_check(is_instance_valid(s)
+			and (s as Node2D).global_position.distance_to(_n.global_position) < 1.0,
+		"и держится на голове")
+	await _wait_real(EnergySphere.life() + 0.4)
+	_check(not _has("sphere") and not is_instance_valid(s),
+		"а досчитав своё — убралась сама")
 
 func _test_clear() -> void:
 	_n.call("apply_slow", 5.0)
