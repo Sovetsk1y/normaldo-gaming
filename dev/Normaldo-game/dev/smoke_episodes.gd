@@ -14,7 +14,7 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 16
+const EXPECTED_CHECKS : int = 19
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -49,6 +49,8 @@ func _initialize() -> void:
 	_test_ring()
 	print("── Прохождение эпизода ──")
 	await _test_finish()
+	print("── Вход в хвост ──")
+	await _test_hardcore_entry()
 	_finish()
 
 func _done(n: int) -> void:
@@ -132,6 +134,32 @@ func _test_finish() -> void:
 		"победа над боссом первого эпизода засчитала его: %d" % int(_save.get("episodes_done")))
 	_check(not _qm.call("is_endless_unlocked"),
 		"и бесконечный за один эпизод не открылся")
+
+# В БЕСКОНЕЧНОМ третий босс не кончает забег, а переводит его в хвост: фон
+# замирает, спавнер уходит в супер хард. Ошибка тут громкая для игрока и тихая
+# для теста — забег просто оборвался бы экраном смерти на победе.
+func _test_hardcore_entry() -> void:
+	var game : Node = _hud.get_parent()
+	var sp   : Node = game.get_node_or_null("Spawner")
+	var bg   : Node = game.get_node_or_null("Background")
+	sp.set("campaign_mode", true)
+	sp.set("endless_chain", true)
+	sp.call("set_start_level", 2)
+	bg.call("start_scrolling")
+
+	_hud.set("_run_episode", 0)     # бесконечный
+	_hud.set("_next_level", -1)     # цепочка уровней кончилась
+	var done_before : int = int(_save.get("episodes_done"))
+	_hud.call("_on_boss_defeated")
+
+	var t0 : int = Time.get_ticks_msec()
+	while not bool(sp.call("is_hardcore")) and Time.get_ticks_msec() - t0 < 30000:
+		get_root().get_tree().paused = false
+		await process_frame
+	_check(bool(sp.call("is_hardcore")), "третий босс в бесконечном включил хвост")
+	_check(not bool(bg.get("_scrolling")), "и фон остановился")
+	_check(int(_save.get("episodes_done")) == done_before,
+		"бесконечный не засчитывает эпизоды: %d" % int(_save.get("episodes_done")))
 
 func _finish() -> void:
 	print("")

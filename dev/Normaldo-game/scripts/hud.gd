@@ -325,6 +325,7 @@ func _ready() -> void:
 		spawner.boss_time.connect(_on_boss_time)
 		spawner.level_cleared.connect(_on_level_cleared)
 		spawner.phase_entered.connect(_on_phase_entered)
+		spawner.hardcore_tier_up.connect(_on_hardcore_tier_up)
 	QuestManager.quests_updated.connect(_refresh_quest_badges)
 	QuestManager.daily_quest_completed.connect(_show_quest_complete_toast)
 	# Skin XP changes (level-ups, prestige resets) flip the СКИНЫ badge.
@@ -6936,14 +6937,19 @@ func _on_boss_defeated() -> void:
 	await _run_win_word()
 	# В БЕСКОНЕЧНОМ бой — не конец, а шов: за ним карточка следующего уровня, и
 	# забег продолжается тем же забегом, с тем же жиром, деньгами и счётчиком
-	# пиццы. Цепочка там замкнута в кольцо, поэтому `_next_level` не кончается
-	# никогда, и выйти отсюда можно только смертью.
+	# пиццы.
 	#
 	# В ЭПИЗОДЕ бой — именно конец: эпизод и есть один уровень со своим боссом.
 	# `_next_level` там всегда −1.
 	if _next_level >= 0:
 		_slide_in_hud()
 		_show_level_card(_next_level)
+		return
+	# Бесконечный после ТРЕТЬЕГО босса: локации кончились, но забег — нет. Фон
+	# замирает, и начинается хвост, из которого выход только один.
+	if _run_episode == 0:
+		_slide_in_hud()
+		await _enter_hardcore()
 		return
 	# Эпизод пройден: он засчитывается, открывается следующий, а пройденный
 	# третий открывает бесконечный режим.
@@ -7017,6 +7023,91 @@ func _run_win_word() -> void:
 	# читалась бы как «вот тебе аптечка», а не как «вот твой выигрыш».
 	var hold : float = float(spawner.call("lay_word", WIN_WORD, false, WIN_SPEED))
 	await get_tree().create_timer(hold).timeout
+
+# ── Хвост бесконечного: СУПЕР ХАРД ───────────────────────────────────────────
+# Третий босс в бесконечном повержен, локации кончились — но забег продолжается.
+#
+# ФОН ЗАМИРАЕТ И БОЛЬШЕ НЕ ЕДЕТ. Это не экономия и не забытый вызов: ехать
+# больше некуда, дорога кончилась, и стоящая стена говорит об этом прямее любой
+# надписи. Дальше есть только поток и игрок.
+#
+# Титр держится две секунды — ровно столько, чтобы прочесть и понять, что режим
+# сменился, и не столько, чтобы это стало паузой.
+const HARDCORE_CARD_T : float = 2.0
+
+func _enter_hardcore() -> void:
+	var game_root := get_parent() as Node2D
+	var normaldo  := get_parent().get_node_or_null("Normaldo")
+	var spawner   := get_parent().get_node_or_null("Spawner")
+	var bg        := game_root.get_node_or_null("Background") if game_root else null
+	if normaldo and normaldo.has_method("disable_input"):
+		normaldo.disable_input()
+	# Фон уже остановлен боем — просто НЕ запускаем его снова.
+	if bg and bg.has_method("stop_scrolling"):
+		bg.call("stop_scrolling")
+
+	Analytics.event("hardcore_entered", { "time_in_run": int(_elapsed_time) })
+	await _show_shout("СУПЕР ХАРД", "ВСЁ И СРАЗУ", HARDCORE_CARD_T,
+		Color(1.0, 0.42, 0.30), Color(1.0, 0.80, 0.55))
+
+	if spawner and spawner.has_method("enter_hardcore"):
+		spawner.call("enter_hardcore")
+	if normaldo and normaldo.has_method("enable_input"):
+		normaldo.enable_input()
+
+# Ступенька усложнения в хвосте. Отбивается титром: молча растущая сложность
+# читается как «игра сломалась», а не как «стало труднее».
+func _on_hardcore_tier_up(tier: int) -> void:
+	_show_shout("СУПЕР ХАРД %d" % (tier + 1), "", 1.1,
+		Color(1.0, 0.42, 0.30), Color(1.0, 0.80, 0.55))
+
+# Общий титр по центру экрана: крупная строка и подпись под ней. Один кирпич на
+# вход в хвост и на его ступеньки — два почти одинаковых титра разошлись бы по
+# кеглю и цвету при первой же правке.
+func _show_shout(big: String, small: String, hold: float,
+		big_col: Color, small_col: Color) -> void:
+	var vp := get_viewport().get_visible_rect().size
+	var cl := CanvasLayer.new()
+	cl.layer = 96
+	add_child(cl)
+
+	var lbl := Label.new()
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", 46)
+	_apply_menu_caption_fx(lbl)
+	lbl.text                 = big
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.size                 = Vector2(vp.x, 56.0)
+	lbl.position             = Vector2(0.0, vp.y * 0.34)
+	lbl.modulate             = Color(big_col.r, big_col.g, big_col.b, 0.0)
+	cl.add_child(lbl)
+
+	var sub : Label = null
+	if not small.is_empty():
+		sub = Label.new()
+		sub.add_theme_font_override("font", UI_FONT)
+		sub.add_theme_font_size_override("font_size", 20)
+		_apply_menu_caption_fx(sub)
+		sub.text                 = small
+		sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		sub.size                 = Vector2(vp.x, 28.0)
+		sub.position             = Vector2(0.0, vp.y * 0.34 + 58.0)
+		sub.modulate             = Color(small_col.r, small_col.g, small_col.b, 0.0)
+		cl.add_child(sub)
+
+	var tw := lbl.create_tween()
+	tw.tween_property(lbl, "modulate:a", 1.0, 0.25)
+	if sub != null:
+		tw.parallel().tween_property(sub, "modulate:a", 1.0, 0.25)
+	await tw.finished
+	await get_tree().create_timer(hold).timeout
+	if not is_instance_valid(cl):
+		return
+	var out := lbl.create_tween()
+	out.tween_property(lbl, "modulate:a", 0.0, 0.30)
+	if sub != null:
+		out.parallel().tween_property(sub, "modulate:a", 0.0, 0.30)
+	out.tween_callback(cl.queue_free)
 
 # ── Карточка уровня ──────────────────────────────────────────────────────────
 # Между уровнями экран накрывается карточкой: «УРОВЕНЬ 3» и название локации.
@@ -7204,6 +7295,11 @@ func _on_normaldo_died(total_pizzas: int, death_pos: Vector2) -> void:
 		"pizzas_collected": int(total_pizzas),
 		"dollars_collected": int(_dollars_this_run),
 		"phase_reached":    int(spawner_for_a._phase) if spawner_for_a else 0,
+		# Ступенька хвоста. По ней видно, сколько игрок держится ПОСЛЕ кампании,
+		# — то, ради чего бесконечный и существует. Ноль означает «до хвоста не
+		# дошёл», в том числе весь эпизодный режим.
+		"hardcore_tier":    int(spawner_for_a.call("hardcore_tier")) \
+			if spawner_for_a and spawner_for_a.has_method("hardcore_tier") else 0,
 		"skin_id":          str(SaveData.active_skin),
 	})
 	# Silence the world before the game-over screen comes up — otherwise the

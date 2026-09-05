@@ -3,8 +3,12 @@ extends Node2D
 signal boss_time
 signal phase_entered(phase: int)
 # Уровень пройден. `boss` — кого звать (пусто, если на этом уровне босса нет),
-# `next_level` — номер следующего, 0 если кампания кончилась.
+# `next_level` — номер следующего или −1, если следующего нет.
 signal level_cleared(boss: String, next_level: int)
+# Ступенька усложнения в хвосте бесконечного. Интерфейсу — чтобы отбить её
+# титром: молча растущая сложность читается как «игра сломалась», а не как
+# «стало труднее».
+signal hardcore_tier_up(tier: int)
 
 const ITEM_SCENE         := preload("res://scenes/item.tscn")
 const PIZZA_PACK_SCENE   := preload("res://scenes/pizza_pack.tscn")
@@ -37,33 +41,35 @@ const DOLLAR_TEX         := preload("res://assets/items/dollar.png")
 
 const LANE_COUNT : int = 5
 
-# ── Endless mode phase progression ────────────────────────────────────────────
-# First 5 phases (Crescendo, 0–7 min) mirror the campaign ramp.
-# Phases 5+ (Безумие, 7+ min) stack modifiers every 90 s:
-#   no_t1        — T1 patterns excluded (T1 weight forced to 0)
-#   trash_only   — T1 negatives are always trash bins (damage 1)
-#   short_gap    — POST_PAT_GAPS × 0.7
-#   molotov_plus — molotov fire_count + 1
-#   twin_pat     — 35 % chance to chain a second pattern with no inter-gap
+# ── Хвост бесконечного: СУПЕР ХАРД ────────────────────────────────────────────
+# Бесконечный проходит все три уровня подряд, а после последнего босса фон
+# ЗАМИРАЕТ и начинается хвост без конца: предметы продолжают сыпать, и летит
+# теперь ЧТО УГОДНО С ЛЮБОГО УРОВНЯ — банан из канализации рядом со штурвалом с
+# улицы и машиной копов со двора. Уровней больше нет, локации кончились, и
+# стоящая стена за спиной говорит об этом прямее любой надписи.
+#
+# Раньше на этом месте была ОТДЕЛЬНАЯ машинерия: своя таблица `ENDLESS_PHASES` с
+# фазами «Разогрев…Безумие V», свои модификаторы (no_t1, trash_only, short_gap,
+# molotov_plus, twin_pat), свой генератор паттернов и calm-wave между фазами.
+# Она удалена целиком. Причина не в том, что она плохо работала, а в том, что
+# это был ВТОРОЙ спавнер: то же самое — фазы, веса, паттерны, скорость — только
+# описанное второй раз и живущее своей жизнью. Каждая правка баланса требовала
+# делать её дважды, и каждый новый предмет попадал в кампанию, а в бесконечный
+# приходил через раз.
+#
+# Хвост поэтому — не режим, а ПРОДОЛЖЕНИЕ третьего уровня: тот же цикл, тот же
+# директор, те же паттерны. Меняется ровно три вещи, и все три — числа.
+const HARDCORE_STEP      : float = 25.0    # раз в сколько секунд подкручиваем
+const HARDCORE_TIERS     : int   = 8       # сколько ступеней до потолка
+# Интервалы между предметами и каденция сет-писов ужимаются каждой ступенью,
+# но не бесконечно: ниже этого множителя экран перестаёт читаться и превращается
+# в шум, в котором нет решений.
+const HARDCORE_TIGHTEN   : float = 0.93
+const HARDCORE_TIGHT_MIN : float = 0.55
+# Потолок скорости в хвосте выше кампанийного: 360 — это скорость, на которой
+# эпизод кончается, а хвост с неё только начинается.
+const HARDCORE_SPEED_MAX : float = 430.0
 
-const ENDLESS_PHASES : Array = [
-	{ "name": "Разогрев",    "duration":  60.0, "speed": 220.0, "weights": [7, 3, 0, 0], "mods": {} },
-	{ "name": "Поток",       "duration":  80.0, "speed": 242.0, "weights": [2, 5, 3, 0], "mods": {} },
-	{ "name": "Натиск",      "duration":  90.0, "speed": 264.0, "weights": [0, 2, 4, 4], "mods": {} },
-	{ "name": "Шторм",       "duration":  90.0, "speed": 297.0, "weights": [0, 1, 3, 6], "mods": {} },
-	{ "name": "Ад",          "duration": 100.0, "speed": 330.0, "weights": [0, 0, 2, 8], "mods": {} },
-	{ "name": "Безумие I",   "duration":  90.0, "speed": 350.0, "weights": [0, 0, 1, 9],  "mods": { "no_t1": true } },
-	{ "name": "Безумие II",  "duration":  90.0, "speed": 370.0, "weights": [0, 0, 1, 9],  "mods": { "no_t1": true, "trash_only": true, "short_gap": true } },
-	{ "name": "Безумие III", "duration":  90.0, "speed": 390.0, "weights": [0, 0, 0, 10], "mods": { "no_t1": true, "trash_only": true, "short_gap": true, "molotov_plus": true } },
-	{ "name": "Безумие IV",  "duration":  90.0, "speed": 410.0, "weights": [0, 0, 0, 10], "mods": { "no_t1": true, "trash_only": true, "short_gap": true, "molotov_plus": true, "twin_pat": true } },
-	{ "name": "Безумие V",   "duration":   INF, "speed": 420.0, "weights": [0, 0, 0, 10], "mods": { "no_t1": true, "trash_only": true, "short_gap": true, "molotov_plus": true, "twin_pat": true } },
-]
-
-# Calm-wave window after entering each Безумие phase (index ≥ 5).
-# Pure T1 pizza line with no obstacles — breather + fat restoration.
-const CALM_WAVE_PHASES_FROM : int   = 5
-const CALM_WAVE_DURATION    : float = 4.0
-const CALM_WAVE_LINE_COUNT  : int   = 7
 
 # ── Pattern tier system (shared by both modes) ────────────────────────────────
 # T0=T1 … T4=T5 in concept terms.
@@ -203,6 +209,15 @@ const CAMPAIGN_DIRECTOR : Array = [
 	{ "res": 0.52, "int": 0.38, "cad":  8.0, "sp": ["stone_chess", "glove_wave", "molotov_wave", "diagonal", "bum_crowd", "bum_barrel"] },
 ]
 
+# Сет-писы хвоста — ВСЕ, что есть в игре, а не список одной фазы. По той же
+# причине, по которой там общий набор предметов: локаций больше нет, и держать
+# сценку «только для канализации» не за что.
+const HARDCORE_SET_PIECES : Array = [
+	"sandwich", "zigzag", "cone", "bum_crowd", "bum_wall", "bum_barrel",
+	"barrel_cascade", "snake_columns", "stone_chess", "diagonal",
+	"glove_wave", "molotov_wave",
+]
+
 # Item speed goes up in STEPS (background scrolls at a fixed, slower pace — see
 # background.gd). Первое ускорение — на 16-й секунде (+10%), затем каждые 16 c ещё
 # +10%, КОМПАУНДОМ (каждый шаг считается от уже ускоренного значения), до максимума.
@@ -218,7 +233,17 @@ func _campaign_item_speed() -> float:
 	# Кол-во сработавших ускорений: 1 на 17-й секунде, +1 каждые SPEEDUP_INTERVAL.
 	var steps := 1 + int((_elapsed - SPEEDUP_FIRST_AT) / SPEEDUP_INTERVAL)
 	var mult  := pow(1.0 + SPEEDUP_STEP, float(steps))
-	return minf(CAMPAIGN_SPEED_MIN * mult, CAMPAIGN_SPEED_MAX) * world_speed_mult
+	return minf(CAMPAIGN_SPEED_MIN * mult, _speed_cap()) * world_speed_mult
+
+# Потолок скорости. В эпизоде он один на всю игру: эпизод кончается там, где
+# скорость упирается, и дальше расти ей некуда. В хвосте потолок ползёт вверх
+# вместе со ступенькой — иначе «супер хард» отличался бы от третьего уровня
+# только плотностью.
+func _speed_cap() -> float:
+	if not _hardcore:
+		return CAMPAIGN_SPEED_MAX
+	var t : float = clampf(float(_hardcore_tier) / float(maxi(1, HARDCORE_TIERS)), 0.0, 1.0)
+	return lerpf(CAMPAIGN_SPEED_MAX, HARDCORE_SPEED_MAX, t)
 const LETHAL_SET_PIECES : Array = ["glove_wave", "molotov_wave"]
 var _last_sp_at : float  = -999.0   # _elapsed at the last set-piece
 var _last_sp_id : String = ""       # avoid immediate repeats
@@ -257,8 +282,13 @@ var _spawn_timer    : float = 0.5
 var _phase          : int   = 0
 var _phase_elapsed  : float = 0.0
 
-# Endless-only state
-var _endless_mods   : Dictionary = {}
+# ── Хвост бесконечного ───────────────────────────────────────────────────────
+# `_hardcore` включается после последнего босса в бесконечном (см.
+# `enter_hardcore`), `_hardcore_tier` растёт каждые HARDCORE_STEP секунд и
+# больше не падает.
+var _hardcore      : bool  = false
+var _hardcore_t    : float = 0.0
+var _hardcore_tier : int   = 0
 
 var _pat_tier        : int  = 0
 var _pattern_running : bool = false
@@ -289,38 +319,40 @@ func _process(delta: float) -> void:
 	_elapsed     += delta
 	_spawn_timer -= delta
 
-	if campaign_mode:
-		_phase_elapsed += delta
-		if not _pattern_running and not _frozen and _spawn_timer <= 0.0:
-			_pattern_running = true
-			_run_campaign_pattern()
-		_tick_letters(delta)
-		var dur := CAMPAIGN_PHASES[_phase]["duration"] as float
-		if _phase_elapsed >= dur:
-			_phase        += 1
-			_phase_elapsed = 0.0
-			_phase_floor   = mini(_phase, CAMPAIGN_PHASES.size() - 1)
-			if _phase >= CAMPAIGN_PHASES.size():
-				# Боссом командует ПОСЛЕДНЯЯ БУКВА, а не таблица фаз: иначе эпизод
-				# кончался бы посреди слова. Кончились фазы — держимся на
-				# последней и ждём букву.
-				_phase = CAMPAIGN_PHASES.size() - 1
-				_phase_elapsed = dur
-				return
-			phase_entered.emit(_phase)
-			_spawn_timer = 0.8
-			# Pre-boss phase doubles as a "loot rain" gauntlet: pizza + dollar
-			# swarms keep arriving while molotov/glove waves try to wipe them.
-			if _phase == CAMPAIGN_PHASES.size() - 1:
-				_start_pre_boss_resource_rain()
-	else:
-		_phase_elapsed += delta
-		if not _pattern_running and not _frozen and _spawn_timer <= 0.0:
-			_pattern_running = true
-			_run_endless_pattern()
-		var dur := ENDLESS_PHASES[_phase]["duration"] as float
-		if dur != INF and _phase_elapsed >= dur:
-			_advance_endless_phase()
+	if not campaign_mode:
+		return
+
+	_phase_elapsed += delta
+	if not _pattern_running and not _frozen and _spawn_timer <= 0.0:
+		_pattern_running = true
+		_run_campaign_pattern()
+
+	# В ХВОСТЕ уровней больше нет: ни букв (они — часы уровня, а мерить нечего),
+	# ни смены фаз (мы на последней играбельной и там остаёмся). Вместо них
+	# тикает своя ступенька — она и есть всё усложнение хвоста.
+	if _hardcore:
+		_tick_hardcore(delta)
+		return
+
+	_tick_letters(delta)
+	var dur := CAMPAIGN_PHASES[_phase]["duration"] as float
+	if _phase_elapsed >= dur:
+		_phase        += 1
+		_phase_elapsed = 0.0
+		_phase_floor   = mini(_phase, CAMPAIGN_PHASES.size() - 1)
+		if _phase >= CAMPAIGN_PHASES.size():
+			# Боссом командует ПОСЛЕДНЯЯ БУКВА, а не таблица фаз: иначе эпизод
+			# кончался бы посреди слова. Кончились фазы — держимся на
+			# последней и ждём букву.
+			_phase = CAMPAIGN_PHASES.size() - 1
+			_phase_elapsed = dur
+			return
+		phase_entered.emit(_phase)
+		_spawn_timer = 0.8
+		# Pre-boss phase doubles as a "loot rain" gauntlet: pizza + dollar
+		# swarms keep arriving while molotov/glove waves try to wipe them.
+		if _phase == CAMPAIGN_PHASES.size() - 1:
+			_start_pre_boss_resource_rain()
 
 # ── Буквы NORMALDO ───────────────────────────────────────────────────────────
 # Раз в 30 секунд поток ЗАМИРАЕТ и через экран проплывает одна буква слова
@@ -457,15 +489,15 @@ func _finish_level() -> void:
 	set_process(false)
 	_frozen = true
 	var boss : String = level_boss() if campaign_mode else "ninja"
-	# Куда дальше. −1 означает «дальше некуда, забег кончился»:
-	#   ЭПИЗОД кончается всегда — в нём ровно один уровень;
-	#   БЕСКОНЕЧНЫЙ не кончается никогда — после третьего уровня круг заходит
-	#   на первый.
-	# Ноль здесь раньше значил «кампания пройдена», и это мешало: в
-	# бесконечном ноль — законный номер следующего уровня.
+	# Куда дальше. −1 означает «следующего уровня нет»:
+	#   ЭПИЗОД — всегда: в нём ровно один уровень, и его босс кончает забег;
+	#   БЕСКОНЕЧНЫЙ — только после ТРЕТЬЕГО: локации кончились, и дальше идёт
+	#   хвост (см. `enter_hardcore`), а не четвёртый уровень.
+	# Ноль здесь раньше значил «кампания пройдена», и это мешало: ноль —
+	# законный номер уровня.
 	var nxt  : int = -1
-	if campaign_mode and endless_chain:
-		nxt = (level + 1) % CAMPAIGN_LEVELS.size()
+	if campaign_mode and endless_chain and level + 1 < CAMPAIGN_LEVELS.size():
+		nxt = level + 1
 	# `boss_time` оставлен ради всего, что уже на него подписано (задания,
 	# аналитика, дев-кнопка): для них «дошёл до босса» не изменилось.
 	if boss != "":
@@ -477,11 +509,66 @@ func _finish_level() -> void:
 func advance_level() -> void:
 	if not campaign_mode:
 		return
-	if endless_chain:
-		level = (level + 1) % CAMPAIGN_LEVELS.size()
-	else:
-		level = clampi(level + 1, 0, CAMPAIGN_LEVELS.size() - 1)
+	level = clampi(level + 1, 0, CAMPAIGN_LEVELS.size() - 1)
 	_start_level()
+
+# ── Хвост бесконечного: СУПЕР ХАРД ────────────────────────────────────────────
+# Зовёт интерфейс после победы над ПОСЛЕДНИМ боссом в бесконечном. Уровней
+# дальше нет: фон замирает (это делает hud), а поток продолжает идти и
+# постепенно затягиваться.
+#
+# Фаза встаёт на ПОСЛЕДНЮЮ ИГРАБЕЛЬНУЮ, а не на предбоссовую. Предбоссовая
+# помечена `no_pizza`: она задумана как десять секунд без еды перед боем, и
+# оставить её навсегда значит забрать у игрока жир, то есть жизни, — хвост
+# кончался бы не мастерством, а голодом.
+func enter_hardcore() -> void:
+	_hardcore      = true
+	_hardcore_t    = 0.0
+	_hardcore_tier = 0
+	_phase         = maxi(0, CAMPAIGN_PHASES.size() - 2)
+	_phase_floor   = _phase
+	_phase_elapsed = 0.0
+	# Буквы выключаем: слово NORMALDO — это часы УРОВНЯ, а уровня больше нет.
+	# Оставленное, оно выложилось бы до конца и позвало четвёртого босса.
+	_letter_idx    = LETTER_WORD.length()
+	_letter_active = false
+	_frozen        = false
+	_pattern_running = false
+	_spawn_timer   = 0.8
+	_reset_spans()
+	set_process(true)
+	phase_entered.emit(_phase)
+
+func is_hardcore() -> bool:
+	return _hardcore
+
+func hardcore_tier() -> int:
+	return _hardcore_tier
+
+func _tick_hardcore(delta: float) -> void:
+	_hardcore_t += delta
+	if _hardcore_t >= HARDCORE_STEP:
+		_hardcore_t -= HARDCORE_STEP
+		_bump_hardcore_tier()
+
+func _bump_hardcore_tier() -> void:
+	if _hardcore_tier >= HARDCORE_TIERS:
+		return
+	_hardcore_tier += 1
+	hardcore_tier_up.emit(_hardcore_tier)
+
+# Множитель интервалов и каденции: с каждой ступенью экран набивается плотнее.
+# Пол есть и он не декоративный — ниже него кадр перестаёт читаться и решений в
+# нём не остаётся, только шум.
+# Накал волн. Вне хвоста это просто фаза; в хвосте фаза стоит на месте, и растёт
+# ступенька — она и двигает формы паттернов к самым злым.
+func _wave_intensity() -> int:
+	return _phase + (_hardcore_tier if _hardcore else 0)
+
+func _hardcore_tighten() -> float:
+	if not _hardcore:
+		return 1.0
+	return maxf(pow(HARDCORE_TIGHTEN, float(_hardcore_tier)), HARDCORE_TIGHT_MIN)
 
 # С какого уровня начинается забег. Эпизод ставит сюда свой номер, бесконечный
 # начинает с первого. Планка сложности берётся у уровня: эпизод 3, начатый с
@@ -676,7 +763,7 @@ func _run_campaign_pattern() -> void:
 		await _t1_center_line(speed, lanes, vp_w)
 		_last_sp_at = _elapsed
 	else:
-		var dc : Dictionary = CAMPAIGN_DIRECTOR[mini(_phase, CAMPAIGN_DIRECTOR.size() - 1)]
+		var dc : Dictionary = _director_cfg()
 		if _elapsed - _last_sp_at >= float(dc["cad"]):
 			# SET-PIECE window.
 			var sp := _pick_set_piece(dc["sp"])
@@ -696,6 +783,23 @@ func _run_campaign_pattern() -> void:
 	# налезали друг на друга (та же дистанция, что и внутри линии).
 	await get_tree().create_timer(_col_gap(speed)).timeout
 	_pattern_running = false
+
+# Настройки директора на сейчас. В хвосте берётся последняя строка таблицы, а
+# интервал и каденция ужимаются ступенькой: набор предметов там уже общий, и
+# единственное, чем хвост может расти дальше, — плотность.
+#
+# Доля ресурсов (`res`) НЕ трогается. Плотность — это насыщенность кадра, а доля
+# еды — это сложность, и путать их нельзя: ужав заодно и еду, хвост убивал бы не
+# трудностью, а голодом.
+func _director_cfg() -> Dictionary:
+	var dc : Dictionary = (CAMPAIGN_DIRECTOR[mini(_phase, CAMPAIGN_DIRECTOR.size() - 1)]
+		as Dictionary).duplicate()
+	if _hardcore:
+		var k := _hardcore_tighten()
+		dc["int"] = float(dc["int"]) * k
+		dc["cad"] = float(dc["cad"]) * k
+		dc["sp"]  = HARDCORE_SET_PIECES
+	return dc
 
 # ── Director: random baseline stream ──────────────────────────────────────────
 
@@ -794,12 +898,21 @@ const HAZ_LEVEL : Array = [
 	  "loser_ticket": 3, "ninja": 6 },
 ]
 
-func _pick_level_hazard() -> String:
+# В ХВОСТЕ набор — СУММА ВСЕХ УРОВНЕЙ. Локации кончились, и держаться раскладки
+# больше не за что: банан из канализации летит рядом со штурвалом с улицы и
+# машиной копов со двора. Это и есть обещание «супер хард» — не «то же самое, но
+# быстрее», а «всё, что ты видел за игру, разом».
+func _hazard_pool() -> Dictionary:
 	var pool : Dictionary = HAZ_ALWAYS.duplicate()
-	var lvl : Dictionary = HAZ_LEVEL[clampi(level, 0, HAZ_LEVEL.size() - 1)] \
-		if campaign_mode else HAZ_LEVEL[HAZ_LEVEL.size() - 1]
-	for k in lvl:
-		pool[k] = int(pool.get(k, 0)) + int(lvl[k])
+	var tables : Array = HAZ_LEVEL if _hardcore \
+		else [HAZ_LEVEL[clampi(level, 0, HAZ_LEVEL.size() - 1)]]
+	for t in tables:
+		for k in (t as Dictionary):
+			pool[k] = int(pool.get(k, 0)) + int((t as Dictionary)[k])
+	return pool
+
+func _pick_level_hazard() -> String:
+	var pool : Dictionary = _hazard_pool()
 	var total : int = 0
 	for k in pool:
 		total += int(pool[k])
@@ -1223,85 +1336,12 @@ func _wave_molotov_right(speed: float, lanes: Array, vp_w: float) -> void:
 	var lane := randi() % LANE_COUNT
 	var m       := MOLOTOV_SCENE.instantiate()
 	m.speed              = speed
-	m.fire_count         = 4 + (1 if _endless_mods.get("molotov_plus", false) else 0)
+	# В хвосте молотов жжёт дольше: огневая зона дольше держит линию закрытой.
+	m.fire_count         = 4 + (1 if _hardcore_tier >= 3 else 0)
 	m.target_x_min_ratio = PRE_BOSS_MOLOTOV_X_MIN_RATIO
 	m.position           = Vector2(vp_w + 80.0, lanes[lane])
 	add_child(m)
 	await get_tree().create_timer(PRE_BOSS_MOLOTOV_INTERVAL).timeout
-
-# ── Endless pattern runner ────────────────────────────────────────────────────
-
-func _endless_pick_pat_tier() -> int:
-	var weights : Array = ENDLESS_PHASES[_phase]["weights"]
-	if _endless_mods.get("no_t1", false):
-		weights = weights.duplicate()
-		weights[0] = 0
-	var total : int = 0
-	for w in weights: total += w
-	if total <= 0: return 3
-	var r := randi() % total
-	var acc : int = 0
-	for i in weights.size():
-		acc += weights[i]
-		if r < acc: return i
-	return 3
-
-func _run_endless_pattern(allow_twin: bool = true) -> void:
-	var cfg     = ENDLESS_PHASES[_phase]
-	var speed  := (cfg["speed"] as float) * world_speed_mult
-	var lanes  := _lane_centers()
-	var vp_w   := get_viewport_rect().size.x
-	var pt     := _endless_pick_pat_tier()
-	await _await_big_clear()
-	_pat_tier   = pt
-	await _dispatch_pat(pt, speed, lanes, vp_w)
-	if _frozen:
-		_pattern_running = false
-		return
-	await get_tree().create_timer(0.2).timeout
-	if not _frozen and randf() < BONUS_CHANCES[mini(pt, 4)]:
-		_spawn_bonus_item(speed, vp_w, lanes)
-	# Twin patterns: chain a second one immediately, no gap.
-	if allow_twin and _endless_mods.get("twin_pat", false) and randf() < 0.35:
-		await _run_endless_pattern(false)
-		return
-	var gap := POST_PAT_GAPS[mini(pt, 4)] as float
-	if _endless_mods.get("short_gap", false):
-		gap *= 0.7
-	await get_tree().create_timer(gap).timeout
-	_pattern_running = false
-
-# ── Endless phase advancement ────────────────────────────────────────────────
-
-func _advance_endless_phase() -> void:
-	_phase         += 1
-	_phase_elapsed  = 0.0
-	if _phase >= ENDLESS_PHASES.size():
-		_phase = ENDLESS_PHASES.size() - 1
-	_endless_mods = (ENDLESS_PHASES[_phase]["mods"] as Dictionary).duplicate()
-	phase_entered.emit(_phase)
-	# Калм-волна на старте каждой Безумие-фазы (отдыхающая T1 без врагов).
-	if _phase >= CALM_WAVE_PHASES_FROM:
-		_run_calm_wave()
-	else:
-		_spawn_timer = 0.8
-
-func _run_calm_wave() -> void:
-	_frozen          = true
-	_pattern_running = true
-	var speed := ENDLESS_PHASES[_phase]["speed"] as float
-	var vp_w  := get_viewport_rect().size.x
-	var lanes := _lane_centers()
-	var gap   := _col_gap(speed) * 1.1
-	var lane_y : float = lanes[2]
-	for i in CALM_WAVE_LINE_COUNT:
-		_spawn_item(lane_y, vp_w, PIZZA_TEX, 0.09, speed, 0, true, true, true)
-		if i < CALM_WAVE_LINE_COUNT - 1:
-			await get_tree().create_timer(gap).timeout
-	await get_tree().create_timer(CALM_WAVE_DURATION).timeout
-	_frozen          = false
-	_pattern_running = false
-	_spawn_timer     = 0.4
 
 # ── Pattern dispatch ──────────────────────────────────────────────────────────
 
@@ -1346,7 +1386,9 @@ func _t1_osc_y() -> float:
 
 func _pat_t1(speed: float, lanes: Array, vp_w: float) -> void:
 	_t1_pattern_count += 1
-	_t1_trash = _t1_pattern_count > 5 or _endless_mods.get("trash_only", false)
+	# В хвосте негатив в ресурсных линиях — всегда бочка (урон 1), а не банан:
+	# банан там читался бы как поблажка.
+	_t1_trash = _t1_pattern_count > 5 or _hardcore_tier >= 2
 	match randi() % 6:
 		0: await _t1_double_line(speed, lanes, vp_w)
 		1: await _t1_center_line(speed, lanes, vp_w)
@@ -1723,16 +1765,23 @@ func _pat_t5(speed: float, lanes: Array, vp_w: float) -> void:
 		_spawn_item(lanes[2], vp_w, PIZZA_TEX, 0.09, speed, 0, true, true, true)
 		return
 
-	# Pick the wave shape by phase:
+	# Форма волны — по НАКАЛУ (см. `_wave_intensity`):
 	#   0–3: plain wall, single column, 3 fires + 2 safe gaps.
-	#   4 (Ад): wall, then an inverse-style second column right after.
-	#   5+ (Безумие): 2-column checkerboard.
-	#   7+ (Безумие III+): checkerboard + inverse follow-up (cross).
-	if _phase <= 3:
+	#   4: wall, then an inverse-style second column right after.
+	#   5–6: 2-column checkerboard.
+	#   7+: checkerboard + inverse follow-up (cross).
+	#
+	# Накал — это фаза, а в хвосте фаза плюс ступенька. Пороги 5+ и 7+ жили у
+	# старого бесконечного и вместе с ним стали недостижимы: в кампании фаза
+	# доходит до 5, но пятая — предбоссовая и до этой ветки не добирается.
+	# Самые злые формы T5 просто перестали существовать; ступенька возвращает их
+	# в хвост, где им и место.
+	var wave : int = _wave_intensity()
+	if wave <= 3:
 		await _t5_wall(speed, lanes, vp_w)
-	elif _phase <= 4:
+	elif wave <= 4:
 		await _t5_two_walls(speed, lanes, vp_w)
-	elif _phase <= 6:
+	elif wave <= 6:
 		await _t5_molotov_checkerboard(speed, lanes, vp_w, 2, 0)
 	else:
 		await _t5_molotov_checkerboard(speed, lanes, vp_w, 2, 0)
@@ -1836,7 +1885,7 @@ func _spawn_dog(y: float, vp_w: float, speed: float, solo: bool = false) -> void
 func _spawn_molotov(y: float, vp_w: float, speed: float, fire_count: int = 4) -> void:
 	var m       := MOLOTOV_SCENE.instantiate()
 	m.speed      = speed
-	m.fire_count = fire_count + (1 if _endless_mods.get("molotov_plus", false) else 0)
+	m.fire_count = fire_count + (1 if _hardcore_tier >= 3 else 0)
 	m.position   = Vector2(vp_w + 80.0, y)
 	add_child(m)
 
@@ -1855,11 +1904,7 @@ const GLOVE_CHARGE_SLOW : float = 0.90   # длиннее чардж на ран
 const GLOVE_CHARGE_FAST : float = 0.30
 
 func _glove_charge_duration_for_phase() -> float:
-	var last_idx : int
-	if campaign_mode:
-		last_idx = CAMPAIGN_PHASES.size() - 1
-	else:
-		last_idx = ENDLESS_PHASES.size() - 1
+	var last_idx : int = CAMPAIGN_PHASES.size() - 1
 	if last_idx <= 0:
 		return GLOVE_CHARGE_FAST
 	var t : float = clampf(float(_phase) / float(last_idx), 0.0, 1.0)
@@ -2070,28 +2115,30 @@ func _spawn_pre_boss_resource_burst() -> void:
 
 func dev_spawn_money_bag() -> void:
 	var vp_w  := get_viewport_rect().size.x
-	var speed := (CAMPAIGN_PHASES[_phase]["speed"] if campaign_mode else ENDLESS_PHASES[_phase]["speed"]) as float
-	_inst_lane(MONEY_BAG_SCENE, speed, vp_w, _lane_centers())
+	_inst_lane(MONEY_BAG_SCENE, current_phase_speed(), vp_w, _lane_centers())
 
 # Dev hotkey: jump straight to the next phase without waiting out the timer.
-# Campaign: stepping past the final (pre-boss) phase fires boss_time, mirroring
-# the natural campaign end. Endless: clamps at the last Безумие phase.
+# Stepping past the final (pre-boss) phase fires boss_time, mirroring the
+# natural end of a level. В хвосте фаз нет — там шагает ступенька усложнения.
 func dev_skip_to_next_phase() -> void:
 	_phase_elapsed = 0.0
-	if campaign_mode:
-		_phase += 1
-		_campaign_intro_left = 0
-		_pre_boss_last_type  = -1
-		if _phase >= CAMPAIGN_PHASES.size():
-			set_process(false)
-			boss_time.emit()
-			return
-		_spawn_timer = 0.4
-		phase_entered.emit(_phase)
-		if _phase == CAMPAIGN_PHASES.size() - 1:
-			_start_pre_boss_resource_rain()
-	else:
-		_advance_endless_phase()
+	if not campaign_mode:
+		return
+	if _hardcore:
+		_hardcore_t = 0.0
+		_bump_hardcore_tier()
+		return
+	_phase += 1
+	_campaign_intro_left = 0
+	_pre_boss_last_type  = -1
+	if _phase >= CAMPAIGN_PHASES.size():
+		set_process(false)
+		boss_time.emit()
+		return
+	_spawn_timer = 0.4
+	phase_entered.emit(_phase)
+	if _phase == CAMPAIGN_PHASES.size() - 1:
+		_start_pre_boss_resource_rain()
 
 func clear_items() -> void:
 	set_process(false)
@@ -2177,6 +2224,5 @@ func resume_after_event() -> void:
 	set_process(true)
 
 func current_phase_speed() -> float:
-	if campaign_mode:
-		return CAMPAIGN_PHASES[mini(_phase, CAMPAIGN_PHASES.size() - 1)]["speed"]
-	return ENDLESS_PHASES[mini(_phase, ENDLESS_PHASES.size() - 1)]["speed"]
+	return CAMPAIGN_PHASES[mini(_phase, CAMPAIGN_PHASES.size() - 1)]["speed"]
+

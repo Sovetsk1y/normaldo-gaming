@@ -22,7 +22,7 @@ const LEVELS : int = 3
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 32
+const EXPECTED_CHECKS : int = 43
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -45,6 +45,8 @@ func _initialize() -> void:
 	await _test_background()
 	print("── Эпизод против бесконечного ──")
 	await _test_chain()
+	print("── Хвост бесконечного ──")
+	await _test_hardcore()
 	_finish()
 
 # ── Таблица ──────────────────────────────────────────────────────────────────
@@ -237,8 +239,8 @@ func _test_advance() -> void:
 		got.append([boss, nxt]))
 	sp.call("_run_letter")
 	await _tick(8.0)
-	_check(not got.is_empty() and int(got[0][1]) == 0,
-		"а после третьего круг заходит на первый: %s" % [got])
+	_check(not got.is_empty() and int(got[0][1]) == -1,
+		"а после третьего следующего уровня нет — дальше хвост: %s" % [got])
 	e["game"].queue_free()
 	await process_frame
 
@@ -296,27 +298,104 @@ func _test_chain() -> void:
 		_check(got.size() == 1 and int(got[0][1]) == -1,
 			"эпизод %d кончается сам: %s" % [ep + 1, got])
 
-	# БЕСКОНЕЧНЫЙ. С последнего уровня цепочка заходит на первый, а не обрывается.
+	# БЕСКОНЕЧНЫЙ. Между уровнями цепочка ведёт дальше, а после ПОСЛЕДНЕГО
+	# следующего уровня нет: локации кончились, и дальше идёт хвост.
 	sp.set("endless_chain", true)
-	sp.call("set_start_level", LEVELS - 1)
+	sp.call("set_start_level", 0)
 	sp.set("_letter_idx", SP.LETTER_WORD.length() - 1)
-	var loop : Array = []
-	sp.connect("level_cleared", func(boss: String, nxt: int) -> void: loop.append(nxt))
+	var mid : Array = []
+	var hm := func(boss: String, nxt: int) -> void: mid.append(nxt)
+	sp.connect("level_cleared", hm)
 	sp.set_process(true)
 	sp.call("_run_letter")
 	await _tick(8.0)
-	_check(loop.size() == 1 and int(loop[0]) == 0,
-		"в бесконечном после последнего уровня круг заходит на первый: %s" % [loop])
+	sp.disconnect("level_cleared", hm)
+	_check(mid.size() == 1 and int(mid[0]) == 1,
+		"в бесконечном после первого уровня идёт второй: %s" % [mid])
 
-	# И СЛОЖНОСТЬ НЕ ОТКАТЫВАЕТСЯ. Второй круг обязан начинаться не легче того
-	# места, где кончился первый: иначе «бесконечный» это «повторяющийся».
-	sp.set("_phase", SP.CAMPAIGN_PHASES.size() - 1)
-	sp.set("_phase_floor", SP.CAMPAIGN_PHASES.size() - 1)
-	sp.call("advance_level")
+	sp.call("set_start_level", LEVELS - 1)
+	sp.set("_letter_idx", SP.LETTER_WORD.length() - 1)
+	var tail : Array = []
+	sp.connect("level_cleared", func(boss: String, nxt: int) -> void: tail.append(nxt))
+	sp.set_process(true)
+	sp.call("_run_letter")
+	await _tick(8.0)
+	_check(tail.size() == 1 and int(tail[0]) == -1,
+		"а после последнего уровня цепочка кончается: %s" % [tail])
+	e["game"].queue_free()
 	await process_frame
-	_check(int(sp.get("level")) == 0, "уровень стал первым: %d" % int(sp.get("level")))
-	_check(int(sp.get("_phase")) == SP.CAMPAIGN_PHASES.size() - 1,
-		"а фаза осталась на достигнутой планке: %d" % int(sp.get("_phase")))
+
+# ── Хвост бесконечного: СУПЕР ХАРД ───────────────────────────────────────────
+# После последнего босса в бесконечном уровней больше нет: фон замирает, а поток
+# идёт дальше и затягивается. Ломается это тихо в обе стороны — хвост, который
+# не усложняется, читается как «игра забыла про меня», а хвост, оставшийся на
+# предбоссовой фазе, отнимает еду и убивает голодом, а не трудностью.
+func _test_hardcore() -> void:
+	var e : Dictionary = await _boot()
+	var sp : Node = e["sp"]
+	sp.set("campaign_mode", true)
+	sp.set("endless_chain", true)
+	sp.call("set_start_level", LEVELS - 1)
+
+	sp.call("enter_hardcore")
+	await process_frame
+	_check(bool(sp.call("is_hardcore")), "хвост включился")
+	# Фаза — ПОСЛЕДНЯЯ ИГРАБЕЛЬНАЯ, а не предбоссовая: у той стоит `no_pizza`,
+	# и оставить её навсегда значит забрать у игрока жир, то есть жизни.
+	var ph : int = int(sp.get("_phase"))
+	_check(ph == SP.CAMPAIGN_PHASES.size() - 2,
+		"фаза встала на последнюю играбельную: %d" % ph)
+	_check(not bool(SP.CAMPAIGN_PHASES[ph]["no_pizza"]),
+		"и пицца в хвосте продолжает летать")
+	# Буквы кончились: слово — часы УРОВНЯ, а уровня больше нет. Оставленное,
+	# оно выложилось бы до конца и позвало четвёртого босса.
+	_check(int(sp.get("_letter_idx")) >= SP.LETTER_WORD.length(),
+		"буквы в хвосте выключены: %d" % int(sp.get("_letter_idx")))
+
+	# НАБОР — СУММА ВСЕХ УРОВНЕЙ. Ровно это и обещает «супер хард»: не «то же
+	# самое, но быстрее», а всё, что игрок видел за игру, разом.
+	var kinds : Dictionary = {}
+	for _i in 8000:
+		kinds[String(sp.call("_pick_level_hazard"))] = true
+	var missing : Array = []
+	for item in LAYOUT:
+		if not kinds.has(item):
+			missing.append(item)
+	_check(missing.is_empty(), "в хвосте летит всё со всех уровней: нет %s" % [missing])
+
+	# СТУПЕНЬКА. Плотность растёт, но не бесконечно: у неё есть пол, ниже
+	# которого кадр перестаёт читаться.
+	var t0 : float = float(sp.call("_hardcore_tighten"))
+	_check(is_equal_approx(t0, 1.0), "на нулевой ступени плотность как была: %.2f" % t0)
+	var seen : Array = []
+	for i in SP.HARDCORE_TIERS + 4:
+		sp.call("_bump_hardcore_tier")
+		seen.append(float(sp.call("_hardcore_tighten")))
+	_check(seen[0] < t0, "ступенька ужимает интервалы: %.2f → %.2f" % [t0, seen[0]])
+	_check(int(sp.call("hardcore_tier")) == SP.HARDCORE_TIERS,
+		"ступеньки упираются в потолок: %d" % int(sp.call("hardcore_tier")))
+	_check(seen[seen.size() - 1] >= SP.HARDCORE_TIGHT_MIN - 0.001,
+		"и не проваливаются ниже пола: %.2f при поле %.2f"
+			% [seen[seen.size() - 1], SP.HARDCORE_TIGHT_MIN])
+
+	# НАКАЛ ВОЛН растёт вместе со ступенькой: самые злые формы T5 (шахматка и
+	# крест) жили у старого бесконечного на фазах 5+ и вместе с ним стали
+	# недостижимы — в кампании до этой ветки доходит только фаза 4.
+	_check(int(sp.call("_wave_intensity")) >= 7,
+		"на потолке ступеньки накал волн достаёт до самых злых форм: %d"
+			% int(sp.call("_wave_intensity")))
+
+	# И СКОРОСТЬ растёт выше кампанийного потолка — иначе хвост отличался бы от
+	# третьего уровня только плотностью.
+	_check(float(sp.call("_speed_cap")) > SP.CAMPAIGN_SPEED_MAX,
+		"потолок скорости в хвосте выше: %.0f против %.0f"
+			% [float(sp.call("_speed_cap")), SP.CAMPAIGN_SPEED_MAX])
+
+	# А в ЭПИЗОДЕ ничего этого нет: там хвоста не бывает.
+	sp.set("_hardcore", false)
+	sp.set("_hardcore_tier", 0)
+	_check(is_equal_approx(float(sp.call("_speed_cap")), SP.CAMPAIGN_SPEED_MAX),
+		"вне хвоста потолок прежний: %.0f" % float(sp.call("_speed_cap")))
 	e["game"].queue_free()
 	await process_frame
 
