@@ -1,6 +1,6 @@
 extends SceneTree
 
-# Headless-проверка КАМПАНИИ ИЗ ПЯТИ УРОВНЕЙ.
+# Headless-проверка КАМПАНИИ ИЗ ТРЁХ УРОВНЕЙ.
 #   godot --headless --path . --script res://dev/smoke_levels.gd
 #
 # Кампания — это цепочка, и ломается она в стыках. Отдельно взятый уровень
@@ -12,13 +12,17 @@ extends SceneTree
 # банан под ногами и полицейская машина, стройка — конусы и знаки. Перепутать их
 # местами нельзя, а на глаз это ловится только после долгой игры.
 #
-# См. /Концепция/Кампания — пять уровней.md
+# См. /Концепция/Уровни/Кампания — три эпизода.md
 
 const SP := preload("res://scripts/spawner.gd")
 
+# Уровней три. Полос фона по-прежнему пять — полосы 2 и 3 склеены в уровень 2,
+# 4 и 5 в уровень 3, — но КАМПАНИЯ считается уровнями, а не полосами.
+const LEVELS : int = 3
+
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 28
+const EXPECTED_CHECKS : int = 26
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -45,13 +49,19 @@ func _initialize() -> void:
 
 func _test_table() -> void:
 	var lv : Array = SP.CAMPAIGN_LEVELS
-	_check(lv.size() == 5, "уровней пять: %d" % lv.size())
+	_check(lv.size() == LEVELS, "уровней три: %d" % lv.size())
 	# Боссы стоят там же, где в старом проекте.
 	_check(String(lv[0]["boss"]) == "ninja", "в конце первого — Нога Ниндзя")
 	_check(String(lv[1]["boss"]) == "croc", "в конце второго — Крокодил")
-	_check(String(lv[2]["boss"]) == "" and String(lv[3]["boss"]) == "",
-		"третий и четвёртый без боссов")
-	_check(String(lv[4]["boss"]) == "club", "в конце пятого — Хозяин клуба")
+	_check(String(lv[2]["boss"]) == "club", "в конце третьего — Хозяин клуба")
+	# Уровень — это ЭПИЗОД, и кончается он боем: пустых финалов больше нет.
+	# Раньше уровни 3 и 4 доигрывались просто буквой, потому что боссов было три
+	# на пять уровней; теперь уровней ровно столько же, сколько боёв.
+	var all_bossed := true
+	for d in lv:
+		if String(d["boss"]).is_empty():
+			all_bossed = false
+	_check(all_bossed, "каждый эпизод кончается боссом")
 
 	# Стартовая планка сложности РАСТЁТ от уровня к уровню: пятый не должен
 	# начинаться так же вяло, как первый.
@@ -80,35 +90,35 @@ func _test_table() -> void:
 # См. /Концепция/Уровни/Раскладка по уровням.md
 const LAYOUT : Dictionary = {
 	# предмет → на каких уровнях (0-based) он ДОЛЖЕН встречаться
-	"banana":     [0, 2],
-	"trash":      [0, 3],
-	"stone":      [0, 2],
-	"homeless":   [0, 3, 4],
-	"cone":       [0, 1, 4],
+	"banana":     [0, 1],
+	"trash":      [0, 2],
+	"stone":      [0, 1],
+	"homeless":   [0, 2],
+	"cone":       [0, 1, 2],
 	"roadsign":   [0],
 	"snake":      [0],
 	"poison":     [0],
 	"helm":       [1],
 	"bottle":     [1],
-	"bird":       [1, 2],
-	"umbrella":   [1, 2],
+	"bird":       [1],
+	"umbrella":   [1],
 	"campfire":   [1],
-	"lounger":    [2],
-	"compass":    [2],
-	"beer":       [2],
-	"shaman":     [2],
-	"police_car": [3],
-	"tire":       [3, 4],
-	"molotov":    [3],
-	"dog":        [3],
-	"thief":      [3],
-	"safe":       [3],
-	"cop":        [4],
-	"handcuffs":  [4],
-	"girl":       [4],
-	"cocktail":   [4],
-	"black_ace":  [4],
-	"loser_ticket": [4],
+	"lounger":    [1],
+	"compass":    [1],
+	"beer":       [1],
+	"shaman":     [1],
+	"police_car": [2],
+	"tire":       [2],
+	"molotov":    [2],
+	"dog":        [2],
+	"thief":      [2],
+	"safe":       [2],
+	"cop":        [2],
+	"handcuffs":  [2],
+	"girl":       [2],
+	"cocktail":   [2],
+	"black_ace":  [2],
+	"loser_ticket": [2],
 }
 # Единственное, что летит ВЕЗДЕ: это не предмет места, а ритм-событие.
 const EVERYWHERE : Array = ["glove"]
@@ -118,7 +128,7 @@ func _test_pools() -> void:
 	var sp : Node = e["sp"]
 	sp.set("campaign_mode", true)
 	var seen : Array = []
-	for lvl in 5:
+	for lvl in LEVELS:
 		sp.set("level", lvl)
 		var kinds : Dictionary = {}
 		for _i in 6000:
@@ -129,7 +139,7 @@ func _test_pools() -> void:
 	var stray   : Array = []
 	for item in LAYOUT:
 		var want : Array = LAYOUT[item]
-		for lvl in 5:
+		for lvl in LEVELS:
 			var here : bool = (seen[lvl] as Dictionary).has(item)
 			if want.has(lvl) and not here:
 				missing.append("%s нет на %d" % [item, lvl + 1])
@@ -140,7 +150,7 @@ func _test_pools() -> void:
 
 	var all_ok := true
 	for k in EVERYWHERE:
-		for lvl in 5:
+		for lvl in LEVELS:
 			if not (seen[lvl] as Dictionary).has(k):
 				all_ok = false
 	_check(all_ok, "боксёрская перчатка летит на всех уровнях")
@@ -149,7 +159,7 @@ func _test_pools() -> void:
 	# ждёт боссом в конце, и предмет, который объясняет себя этим боем, до боя
 	# читается как непонятная фигура, зачем-то замирающая посреди экрана.
 	var ninja_ok : bool = not (seen[0] as Dictionary).has("ninja")
-	for lvl in range(1, 5):
+	for lvl in range(1, LEVELS):
 		if not (seen[lvl] as Dictionary).has("ninja"):
 			ninja_ok = false
 	_check(ninja_ok, "ниндзя приходит в поток со второго уровня")
@@ -157,8 +167,8 @@ func _test_pools() -> void:
 	# И наборы РАЗНЫЕ: два уровня, совпавшие по составу, — это один уровень с
 	# двумя задниками.
 	var same : Array = []
-	for a in range(5):
-		for b in range(a + 1, 5):
+	for a in range(LEVELS):
+		for b in range(a + 1, LEVELS):
 			var ka : Array = (seen[a] as Dictionary).keys()
 			ka.sort()
 			var kb : Array = (seen[b] as Dictionary).keys()
@@ -213,8 +223,8 @@ func _test_advance() -> void:
 	_check(String(sp.call("level_name")) == String(SP.CAMPAIGN_LEVELS[1]["name"]),
 		"и название сменилось: %s" % sp.call("level_name"))
 
-	# Пятый уровень — последний: дальше идти некуда.
-	sp.set("level", 4)
+	# Третий уровень — последний: дальше идти некуда.
+	sp.set("level", LEVELS - 1)
 	sp.set("_letter_idx", SP.LETTER_WORD.length() - 1)
 	var got : Array = []
 	sp.connect("level_cleared", func(boss: String, nxt: int) -> void:
@@ -222,7 +232,7 @@ func _test_advance() -> void:
 	sp.call("_run_letter")
 	await _tick(8.0)
 	_check(not got.is_empty() and int(got[0][1]) == 0,
-		"после пятого следующего нет: %s" % [got])
+		"после третьего следующего нет: %s" % [got])
 	e["game"].queue_free()
 	await process_frame
 
@@ -233,16 +243,15 @@ func _test_background() -> void:
 	var bg : Node = e["game"].get_node_or_null("Background")
 	_check(bg != null and bg.has_method("set_level"), "фон умеет менять уровень")
 	if bg == null:
-		_check(false, "—")
-		_check(false, "—")
-		_check(false, "—")
+		for _i in LEVELS + 1:
+			_check(false, "—")
 		e["game"].queue_free()
 		await process_frame
 		return
-	# У каждого уровня СВОЯ полоса, и куски у них разные. Одна и та же полоса на
-	# двух уровнях означала бы, что смена локации не читается вовсе.
+	# У каждого уровня СВОЯ лента, и начинается она со своего куска. Один и тот же
+	# кусок на двух уровнях означал бы, что смена локации не читается вовсе.
 	var texs : Array = []
-	for lvl in range(1, 6):
+	for lvl in range(1, LEVELS + 1):
 		bg.call("set_level", lvl)
 		await process_frame
 		var t : Texture2D = (bg.get_node("BgA") as Sprite2D).texture
@@ -251,7 +260,7 @@ func _test_background() -> void:
 	var distinct : Dictionary = {}
 	for t in texs:
 		distinct[t] = true
-	_check(distinct.size() == 5, "и у всех пяти она своя: %d разных" % distinct.size())
+	_check(distinct.size() == LEVELS, "и у всех трёх она своя: %d разных" % distinct.size())
 	e["game"].queue_free()
 	await process_frame
 

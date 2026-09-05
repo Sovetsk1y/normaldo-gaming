@@ -123,35 +123,53 @@ func _test_ninja_kinds() -> void:
 		sp.add_child(it)
 		marks.append(it)
 	var yellow : Node2D = _put_ninja(sp, "smoke", vp)
-	await _tick(2.6)
-	var smoke : Array = get_root().get_tree().get_nodes_in_group("smoke")
-	_check(smoke.size() >= 1, "жёлтый поставил дым: облаков %d" % smoke.size())
 
-	# ДЫМ НЕ БЬЁТ. Он закрывает обзор, и всё: ни группы препятствий, ни хитбокса,
-	# ни урона. Иначе жёлтый превращается в третий вид стены, а от стен в игре и
-	# так уворачиваются одинаково.
-	var harmless := true
+	# Ждём НЕ фиксированное число кадров, а САМО СОБЫТИЕ — облако, севшее на
+	# мишень. Ниндзя живёт на таймерах реального времени, а тест считает кадры:
+	# под нагрузкой 2.6 «секунды» кадров растягивались в шесть секунд реальных,
+	# облака успевали дожить своё и начать растворяться, — а растворяющееся
+	# облако отлипает от предмета и уезжает с потоком (см. smoke_screen.gd).
+	# Тест мигал «накрыто 0 из 2», не поймав при этом ничего сломанного.
+	#
+	# Поэтому смотрим каждый кадр и запоминаем ЛУЧШЕЕ увиденное: облако село на
+	# предмет хотя бы раз — вопрос закрыт, дальше оно имеет полное право уехать.
+	var seen_clouds : int = 0
+	var covering    : int = 0
+	var harmless  := true
 	var over_head := true
-	for c in smoke:
-		if c.is_in_group("obstacle") or c is CollisionObject2D:
-			harmless = false
-		# Нормальдо в сцене на z_index 3 — дым обязан быть выше: он пролетает ПОД
-		# ним, а не появляется поверх.
-		if int(c.get("z_index")) <= 3:
-			over_head = false
+	var t0 : int = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 9000:
+		get_root().get_tree().paused = false
+		await process_frame
+		var smoke : Array = get_root().get_tree().get_nodes_in_group("smoke")
+		seen_clouds = maxi(seen_clouds, smoke.size())
+
+		# ДЫМ НЕ БЬЁТ. Он закрывает обзор, и всё: ни группы препятствий, ни
+		# хитбокса, ни урона. Иначе жёлтый превращается в третий вид стены, а от
+		# стен в игре и так уворачиваются одинаково.
+		var on_marks : int = 0
+		for c in smoke:
+			if c.is_in_group("obstacle") or c is CollisionObject2D:
+				harmless = false
+			# Нормальдо в сцене на z_index 3 — дым обязан быть выше: он
+			# пролетает ПОД ним, а не появляется поверх.
+			if int(c.get("z_index")) <= 3:
+				over_head = false
+			# И садится он НА ПРЕДМЕТ, а не в пустой лейн: смысл в том, что под
+			# ним не видно, что летит.
+			for m in marks:
+				if is_instance_valid(m) \
+						and (c as Node2D).global_position.distance_to((m as Node2D).global_position) < 6.0:
+					on_marks += 1
+					break
+		covering = maxi(covering, on_marks)
+		if covering >= 1:
+			break
+
+	_check(seen_clouds >= 1, "жёлтый поставил дым: облаков %d" % seen_clouds)
 	_check(harmless, "дым безвреден: ни группы препятствия, ни хитбокса")
 	_check(over_head, "и рисуется поверх Нормальдо — тот проходит под ним")
-
-	# И садится он НА ПРЕДМЕТ, а не в пустой лейн: смысл в том, что под ним не
-	# видно, что летит.
-	var covering := 0
-	for c in smoke:
-		for m in marks:
-			if is_instance_valid(m) \
-					and (c as Node2D).global_position.distance_to((m as Node2D).global_position) < 6.0:
-				covering += 1
-				break
-	_check(covering >= 1, "и завешивает предметы: накрыто %d из %d" % [covering, smoke.size()])
+	_check(covering >= 1, "и завешивает предметы: накрыто %d из %d" % [covering, seen_clouds])
 
 	# ДЫМ ЕДЕТ ВЛЕВО вместе с потоком. Проверяется самый честный случай — облако
 	# БЕЗ цели (шашка ушла в пустой лейн): облако с целью ездит за ней и потому

@@ -14,16 +14,19 @@ extends SceneTree
 #      dev/art/level1/README.md): кладка и линия пола обязаны сходиться, иначе
 #      посреди забега под ногами ступенька.
 #
-# Проверяются ВСЕ ПЯТЬ уровней: полос теперь пять, режет их один и тот же
-# скрипт, и ошибка нарезки одинаково тихая на любой из них.
+# Проверяются ВСЕ ПЯТЬ ПОЛОС — их пять, а уровней три: полосы 2 и 3 склеены в
+# уровень 2, полосы 4 и 5 — в уровень 3. Нарезку проверяем по ПОЛОСАМ (режет их
+# один и тот же скрипт, и ошибка нарезки одинаково тихая на любой), а склейку —
+# по УРОВНЯМ, потому что стык полосы с полосой внутри уровня игрок видит, а
+# отдельно взятую полосу — нет.
 #
-# См. /Концепция/Уровни/1-Канализация.md, /Концепция/Уровни/Кампания — пять уровней.md
+# См. /Концепция/Уровни/1-Канализация.md, /Концепция/Уровни/Кампания — три эпизода.md
 
 const BG := preload("res://scripts/background.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 10
+const EXPECTED_CHECKS : int = 12
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -44,32 +47,56 @@ func _initialize() -> void:
 
 # Размер куска — не украшение: высота обязана быть высотой экрана (иначе поля
 # или обрезка), а ширина одинаковой у всех (иначе шаг прокрутки врёт).
-# Куски одного уровня. Грузятся по пути, а не берутся из массива: в скрипте их
-# больше нет — сто двадцать предзагруженных текстур не помещаются в память
+# Куски одной ПОЛОСЫ. Грузятся по пути, а не берутся из массива: в скрипте их
+# больше нет — сто тридцать предзагруженных текстур не помещаются в память
 # (см. background.gd).
-func _slices(level: int) -> Array:
+func _slices(strip: int) -> Array:
 	var out : Array = []
-	for i in int(BG.LEVEL_SLICES[level]):
+	for i in int(BG.STRIP_SLICES[strip]):
 		out.append(load("res://assets/backgrounds/level%d/level%d_%02d.png"
-			% [level, level, i + 1]))
+			% [strip, strip, i + 1]))
+	return out
+
+# Куски УРОВНЯ — куски всех его полос подряд. Ровно эта лента и едет по экрану,
+# поэтому склейку и порядок меряем по ней.
+func _level_chain(level: int) -> Array:
+	var out : Array = []
+	for strip in (BG.LEVEL_STRIPS[level] as Array):
+		out.append_array(_slices(int(strip)))
 	return out
 
 func _test_slices() -> void:
 	var bad : Array = []
 	var total : int = 0
-	for level in range(1, BG.LEVEL_COUNT + 1):
-		var arr : Array = _slices(level)
+	for strip in BG.STRIP_SLICES.keys():
+		var arr : Array = _slices(int(strip))
 		total += arr.size()
-		if arr.size() != int(BG.LEVEL_SLICES[level]):
-			bad.append("уровень %d: кусков %d" % [level, arr.size()])
+		if arr.size() != int(BG.STRIP_SLICES[strip]):
+			bad.append("полоса %d: кусков %d" % [int(strip), arr.size()])
 		for i in arr.size():
 			var t : Texture2D = arr[i]
 			if t == null or t.get_width() != int(BG.SLICE_W) or t.get_height() != int(BG.SLICE_H):
-				bad.append("%d/%02d: %s" % [level, i + 1, str(t.get_size()) if t != null else "нет"])
-	_check(bad.is_empty(), "все %d кусков пяти уровней %d×%d: %s"
+				bad.append("%d/%02d: %s" % [int(strip), i + 1, str(t.get_size()) if t != null else "нет"])
+	_check(bad.is_empty(), "все %d кусков пяти полос %d×%d: %s"
 		% [total, BG.SLICE_W, BG.SLICE_H, bad])
-	_check(BG.LEVEL_SLICES.size() == BG.LEVEL_COUNT,
-		"полос ровно пять: %d" % BG.LEVEL_SLICES.size())
+
+	# Уровней три, полос пять, и каждая полоса разложена РОВНО ПО ОДНОМУ РАЗУ.
+	# Полоса, забытая в раскладке, — это кусок игры, который никто никогда не
+	# увидит; полоса, попавшая в два уровня, — это два уровня с одинаковой
+	# стеной. Оба промаха на глаз не ловятся вообще.
+	_check(BG.LEVEL_STRIPS.size() == BG.LEVEL_COUNT,
+		"уровней ровно три: %d" % BG.LEVEL_STRIPS.size())
+	var used : Array = []
+	for level in range(1, BG.LEVEL_COUNT + 1):
+		for strip in (BG.LEVEL_STRIPS[level] as Array):
+			used.append(int(strip))
+	used.sort()
+	var want : Array = []
+	for strip in BG.STRIP_SLICES.keys():
+		want.append(int(strip))
+	want.sort()
+	_check(used == want, "каждая полоса разложена ровно раз: %s при полосах %s"
+		% [used, want])
 
 	var vp : Vector2 = get_root().get_visible_rect().size
 	_check(is_equal_approx(BG.SLICE_H, vp.y),
@@ -81,10 +108,11 @@ func _test_slices() -> void:
 # соседский шов по всем пяти полосам — 41 (уровень 4, куски 23→24), и это шов
 # самого рисунка, а не нарезки.
 #
-# Стык ПОСЛЕДНЕГО куска с ПЕРВЫМ проверяется отдельным, более мягким порогом:
-# полоса не зациклена, её хвост при нарезке отбрасывается, и сходиться там
-# нечему. Один такой стык на круг — цена цикла, и она измерена (29–87 по
-# уровням). Альтернатива — пинг-понг — обходится дороже: см. background.gd.
+# НЕНАРИСОВАННЫЕ стыки проверяются отдельным, более мягким порогом. Их в уровне
+# ровно столько, сколько у него полос: переход с полосы на полосу (полосы не
+# рисовались продолжением друг друга) и замыкание ленты уровня на её начало
+# (полоса не зациклена, её хвост при нарезке отбрасывается). Измерено 29–87.
+# Альтернатива циклу — пинг-понг — обходится дороже: см. background.gd.
 const SEAM_LIMIT : float = 48.0
 const WRAP_LIMIT : float = 95.0
 
@@ -92,33 +120,38 @@ func _test_seams() -> void:
 	var worst : float = 0.0
 	var worst_at : String = ""
 	var broken : Array = []
-	for level in range(1, BG.LEVEL_COUNT + 1):
-		var arr : Array = _slices(level)
+	for strip in BG.STRIP_SLICES.keys():
+		var arr : Array = _slices(int(strip))
 		for i in arr.size() - 1:
 			var a : Image = (arr[i] as Texture2D).get_image()
 			var b : Image = (arr[i + 1] as Texture2D).get_image()
 			var d : float = _edge_diff(a, b)
 			if d > worst:
 				worst = d
-				worst_at = "ур.%d %02d→%02d" % [level, i + 1, i + 2]
+				worst_at = "пол.%d %02d→%02d" % [int(strip), i + 1, i + 2]
 			if d > SEAM_LIMIT:
-				broken.append("ур.%d %02d→%02d %.0f" % [level, i + 1, i + 2, d])
-	_check(broken.is_empty(), "все швы сходятся, худший %s (%.0f из 255): %s"
+				broken.append("пол.%d %02d→%02d %.0f" % [int(strip), i + 1, i + 2, d])
+	_check(broken.is_empty(), "все нарисованные швы сходятся, худший %s (%.0f из 255): %s"
 		% [worst_at, worst, broken])
 
-	# Замыкание круга. Порог свой и мягкий — это единственный стык, которого
-	# художник не рисовал. Смысл проверки в том, чтобы он не уехал ЕЩЁ дальше
-	# при перенарезке полос.
+	# Стыки, которых художник не рисовал: конец полосы → начало следующей и
+	# замыкание ленты уровня. Смысл проверки в том, чтобы они не уехали ЕЩЁ
+	# дальше при перенарезке полос или при пересборке раскладки.
 	var wrap_worst : float = 0.0
 	var wrap_bad : Array = []
 	for level in range(1, BG.LEVEL_COUNT + 1):
-		var arr : Array = _slices(level)
-		var d : float = _edge_diff((arr[arr.size() - 1] as Texture2D).get_image(),
-			(arr[0] as Texture2D).get_image())
-		wrap_worst = maxf(wrap_worst, d)
-		if d > WRAP_LIMIT:
-			wrap_bad.append("ур.%d %.0f" % [level, d])
-	_check(wrap_bad.is_empty(), "замыкание круга в пределах %.0f, худшее %.0f: %s"
+		var strips : Array = BG.LEVEL_STRIPS[level]
+		for i in strips.size():
+			var st : int = int(strips[i])
+			var nx : int = int(strips[(i + 1) % strips.size()])
+			var tail : Array = _slices(st)
+			var head : Array = _slices(nx)
+			var d : float = _edge_diff((tail[tail.size() - 1] as Texture2D).get_image(),
+				(head[0] as Texture2D).get_image())
+			wrap_worst = maxf(wrap_worst, d)
+			if d > WRAP_LIMIT:
+				wrap_bad.append("ур.%d %d→%d %.0f" % [level, st, nx, d])
+	_check(wrap_bad.is_empty(), "ненарисованные стыки в пределах %.0f, худший %.0f: %s"
 		% [WRAP_LIMIT, wrap_worst, wrap_bad])
 
 func _edge_diff(a: Image, b: Image) -> float:
@@ -178,25 +211,28 @@ func _test_scene() -> void:
 	# Поэтому теперь берётся сама цепочка и по ней МЕРЯЮТСЯ ШВЫ — тем же
 	# _edge_diff, что и выше. Так проверка ловит любой порядок, который на
 	# бумаге выглядит связным, а на экране рвёт картинку.
-	bg.call("set_level", 5)          # самая короткая полоса: круг успеет замкнуться
-	var n5 : int = int(BG.LEVEL_SLICES[5])
-	var arr5 : Array = _slices(5)
+	# Уровень 1 — самая короткая лента (одна полоса в 14 кусков): круг успеет
+	# замкнуться дважды. На уровнях 2 и 3 лента из двух полос, 72 и 50 кусков, и
+	# два круга по ней — это полтораста сравнений картинок ради того же ответа.
+	bg.call("set_level", 1)
+	var n1 : int = int(BG.STRIP_SLICES[1])
+	var arr1 : Array = _level_chain(1)
 	var chain : Array = []
-	for i in n5 * 2 + 3:
+	for i in n1 * 2 + 3:
 		chain.append(int(bg.get("_next_idx")))
 		bg.call("_take_next_slice")
 
 	var cycled := true
 	for i in range(1, chain.size()):
-		if int(chain[i]) != (int(chain[i - 1]) + 1) % n5:
+		if int(chain[i]) != (int(chain[i - 1]) + 1) % n1:
 			cycled = false
 	_check(cycled, "куски идут по кругу: %s…" % [chain.slice(0, 12)])
 
 	var chain_worst : float = 0.0
 	var chain_bad : Array = []
 	for i in range(1, chain.size()):
-		var a : Image = (arr5[int(chain[i - 1])] as Texture2D).get_image()
-		var b : Image = (arr5[int(chain[i])] as Texture2D).get_image()
+		var a : Image = (arr1[int(chain[i - 1])] as Texture2D).get_image()
+		var b : Image = (arr1[int(chain[i])] as Texture2D).get_image()
 		var d : float = _edge_diff(a, b)
 		chain_worst = maxf(chain_worst, d)
 		if d > WRAP_LIMIT:

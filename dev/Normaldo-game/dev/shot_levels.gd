@@ -1,9 +1,9 @@
 extends SceneTree
 
-# Кадры пяти уровней кампании — настоящий рендер.
+# Кадры трёх уровней кампании — настоящий рендер.
 #   xvfb-run -a godot --path . --script res://dev/shot_levels.gd -- <папка> <такт>
 #
-# такт: 1..5 — забег на соответствующем уровне; card — карточка перехода.
+# такт: 1..3 — забег на соответствующем уровне; card — карточка перехода.
 
 func _initialize() -> void:
 	_bail_out()
@@ -31,7 +31,7 @@ func _initialize() -> void:
 		hud.call("_show_level_card", 2)
 		await _wait(0.9)
 	else:
-		var lvl : int = clampi(int(mode), 1, 5)
+		var lvl : int = clampi(int(mode), 1, 3)
 		sp.set("level", lvl - 1)
 		sp.call("clear_items")
 		bg.call("set_level", lvl)
