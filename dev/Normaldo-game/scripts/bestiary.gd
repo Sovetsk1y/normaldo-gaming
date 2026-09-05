@@ -129,7 +129,7 @@ const ENTRIES : Array = [
 	  "text": "Урона нет — есть четыре секунды заплетающихся ног." },
 	{ "id": "shaman", "section": S_ENEMY, "title": "ШАМАН",
 	  "icon": "res://assets/items/shaman.png", "script": "hazard_item", "kind": "shaman",
-	  "text": "Колдует на ходу. Что именно — узнаешь, когда прилетит." },
+	  "text": "Зовёт двух змей и пускает их кружить вокруг себя. Мимо не пройдёшь — только между." },
 	{ "id": "handcuffs", "section": S_ENEMY, "title": "НАРУЧНИКИ",
 	  "icon": "res://assets/items/handcuffs.png", "script": "effect_item", "kind": "handcuffs",
 	  "text": "Сковывают: пока не спадут, голова еле ползёт." },

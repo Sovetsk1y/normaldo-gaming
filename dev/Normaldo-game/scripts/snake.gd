@@ -81,12 +81,43 @@ func _ensure_rattle() -> void:
 	if not _rattle_player.playing:
 		_rattle_player.play()
 
+# ── Змея на службе шамана ────────────────────────────────────────────────────
+# Призванная змея не летит по прямой, а КРУЖИТ вокруг хозяина: он идёт своим
+# ходом, она держит вокруг него дистанцию. Это делает шамана не предметом, а
+# зоной — объехать его по соседней линии больше нельзя, надо смотреть, где
+# сейчас змеи.
+#
+# Хозяина держим слабой ссылкой по смыслу: пропал (сбили, улетел за край) —
+# змея не пропадает вместе с ним и не зависает на месте, а доживает свой полёт
+# сама. Змея, исчезающая в момент смерти шамана, читалась бы как баг: игрок
+# видел бы, как угроза растворяется у него перед носом.
+var _orbit_host  : Node2D = null
+var _orbit_r     : float  = 0.0
+var _orbit_a     : float  = 0.0
+var _orbit_w     : float  = 0.0     # радиан в секунду
+
+func escort(host: Node2D, radius: float, angle: float, omega: float) -> void:
+	_orbit_host = host
+	_orbit_r    = radius
+	_orbit_a    = angle
+	_orbit_w    = omega
+	position    = host.position + Vector2(cos(angle), sin(angle)) * radius
+
 func _process(delta: float) -> void:
 	if _falling:
 		_fall_vel = KnockFall.step(self, self, _fall_vel, _fall_spin, delta)
 		if KnockFall.is_gone(self):
 			queue_free()
 		return
+	if _orbit_host != null:
+		if is_instance_valid(_orbit_host):
+			_orbit_a += _orbit_w * delta
+			position  = _orbit_host.position \
+				+ Vector2(cos(_orbit_a), sin(_orbit_a)) * _orbit_r
+			_pulse_t += delta * 4.0
+			ItemAura.pulse(_glow, 0.5 + 0.5 * sin(_pulse_t), AURA_PX)
+			return
+		_orbit_host = null
 	position.x -= speed * delta
 	if position.x < -200.0:
 		queue_free()

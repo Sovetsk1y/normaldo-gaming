@@ -14,6 +14,11 @@ const CASEY_TEX := preload("res://assets/items/casey_mask.png")
 const COMPASS_TEX := preload("res://assets/items/compass.png")
 const HAT_TEX     := preload("res://assets/items/magic_hat.png")
 const COLA_TEX    := preload("res://assets/items/cola.png")
+# Венцы 10-го уровня. Часы — та же картинка, что у предмета «песочные часы», и
+# это НЕ лень: перк мага делает ровно то же, что предмет, и разные картинки под
+# одно действие заставляли бы игрока искать разницу, которой нет.
+const HOURGLASS_TEX := preload("res://assets/items/hourglass.png")
+const WEB_TEX       := preload("res://assets/skills/spider_man/web1.png")
 
 # 34 было мало: кружок в углу экрана и так на периферии зрения.
 const D    : float = 40.0
@@ -101,6 +106,23 @@ func setup(nrm: Node) -> void:
 	specs.append({ "key": "item:cola", "tex": COLA_TEX, "sym": "",
 		"mod": Color(1, 1, 1), "ring": Color(1.00, 0.35, 0.30), "dyn": true,
 		"title": "БАНКА КОЛЫ", "desc": "Голова двигается быстрее." })
+
+	# ВЕНЦЫ 10-го УРОВНЯ. В ряду они постоянные, а не динамические: у обоих есть
+	# ОТКАТ, и весь смысл кружка — показать, готов перк прямо сейчас или ещё
+	# копится. Динамический (появляющийся только на время действия) отвечал бы
+	# на вопрос «действует ли», а у этих двоих вопрос обратный — «есть ли он у
+	# меня на следующий удар».
+	var lvl : int = int(SaveData.skin_level)
+	if SkinProgression.has_perk(sid, lvl, "time_slow"):
+		specs.append({ "key": "perk:time_slow", "tex": HOURGLASS_TEX, "sym": "",
+			"mod": Color(1, 1, 1), "ring": Color(0.55, 0.85, 1.00),
+			"title": "ОСТАНОВКА ВРЕМЕНИ",
+			"desc": "Раз в 30 c мир сам замедляется на 3 c." })
+	if SkinProgression.has_perk(sid, lvl, "spider_reflex"):
+		specs.append({ "key": "perk:spider_reflex", "tex": WEB_TEX, "sym": "",
+			"mod": Color(1, 1, 1), "ring": Color(0.95, 0.25, 0.30),
+			"title": "ПАУЧЬЯ РЕАКЦИЯ",
+			"desc": "Раз в 10 c один удар уходит в пустоту сам." })
 
 	# Laid out from this layer's origin — the HUD positions the layer itself
 	# (under the resources strip, right of the fat panel).

@@ -113,6 +113,24 @@ const KINDS : Dictionary = {
 const WAVE_AMP    : float = 46.0
 const WAVE_SPEED  : float = 3.2
 const COP_CALL_PERIOD : float = 1.1   # через сколько после появления он бросает
+
+# ── Шаман: две змеи вокруг себя ──────────────────────────────────────────────
+# Шаман до сих пор был копом без броска: тот же человек в потоке, тот же удар на
+# единицу, а всё его колдовство — три секунды перевёрнутого управления, которые
+# видно только по значку. Теперь он ПРИЗЫВАЕТ: на соседних линиях появляются две
+# змеи и начинают кружить вокруг него.
+#
+# Змеи именно кружат, а не летят рядом. Летящие рядом читались бы как три
+# отдельных предмета, между которыми есть щель; кружащие — как ОДНА зона,
+# которую надо обойти целиком, и щель в ней ездит. Это и есть разница между
+# предметом и способностью.
+#
+# Две, а не четыре: на пяти линиях четыре змеи вокруг шамана перекрывают экран
+# по вертикали целиком, и обойти его становится нельзя вовсе.
+const SHAMAN_CALL_AT   : float = 0.45   # через сколько после появления зовёт
+const SHAMAN_ORBIT_SEC : float = 3.2    # полный оборот
+const SHAMAN_SNAKE_SPD : float = 0.55   # доля скорости шамана, если хозяина не станет
+const SNAKE_SCENE      := preload("res://scenes/snake.tscn")
 const HANDCUFF_DROP_SPEED_MULT : float = 1.25
 # Добавка к скорости броска: наручники обязаны ДОГНАТЬ, а не плыть рядом с
 # потоком, иначе бросок читается как «коп что-то обронил».
@@ -130,6 +148,8 @@ var _wave_t  : float      = 0.0
 var _spin    : float      = 0.0
 var _cop_t   : float      = 0.0
 var _cop_thrown : bool    = false
+var _shaman_t      : float = 0.0
+var _shaman_called : bool  = false
 var _alive_t : float      = 0.0     # сколько живёт — по нему качается и кричит
 var _sway_ph : float      = 0.0
 var _human   : bool       = false
@@ -205,6 +225,8 @@ func _process(delta: float) -> void:
 
 	if kind == "cop":
 		_tick_cop(delta)
+	elif kind == "shaman":
+		_tick_shaman(delta)
 
 # Сколько крика слышно и сколько занимает затухание.
 const CRY_LEN  : float = 1.4
@@ -295,6 +317,47 @@ func _tick_cop(delta: float) -> void:
 	get_tree().create_timer(0.5).timeout.connect(func() -> void:
 		if is_instance_valid(self) and is_instance_valid(_sprite):
 			_sprite.texture = TEX["cop"])
+
+# Призыв — ОДИН раз за пролёт и только на экране: за краем игрок его не увидит,
+# а увидит уже готовую стену из трёх тварей.
+func _tick_shaman(delta: float) -> void:
+	if _shaman_called:
+		return
+	_shaman_t += delta
+	if _shaman_t < SHAMAN_CALL_AT:
+		return
+	if position.x > get_viewport_rect().size.x or position.x < 40.0:
+		return
+	_shaman_called = true
+	_summon_snakes()
+
+func _summon_snakes() -> void:
+	var p := get_parent()
+	if p == null:
+		return
+	# Радиус — ВЫСОТА ЛИНИИ, и берём мы её у спавнера, а не считаем сами: линий
+	# пять, но знание об этом принадлежит спавнеру, и своя копия числа здесь
+	# разошлась бы с ним при первой же правке сетки. Змеи тогда встали бы не на
+	# соседние линии, а «примерно рядом».
+	var r : float = get_viewport_rect().size.y * 0.2
+	if p.has_method("_lane_centers"):
+		var c : Array = p.call("_lane_centers")
+		if c.size() >= 2:
+			r = absf(float(c[1]) - float(c[0]))
+	var omega : float = TAU / SHAMAN_ORBIT_SEC
+	# Стартуют строго над и под шаманом — то есть на соседних линиях; дальше
+	# расходятся по кругу, оставаясь друг напротив друга.
+	for a in [-PI * 0.5, PI * 0.5]:
+		var sn := SNAKE_SCENE.instantiate()
+		sn.speed = speed * SHAMAN_SNAKE_SPD
+		p.add_child(sn)
+		sn.call("escort", self, r, a, omega)
+	var a2 := AudioStreamPlayer.new()
+	a2.stream = CAST_SFX
+	a2.volume_db = -7.0
+	p.add_child(a2)
+	a2.play()
+	a2.finished.connect(a2.queue_free)
 
 func _drop_handcuffs() -> void:
 	var p := get_parent()

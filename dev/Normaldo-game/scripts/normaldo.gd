@@ -190,6 +190,23 @@ var _bobbing        : bool  = false
 var velocity_x      : float = 0.0
 var _prev_x         : float = 0.0
 var _slow_remaining   : float = 0.0
+
+# ── Венцы 10-го уровня ───────────────────────────────────────────────────────
+# «ОСТАНОВКА ВРЕМЕНИ» мага: раз в 30 секунд мир сам замедляется на 3 секунды —
+# те же песочные часы, только их не надо ловить. Замедляется именно МИР
+# (предметы и фон), а не голова: перк — передышка, а не помеха.
+#
+# «ПАУЧЬЯ РЕАКЦИЯ» Спайди: раз в 10 секунд один удар уходит в пустоту сам.
+# Не щит и не неуязвимость: заряд ОДИН, тратится на первый же удар, дальше
+# копится заново. Кружок отката в интерфейсе показывает, есть ли он сейчас, —
+# без этого «срабатывает сама» означало бы «срабатывает когда-то».
+const TIME_SLOW_PERIOD : float = 30.0
+const TIME_SLOW_LEN    : float = 3.0
+const REFLEX_PERIOD    : float = 10.0
+
+var _perk_time_slow : bool  = false
+var _perk_reflex    : bool  = false
+var _perk_timer     : float = TIME_SLOW_PERIOD
 var _slow_total       : float = 0.0
 var _was_slowed       : bool  = false
 var _invert_remaining : float = 0.0   # компас: реверс управления на N секунд
@@ -1137,6 +1154,12 @@ func _physics_process(delta: float) -> void:
 			_status_off("curse")
 			if _music_reversed:
 				_set_music_reversed(false)
+	if _perk_time_slow and not _dead and _input_enabled:
+		_perk_timer -= delta
+		if _perk_timer <= 0.0:
+			_perk_timer = TIME_SLOW_PERIOD
+			_fire_time_slow()
+
 	# Значки статусов живут у родителя и потому не едут за головой сами —
 	# двигаем их здесь, в том же такте, что и саму голову: значок, отстающий на
 	# кадр, читается как отдельный предмет рядом.
@@ -1424,6 +1447,37 @@ func _apply_hourglass() -> void:
 	_vfx_particles(SkinSkills.TRANSFORM)
 	_play_oneshot(_SFX_GLITTER)
 
+# ── ОСТАНОВКА ВРЕМЕНИ (маг, 10 уровень) ─────────────────────────────────────
+# Те же песочные часы, только их не надо ловить. Отдельного механизма нет и не
+# нужно: замедлением мира владеет спавнер, и перк — это ещё одна причина его
+# позвать. Свой механизм рядом с чужим разошёлся бы с ним при первой правке
+# (разная длительность, разный множитель, разное поведение на боссе).
+func _fire_time_slow() -> void:
+	var spawner := get_parent().get_node_or_null("Spawner")
+	if spawner == null or not spawner.has_method("apply_slow_mo"):
+		return
+	# На боссе и в мини-играх поток принадлежит им — туда не лезем.
+	if bool(spawner.get("_frozen")):
+		return
+	spawner.call("apply_slow_mo", spawner.SLOW_MO_FACTOR, TIME_SLOW_LEN)
+	start_skill_cd("perk:time_slow", TIME_SLOW_PERIOD)
+	_show_floating_text("ОСТАНОВКА ВРЕМЕНИ", Color(0.55, 0.85, 1.00))
+	_play_oneshot(_SFX_GLITTER)
+
+# ── ПАУЧЬЯ РЕАКЦИЯ (Спайди, 10 уровень) ─────────────────────────────────────
+# Один удар в 10 секунд уходит в пустоту сам. Тратится ТОЛЬКО на удар, который
+# и правда бы прошёл: спалить реакцию на бутылке, которая не бьёт, — это отнять
+# у игрока то, за что он платил десятым уровнем, и ничего ему не дать.
+func _try_spider_reflex(area: Area2D) -> bool:
+	if not _perk_reflex or not is_skill_ready("perk:spider_reflex"):
+		return false
+	start_skill_cd("perk:spider_reflex", REFLEX_PERIOD)
+	_vfx_dodge_flash()
+	StatusFx.burst(get_parent(), global_position, "shield", _art_px() * 1.8)
+	_show_floating_text("ПАУЧЬЯ РЕАКЦИЯ!", Color(0.95, 0.25, 0.30))
+	_play_skill_sfx(SkinSkills.DODGE)
+	return true
+
 # Жетон казино: единственный предмет забега, который платит ВНЕ забега —
 # начисляется сразу в сейв, чтобы не сгорел вместе со смертью.
 func apply_casino_chip() -> void:
@@ -1695,6 +1749,16 @@ func _build_skin_runtime() -> void:
 	_treasure_passive = (_passive_id == "treasure")
 	_scars_passive    = (_passive_id == "scars")
 	_harry_second_chance_ready = (_passive_id == "second_chance")
+	# Венцы 10-го уровня. Они не пассивки из SkinSkills, а награды лестницы
+	# (см. skin_progression.gd), поэтому и спрашиваем лестницу, а не набор
+	# скиллов. Оба были объявлены в лестнице и не написаны в коде: игрок платил
+	# за десятый уровень и не получал ничего.
+	var lvl : int = int(SaveData.skin_level)
+	_perk_time_slow = SkinProgression.has_perk(sid, lvl, "time_slow")
+	_perk_reflex    = SkinProgression.has_perk(sid, lvl, "spider_reflex")
+	_perk_timer     = TIME_SLOW_PERIOD
+	if _perk_reflex:
+		start_skill_cd("perk:spider_reflex", REFLEX_PERIOD)
 	# Retired legacy uniques (Dracula immortality / Wizard magic) — the new model
 	# gives Dracula «Бомж-жор» and Wizard no passive.
 	_dracula_immortal_ready = false
@@ -3894,6 +3958,11 @@ func _handle_obstacle(area: Area2D) -> void:
 		return
 
 	var dmg := int(area.get("damage")) if area.get("damage") != null else 1
+	# Паучья реакция — ПОСЛЕ подсчёта урона и после резистов: резист конкретнее
+	# (он про этот предмет), а реакция общая и тратится на что угодно бьющее.
+	if dmg > 0 and _try_spider_reflex(area):
+		_kill_item(area)
+		return
 	# НУЛЕВОЙ УРОН — ЭТО НЕ УДАР. Раньше сюда всё равно уходил `_take_hit(0)`, а
 	# он на нулевом жире зовёт `_die()` и в любом случае обнуляет счётчик пиццы:
 	# бутылка и девочка-зазывала, которые по таблице не бьют вовсе, съедали
