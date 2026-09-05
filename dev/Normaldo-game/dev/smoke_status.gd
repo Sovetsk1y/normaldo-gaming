@@ -144,7 +144,7 @@ func _test_flash_follows() -> void:
 # то, что у значка проверить было нечем: она и правда появляется отдельным
 # узлом с материалом, надувается через `open_amount` и уходит сама.
 func _test_sphere() -> void:
-	_n.call("_sphere_flash", 1.25)
+	_n.call("_sphere_flash", 1.15)
 	await _wait_frames(2)
 	var s = _fx("sphere")
 	_check(s != null, "сфера появилась")

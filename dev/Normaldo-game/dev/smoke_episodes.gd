@@ -14,7 +14,7 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 26
+const EXPECTED_CHECKS : int = 29
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -201,6 +201,38 @@ func _test_curtain() -> void:
 	if is_instance_valid(t):
 		t.queue_free()
 	await process_frame
+
+	# За занавесом уезжает не только фон: диван и телевизор — мебель квартиры, и
+	# на улице им делать нечего. Сами они уползают влево вместе с фоном, но
+	# занавес поднимается раньше, и первые секунды нового эпизода игрок смотрел
+	# на квартиру, переехавшую на улицу.
+	var game : Node = _hud.get_parent()
+	_check(_on_screen(game, "Couch") or _on_screen(game, "Tv"),
+		"до смены уровня мебель на сцене есть")
+	_hud.call("_clear_apartment", 2)
+	await process_frame
+	await process_frame
+	# Спрашиваем «не видно», а не «узла нет»: телевизор доводит свой звук
+	# затуханием и живёт ещё долю секунды после того, как исчез с экрана. Игроку
+	# важно первое.
+	_check(not _on_screen(game, "Couch") and not _on_screen(game, "Tv"),
+		"а на втором уровне её не видно")
+
+	# На ПЕРВОМ уровне мебель остаётся: там комната и есть фон.
+	var game2 : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game2)
+	await process_frame
+	var hud2 : Node = game2.get_node_or_null("HUD")
+	hud2.call("_clear_apartment", 1)
+	await process_frame
+	_check(_on_screen(game2, "Couch"),
+		"а на первом уровне диван остаётся — там квартира и есть фон")
+	game2.queue_free()
+	await process_frame
+
+func _on_screen(game: Node, name: String) -> bool:
+	var n := game.get_node_or_null(name)
+	return n != null and is_instance_valid(n) and (n as CanvasItem).visible
 
 # Индекс сюжетного задания по его условию. По номеру искать нельзя: главы
 # книги перетасовывались уже дважды, и тест, прибитый к числу, переживает

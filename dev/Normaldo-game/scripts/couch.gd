@@ -93,6 +93,19 @@ func start_game() -> void:
 	if _normaldo and _normaldo.has_method("start_bob"):
 		_normaldo.start_bob()
 
+# Уйти со сцены СРАЗУ. Обычно диван уезжает влево вместе с фоном и там же себя
+# освобождает — это верно для первого уровня, где комната и есть фон. Но перед
+# вторым и третьим эпизодом фон подменяется за занавесом, и занавес поднимается
+# раньше, чем диван успевает уехать: на улице пару секунд стоит диван из
+# квартиры. За занавесом его и убираем — переставлять мебель при зрителе
+# незачем.
+func leave_scene() -> void:
+	visible = false
+	set_process(false)
+	if _thruster_audio and _thruster_audio.playing:
+		_thruster_audio.stop()
+	queue_free()
+
 func menu_position() -> Vector2:
 	return get_viewport_rect().get_center() + MENU_OFFSET
 

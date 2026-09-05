@@ -187,6 +187,23 @@ func _on_remote_pressed() -> void:
 func start_game() -> void:
 	pass
 
+# Уйти со сцены сразу — см. `couch.leave_scene`. Звук глушим руками: телевизор
+# болтает своим каналом, и оборванный на полуслове он слышен как сбой, а не как
+# смена сцены.
+func leave_scene() -> void:
+	# ВИДНО его перестаёт быть сразу — за занавесом, где смена и должна
+	# случиться. А звук доводится затуханием: телевизор болтает своим каналом, и
+	# оборванный на полуслове он слышен как сбой. Узел живёт эти доли секунды
+	# только ради звука, на экране его уже нет.
+	visible = false
+	set_process(false)
+	if _tv_audio and _tv_audio.playing:
+		var tw := create_tween()
+		tw.tween_property(_tv_audio, "volume_db", -40.0, 0.25)
+		tw.tween_callback(queue_free)
+		return
+	queue_free()
+
 # Slams the TV: kills the channel-surfing audio, swaps the sprite sheet to
 # the smashed/static frames, plays the crash SFX, and kicks off the
 # ping-pong frame loop (0 → last → 0 → last → …).

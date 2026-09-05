@@ -5890,6 +5890,26 @@ func _process(delta: float) -> void:
 func _needs_curtain(episode: int) -> bool:
 	return episode > 1
 
+# Диван и телевизор — МЕБЕЛЬ КВАРТИРЫ, и на первом уровне они часть фона: там
+# и нарисована комната. На втором и третьем фон другой, и стоящий посреди улицы
+# диван читается как забытый в кадре реквизит.
+#
+# Сами они уезжают влево вместе с фоном и там же себя освобождают — но занавес
+# поднимается РАНЬШЕ, чем они успевают уехать, и первые секунды нового эпизода
+# игрок смотрит на квартиру, переехавшую на улицу. Убираем их там же, где
+# меняем фон: за занавесом или под карточкой уровня, то есть при закрытом
+# экране.
+#
+# Зовётся из обоих мест смены уровня, а не пишется дважды: мест ровно два, и
+# разойтись им ничего не стоит.
+func _clear_apartment(level: int) -> void:
+	if level <= 1:
+		return
+	for name in ["Couch", "Tv"]:
+		var n := get_parent().get_node_or_null(name)
+		if n != null and n.has_method("leave_scene"):
+			n.call("leave_scene")
+
 func _start_game() -> void:
 	# A tap during the menu-↔-screen camera pan would otherwise drop the player
 	# into a run with Background/Couch/Spawner/Tv/Normaldo frozen at half-pan.
@@ -5963,9 +5983,11 @@ func _start_game() -> void:
 					await LevelTransition.play(self, "НЕМНОГО ПОЗДНЕЕ…",
 						func() -> void:
 							if is_instance_valid(bg):
-								bg.call("set_level", lvl))
+								bg.call("set_level", lvl)
+							_clear_apartment(lvl))
 				else:
 					bg.call("set_level", lvl)
+					_clear_apartment(lvl)
 		spawner.set_process(true)
 	if bg:
 		bg.start_scrolling()
@@ -7183,6 +7205,7 @@ func _show_level_card(next_level: int) -> void:
 		num.text = "УРОВЕНЬ %d" % (next_level + 1)
 	if bg and bg.has_method("set_level"):
 		bg.call("set_level", next_level + 1)
+	_clear_apartment(next_level + 1)
 
 	var tw2 := num.create_tween()
 	tw2.tween_property(num, "modulate:a", 1.0, 0.22)
