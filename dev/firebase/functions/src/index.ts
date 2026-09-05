@@ -46,6 +46,26 @@ function getCurrentWeekId(date: Date = new Date()): string {
   return `${d.getUTCFullYear()}-W${weekNum.toString().padStart(2, "0")}`;
 }
 
+/**
+ * Id недели, ПРЕДШЕСТВУЮЩЕЙ той, в которую попадает `date`.
+ *
+ * Считается от понедельника текущей недели: шаг на день назад с него всегда
+ * попадает в воскресенье прошлой — в какой бы день и час ни случился запуск.
+ *
+ * Раньше здесь стояло «минус три дня» от момента запуска. Это верно ровно для
+ * расписания (понедельник 00:05 UTC) и разъезжается для любого другого
+ * времени: в субботу минус три дня — это среда ТОЙ ЖЕ недели, и сброс раздал
+ * бы призы за неделю, которая ещё идёт, а заодно обнулил всем счётчики.
+ * Функцию положено уметь запускать руками — хотя бы чтобы проверить, — и
+ * зависеть от того, в какой день её дёрнули, она не должна.
+ */
+function previousWeekId(date: Date = new Date()): string {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dayNum = d.getUTCDay() || 7;      // Пн = 1 … Вс = 7
+  d.setUTCDate(d.getUTCDate() - dayNum);  // день перед понедельником этой недели
+  return getCurrentWeekId(d);
+}
+
 function rewardForPlace(place: number): {dollars: number; tokens: number} {
   if (place === 1)   return {dollars: 5000, tokens: 10};
   if (place <= 3)    return {dollars: 2500, tokens: 5};
@@ -579,10 +599,7 @@ export const weeklyReset = onSchedule({
   secrets: APNS_SECRETS, // weeklyReset sends the G3 prize push (iOS via APNs)
 }, async () => {
   const now = new Date();
-  // Last week's id = Monday-of-previous-week
-  const prev = new Date(now);
-  prev.setUTCDate(prev.getUTCDate() - 3);
-  const prevWeek = getCurrentWeekId(prev);
+  const prevWeek = previousWeekId(now);
   const newWeek  = getCurrentWeekId(now);
 
   // G3 — collect each ranked player's best prize across modes; pushed after
