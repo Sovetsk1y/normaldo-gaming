@@ -59,6 +59,15 @@ var pending_rewards      : Array  = []     # locally cached copy of server pendi
 # пройдена», и ровно по этому числу открывается бесконечный режим.
 var episodes_done        : int    = 0
 
+# ── Сколько пиццы съедено ЗА ВСЮ ЖИЗНЬ ───────────────────────────────────────
+# Копится по забегам и никогда не сбрасывается. Отдельное поле, а не сумма по
+# скинам: в записи скина лежит его ЛУЧШИЙ забег, а не сумма, и восстановить
+# прожитое из неё нельзя.
+#
+# У старых сейвов оно начинается с нуля — досчитать прошлое не из чего. Это
+# честнее, чем показать выдуманное число.
+var total_pizzas         : int    = 0
+
 # ─── Скин, которым взят рекорд недели, по режимам ────────────────────────────
 # Ключ — имя режима сервера, значение — id скина. Именно он показывается в
 # таблице лидеров рядом с местом.
@@ -167,7 +176,23 @@ func note_run_finished(pizzas: int) -> void:
 	var e := _skin_entry(active_skin)
 	e["runs"] = int(e.get("runs", 0)) + 1
 	e["best"] = maxi(int(e.get("best", 0)), maxi(pizzas, 0))
+	total_pizzas += maxi(pizzas, 0)
 	_save()
+
+# Забегов ВСЕГО и лучший забег ВООБЩЕ — по всем скинам. Профиль показывает
+# игрока целиком, а не текущий скин: «сыграно 240 забегов» это про него, а не
+# про шляпу, в которой он сейчас.
+func total_runs() -> int:
+	var n := 0
+	for id in skin_progress:
+		n += int((skin_progress[id] as Dictionary).get("runs", 0))
+	return n
+
+func best_run() -> int:
+	var b := 0
+	for id in skin_progress:
+		b = maxi(b, int((skin_progress[id] as Dictionary).get("best", 0)))
+	return b
 
 func get_skin_runs_for(id: String) -> int:
 	if not skin_progress.has(id):
@@ -422,6 +447,7 @@ func _save() -> void:
 		"mode_rank":           mode_rank,
 		"current_week_id":     current_week_id,
 		"episodes_done":       episodes_done,
+		"total_pizzas":        total_pizzas,
 		"pending_rewards":     pending_rewards,
 		"record_skin":         record_skin,
 		"sfx_volume":          sfx_volume,
@@ -499,6 +525,7 @@ func _load() -> void:
 		mode_best["endless"] = int(d.get("best_endless", 0))
 	current_week_id     = str(d.get("current_week_id",     ""))
 	episodes_done       = int(d.get("episodes_done",       0))
+	total_pizzas        = int(d.get("total_pizzas",        0))
 	record_skin         = (d.get("record_skin", {}) as Dictionary).duplicate()
 	sfx_volume          = float(d.get("sfx_volume",        1.0))
 	music_volume        = float(d.get("music_volume",      1.0))

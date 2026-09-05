@@ -621,7 +621,99 @@ func _page_profile(w: float) -> float:
 	_action_button(Vector2(nx, 54.0), Vector2(minf(190.0, w - nx), 30.0),
 		"ИЗМЕНИТЬ ИМЯ", Color(0.16, 0.20, 0.30, 0.98), CLR_ACCENT,
 		func(): _hud.call("_show_rename_modal"))
-	return 6.0 + AV + 24.0
+
+	var y : float = 6.0 + AV + 16.0
+	y = _profile_stats(w, y)
+	return y
+
+# ── Что профиль рассказывает о хозяине ───────────────────────────────────────
+# Раньше здесь были только имя и аватар, то есть КАРТОЧКА, а не профиль: ни
+# одной цифры о том, что игрок за всё это время сделал. Возвращающемуся игроку
+# профиль и нужен ровно за этим — увидеть накопленное.
+#
+# Три группы, и порядок не случайный:
+#   1. ПРОЖИТОЕ — сколько всего съедено, сыграно, лучший забег. Это про игрока
+#      целиком, а не про текущий скин.
+#   2. РЕКОРДЫ НЕДЕЛИ — по режимам, и только те, где рекорд есть. Пустые строки
+#      «эпизод 3: 0» рассказывают лишь о том, что туда ещё не ходили.
+#   3. ДОСТИЖЕНИЯ — прогресс кампании, коллекции и книги учителя, каждое дробью:
+#      знаменатель говорит, сколько ещё осталось, а без него число ни о чём.
+func _profile_stats(w: float, y0: float) -> float:
+	var y := y0
+	y = _stat_group(w, y, "ПРОЖИТОЕ", [
+		["Съедено пиццы", _num(SaveData.total_pizzas)],
+		["Забегов",       _num(SaveData.total_runs())],
+		["Лучший забег",  _num(SaveData.best_run())],
+	])
+
+	var recs : Array = []
+	for m in LeaderboardMock.MODES:
+		var v : int = int((SaveData.mode_best as Dictionary).get(
+			LeaderboardMock.mode_key(int(m)), 0))
+		if v > 0:
+			recs.append([LeaderboardMock.mode_label(int(m)).capitalize(), _num(v)])
+	if recs.is_empty():
+		recs.append(["Пока пусто", "сыграй забег"])
+	y = _stat_group(w, y, "РЕКОРДЫ НЕДЕЛИ", recs)
+
+	var story_done := 0
+	for done in QuestManager.story_claimed:
+		if bool(done):
+			story_done += 1
+	y = _stat_group(w, y, "ДОСТИЖЕНИЯ", [
+		["Эпизодов пройдено", "%d / %d" % [SaveData.episodes_done, 3]],
+		["Скинов открыто",    "%d / %d" % [(SaveData.owned_skins as Array).size(),
+			SkinRegistry.SKINS.size()]],
+		["Наград книги",      "%d / %d" % [story_done, QuestManager.STORY_QUESTS.size()]],
+	])
+	return y
+
+# Пробел разряда: «12 480» читается с одного взгляда, «12480» — нет.
+func _num(v: int) -> String:
+	var s := str(maxi(v, 0))
+	var out := ""
+	var n := s.length()
+	for i in n:
+		if i > 0 and (n - i) % 3 == 0:
+			out += " "
+		out += s[i]
+	return out
+
+func _stat_group(w: float, y0: float, title: String, rows: Array) -> float:
+	var y := y0
+	var cap := Label.new()
+	cap.add_theme_font_override("font", UI_FONT)
+	cap.add_theme_font_size_override("font_size", 10)
+	_apply_text_fx(cap)
+	cap.text               = title
+	cap.modulate           = CLR_GOLD
+	cap.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	cap.mouse_filter       = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_page_body, cap, Vector2(0.0, y), Vector2(w, 14.0))
+	y += 16.0
+	for r in rows:
+		var name_lbl := Label.new()
+		name_lbl.add_theme_font_override("font", UI_FONT)
+		name_lbl.add_theme_font_size_override("font_size", 12)
+		_apply_text_fx(name_lbl)
+		name_lbl.text               = String(r[0])
+		name_lbl.modulate           = Color(0.74, 0.78, 0.86)
+		name_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		name_lbl.mouse_filter       = Control.MOUSE_FILTER_IGNORE
+		UiKit.place(_page_body, name_lbl, Vector2(0.0, y), Vector2(w * 0.6, 18.0))
+
+		var val := Label.new()
+		val.add_theme_font_override("font", UI_FONT)
+		val.add_theme_font_size_override("font_size", 13)
+		_apply_text_fx(val)
+		val.text                 = String(r[1])
+		val.modulate             = CLR_TEXT
+		val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		val.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		val.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+		UiKit.place(_page_body, val, Vector2(w * 0.6, y), Vector2(w * 0.4, 18.0))
+		y += 18.0
+	return y + 8.0
 
 # ── Раздел «Аккаунт» ─────────────────────────────────────────────────────────
 func _page_account(w: float) -> float:
