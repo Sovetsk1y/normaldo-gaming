@@ -647,11 +647,11 @@ func _profile_stats(w: float, y0: float) -> float:
 	])
 
 	var recs : Array = []
-	for m in LeaderboardMock.MODES:
+	for m in LeaderboardModes.MODES:
 		var v : int = int((SaveData.mode_best as Dictionary).get(
-			LeaderboardMock.mode_key(int(m)), 0))
+			LeaderboardModes.mode_key(int(m)), 0))
 		if v > 0:
-			recs.append([LeaderboardMock.mode_label(int(m)).capitalize(), _num(v)])
+			recs.append([LeaderboardModes.mode_label(int(m)).capitalize(), _num(v)])
 	if recs.is_empty():
 		recs.append(["Пока пусто", "сыграй забег"])
 	y = _stat_group(w, y, "РЕКОРДЫ НЕДЕЛИ", recs)

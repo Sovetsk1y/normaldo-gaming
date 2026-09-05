@@ -207,6 +207,13 @@ const REFLEX_PERIOD    : float = 10.0
 var _perk_time_slow : bool  = false
 var _perk_reflex    : bool  = false
 var _perk_timer     : float = TIME_SLOW_PERIOD
+
+# Сколько ещё замедлен МИР (песочные часы или «остановка времени» мага). Держим
+# своим счётчиком, а не спрашиваем спавнер: замедлением он владеет, но снимает
+# его собственным таймером внутри `apply_slow_mo`, и подсмотреть оттуда момент
+# окончания нечем. Второй экземпляр часов не складывается, а продлевает — как и
+# само замедление у спавнера.
+var _world_slow_left : float = 0.0
 var _slow_total       : float = 0.0
 var _was_slowed       : bool  = false
 var _invert_remaining : float = 0.0   # компас: реверс управления на N секунд
@@ -439,7 +446,7 @@ func play_fat_morph() -> void:
 	# Оба вызова этой функции означают ОДНО: жир вырос. Худеет Нормальдо без
 	# морфа, поэтому зелёный плюс здесь никогда не соврёт «поправился», когда на
 	# самом деле отняли.
-	StatusFx.burst(get_parent(), global_position, "heal", _art_px() * 1.6)
+	_status_flash("heal", 1.6)
 	_morphing = true
 	var spr := _sprite
 	var start_rot := spr.rotation
@@ -1151,9 +1158,23 @@ func _physics_process(delta: float) -> void:
 	if _invert_remaining > 0.0:
 		_invert_remaining -= delta
 		if _invert_remaining <= 0.0:
-			_status_off("curse")
+			_status_off("invert")
 			if _music_reversed:
 				_set_music_reversed(false)
+	if not _status_flash_left.is_empty():
+		for n in _status_flash_left.keys():
+			var left : float = float(_status_flash_left[n]) - delta
+			if left <= 0.0:
+				_status_flash_left.erase(n)
+				_status_off(str(n))
+			else:
+				_status_flash_left[n] = left
+
+	if _world_slow_left > 0.0:
+		_world_slow_left -= delta
+		if _world_slow_left <= 0.0:
+			_status_off("hourglass")
+
 	if _perk_time_slow and not _dead and _input_enabled:
 		_perk_timer -= delta
 		if _perk_timer <= 0.0:
@@ -1237,7 +1258,7 @@ func _physics_process(delta: float) -> void:
 
 func _on_slow_start() -> void:
 	_sway_t = 0.0
-	_status_on("slow")
+	_status_on("slow", 2.1)
 
 func _on_slow_end() -> void:
 	_status_off("slow")
@@ -1443,6 +1464,7 @@ func _apply_hourglass() -> void:
 	var spawner := get_parent().get_node_or_null("Spawner")
 	if spawner and spawner.has_method("apply_slow_mo"):
 		spawner.apply_slow_mo()
+		_mark_world_slow(spawner.SLOW_MO_DURATION)
 	_show_floating_text("ВРЕМЯ ЗАМЕДЛЕНО", Color(0.55, 0.85, 1.00))
 	_vfx_particles(SkinSkills.TRANSFORM)
 	_play_oneshot(_SFX_GLITTER)
@@ -1460,6 +1482,7 @@ func _fire_time_slow() -> void:
 	if bool(spawner.get("_frozen")):
 		return
 	spawner.call("apply_slow_mo", spawner.SLOW_MO_FACTOR, TIME_SLOW_LEN)
+	_mark_world_slow(TIME_SLOW_LEN)
 	start_skill_cd("perk:time_slow", TIME_SLOW_PERIOD)
 	_show_floating_text("ОСТАНОВКА ВРЕМЕНИ", Color(0.55, 0.85, 1.00))
 	_play_oneshot(_SFX_GLITTER)
@@ -1473,10 +1496,21 @@ func _try_spider_reflex(area: Area2D) -> bool:
 		return false
 	start_skill_cd("perk:spider_reflex", REFLEX_PERIOD)
 	_vfx_dodge_flash()
-	StatusFx.burst(get_parent(), global_position, "shield", _art_px() * 1.8)
+	_status_flash("shield", 1.8)
 	_show_floating_text("ПАУЧЬЯ РЕАКЦИЯ!", Color(0.95, 0.25, 0.30))
 	_play_skill_sfx(SkinSkills.DODGE)
 	return true
+
+# Часы на голове на всё время замедления мира. Один вход на оба источника —
+# предмет и перк мага: замедление у них одно и то же, и два разных знака над
+# головой означали бы для игрока два разных события.
+#
+# Знак нужен именно потому, что замедляется МИР, а не голова: со стороны это
+# читается как «игра подтормаживает», и без пометки первая мысль игрока — что
+# что-то сломалось, а не что ему дали передышку.
+func _mark_world_slow(sec: float) -> void:
+	_world_slow_left = maxf(_world_slow_left, sec)
+	_status_on("hourglass", 1.7)
 
 # Жетон казино: единственный предмет забега, который платит ВНЕ забега —
 # начисляется сразу в сейв, чтобы не сгорел вместе со смертью.
@@ -1562,12 +1596,11 @@ func apply_invert(duration: float) -> void:
 	# между этим игрок думал, что игра сломалась. Значок висит ровно столько,
 	# сколько держится состояние.
 	#
-	# Значок именно ПРОКЛЯТИЯ: этим словом игра и называет эффект шамана (см.
-	# hazard_item.gd), и брать под него картинку с другим названием значит
-	# рассказывать про два разных эффекта. Пробовали «путаницу» — у неё рисунок
-	# занимает малую долю кадра, и над головой висела дымка, которой в потоке не
-	# видно.
-	_status_on("curse", 2.0)
+	# Часы — общий знак «со временем что-то не так»: они же висят, когда мир
+	# замедлен песочными часами. Компас времени не трогает, он переворачивает
+	# управление, — но для игрока и то и другое одно: привычный ход вещей
+	# сломался, и надо переждать.
+	_status_on("invert", 1.7)
 	if not _music_reversed:
 		_set_music_reversed(true)
 
@@ -1774,7 +1807,7 @@ func _trigger_resist(tag: String, area: Area2D) -> void:
 	# показывать его там, где разлетелся предмет, значит рассказывать про
 	# предмет: игрок видел разбитую бочку и не понимал, почему у него не отняли
 	# жир. Осколки остаются на месте удара, щит вспыхивает на том, кого он спас.
-	StatusFx.burst(get_parent(), global_position, "shield", _art_px() * 2.0)
+	_status_flash("shield", 2.0)
 	_show_floating_text("РЕЗИСТ!", Color(0.95, 0.32, 0.28))
 	# Выкрик — не вместо строки, а вместе с ней: строка говорит, ЧТО произошло,
 	# рисунок — как к этому относится Нормальдо.
@@ -3162,9 +3195,29 @@ func _status_off(name: String) -> void:
 		n.queue_free()
 	_status_fx.erase(name)
 
+# Временный значок на голове: включается как постоянный (то есть едет за
+# головой каждый такт) и снимает себя сам через круг анимации.
+#
+# Через `StatusFx.burst` эти значки не годятся: тот вешает узел на РОДИТЕЛЯ в
+# точке события и там его и оставляет. Для вспышки на разбитой бочке это верно —
+# осколки остаются, где ударили, — но щит резиста и нимб мешка это знаки
+# ГОЛОВЫ, и голова за полсекунды анимации успевает уехать через пол-экрана:
+# значок оставался висеть в пустоте позади.
+var _status_flash_left : Dictionary = {}     # имя -> сколько ещё висит
+
+func _status_flash(name: String, k: float = 1.7, dy: float = 0.0) -> void:
+	_status_on(name, k, dy)
+	# Повторное срабатывание ПРОДЛЕВАЕТ, а не начинает второй значок: два
+	# резиста подряд — это два события, но знак на голове один.
+	_status_flash_left[name] = float(StatusFx.FRAMES) / StatusFx.FPS
+
 func _status_clear() -> void:
+	_status_flash_left.clear()
 	for k in _status_fx.keys():
 		_status_off(str(k))
+	# Счётчик гасим вместе со знаком: иначе он досчитает до нуля уже в другом
+	# режиме и попробует снять то, чего там нет.
+	_world_slow_left = 0.0
 
 func _status_sync() -> void:
 	for k in _status_fx.keys():
@@ -3448,8 +3501,7 @@ func _flash_hit() -> void:
 	# через которую проходят все ветки урона (обычный удар, огонь, второй шанс,
 	# дев-бессмертие). Вешать их по местам столкновений значило бы забыть
 	# половину.
-	StatusFx.burst(get_parent(), global_position + Vector2(0.0, -_art_px() * 0.55),
-		"stun", _art_px() * 1.1)
+	_status_flash("stun", 1.1, -_art_px() * 0.55)
 	var tween := create_tween()
 	tween.set_loops(5)
 	tween.tween_property(_sprite, "modulate", Color(1.0, 0.25, 0.25), 0.12)
@@ -3878,7 +3930,7 @@ func _on_area_entered(area: Area2D) -> void:
 		# доллара только тем, что долларов из него сыпалось много. Нимб на
 		# подборе отмечает САМ момент: игрок понимает, что поймал не мелочь,
 		# ещё до того, как деньги долетят до счётчика.
-		StatusFx.burst(get_parent(), global_position, "blessed", _art_px() * 2.0)
+		_status_flash("blessed", 2.0)
 		var mult := 2 if (SaveData.active_skin == "pirate") else 1
 		if mult > 1:
 			_vfx_particles(SkinSkills.TRANSFORM)

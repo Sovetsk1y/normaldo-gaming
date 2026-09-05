@@ -13,12 +13,22 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 14
+const EXPECTED_CHECKS : int = 18
 
 # Все эффекты, которые обязаны лежать на диске. Список ЗДЕСЬ, а не читается из
 # папки: тест, спрашивающий у папки, что в ней лежит, согласен с любой папкой.
-const WANT : Array = ["slow", "curse", "shield", "armor", "heal", "stun",
-	"shock", "rage", "blessed", "charm"]
+# Имена СОСТОЯНИЙ, а не папок: папку под состоянием можно поменять (часы и
+# шары уже менялись местами), а состояние остаётся тем же.
+const WANT : Array = ["slow", "invert", "hourglass", "shield", "armor", "heal",
+	"stun", "shock", "rage", "blessed", "charm"]
+
+# Состояние без записи в ART грузилось бы по своему имени, а папки с таким
+# именем нет — эффект молча не появился бы.
+var _art_bad : Array = []
+
+func _check_art(name: String) -> void:
+	if not StatusFx.ART.has(name):
+		_art_bad.append(name)
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -48,6 +58,8 @@ func _initialize() -> void:
 	await _test_confusion()
 	print("── Мгновенные значки ──")
 	await _test_burst()
+	print("── Вспышка едет за головой ──")
+	await _test_flash_follows()
 	print("── Смена режима снимает всё ──")
 	await _test_clear()
 	_finish()
@@ -55,12 +67,19 @@ func _initialize() -> void:
 func _test_assets() -> void:
 	var missing : Array = []
 	for name in WANT:
+		# Путь строим ЧЕРЕЗ ту же таблицу, что и игра: собери его тест сам из
+		# имени состояния — и он проверял бы папки, которых нет, а те, что игра
+		# правда грузит, остались бы непроверенными.
+		_check_art(name)
+		var art : String = String(StatusFx.ART.get(name, name))
 		for i in StatusFx.FRAMES:
-			var p : String = (StatusFx.DIR % name) + "%02d.png" % i
+			var p : String = (StatusFx.DIR % art) + "%02d.png" % i
 			if not ResourceLoader.exists(p):
 				missing.append("%s/%02d" % [name, i])
-	_check(missing.is_empty(), "все %d кадров у %d эффектов на месте: %s"
+	_check(missing.is_empty(), "все %d кадров у %d состояний на месте: %s"
 		% [StatusFx.FRAMES, WANT.size(), "нет " + str(missing) if missing else "да"])
+	_check(_art_bad.is_empty(),
+		"у каждого состояния прописана картинка: %s" % ["да" if _art_bad.is_empty() else _art_bad])
 	var sf := StatusFx._sprite_frames("slow")
 	_check(sf != null and sf.get_frame_count("default") == StatusFx.FRAMES,
 		"кадры собираются в анимацию: %d" % (sf.get_frame_count("default") if sf else -1))
@@ -89,9 +108,9 @@ func _test_slow() -> void:
 func _test_confusion() -> void:
 	_n.call("apply_invert", 0.4)
 	await _wait_frames(3)
-	_check(_has("curse"), "перевёрнутое управление — свой значок")
+	_check(_has("invert"), "перевёрнутое управление — свой значок")
 	await _wait_real(1.0)
-	_check(not _has("curse"), "и он гаснет вместе с реверсом")
+	_check(not _has("invert"), "и он гаснет вместе с реверсом")
 
 # Мгновенные значки: появляются и убирают себя сами.
 func _test_burst() -> void:
@@ -104,6 +123,21 @@ func _test_burst() -> void:
 	await _wait_real(float(StatusFx.FRAMES) / StatusFx.FPS + 0.5)
 	_check(_count_fx(host) == before, "и убрал себя сам, без чужой помощи")
 
+# Щит резиста и нимб мешка — знаки ГОЛОВЫ, и держатся они на ней весь круг
+# анимации. Раньше они вешались в точке события и оставались висеть в пустоте:
+# за полсекунды голова уезжает через пол-экрана, и знак читался как чужой
+# предмет позади.
+func _test_flash_follows() -> void:
+	_n.call("_status_flash", "shield", 2.0, 0.0)
+	await _wait_frames(2)
+	_check(_has("shield"), "щит появился")
+	_n.position += Vector2(120.0, -40.0)
+	await _wait_frames(2)
+	_check(_fx("shield").global_position.distance_to(_n.global_position) < 1.0,
+		"и поехал вместе с головой, а не остался на месте удара")
+	await _wait_real(float(StatusFx.FRAMES) / StatusFx.FPS + 0.5)
+	_check(not _has("shield"), "и снял себя сам, доиграв круг")
+
 func _test_clear() -> void:
 	_n.call("apply_slow", 5.0)
 	_n.call("apply_invert", 5.0)
@@ -111,9 +145,9 @@ func _test_clear() -> void:
 	# ловится по ПЕРЕХОДУ состояния в `_physics_process`, а не событием. Один
 	# такт тут и ждём — иначе тест проверяет момент до включения.
 	await _wait_frames(3)
-	_check(_has("slow") and _has("curse"), "два состояния — два значка")
+	_check(_has("slow") and _has("invert"), "два состояния — два значка")
 	_n.call("begin_slots_mode")
-	_check(not _has("slow") and not _has("curse"),
+	_check(not _has("slow") and not _has("invert"),
 		"уход в мини-игру снял оба: там этих состояний нет")
 
 # ── Мелочи ───────────────────────────────────────────────────────────────────

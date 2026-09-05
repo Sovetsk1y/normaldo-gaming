@@ -3,7 +3,7 @@ extends SceneTree
 # Кадр СТАТУС-ЭФФЕКТОВ на живом Нормальдо.
 #   xvfb-run -a godot --path . --script res://dev/shot_status.gd -- <папка> <эффект>
 #
-# эффект: slow | curse | armor | shield | heal | stun | shock |
+# эффект: slow | invert | hourglass | armor | shield | heal | stun | shock |
 #         rage | blessed
 #
 # Глазами проверяется ровно одно: РАЗМЕР И ЧИТАЕМОСТЬ значка на голове. Он
@@ -45,7 +45,8 @@ func _initialize() -> void:
 	# нарисовать.
 	match fx:
 		"slow":      normaldo.call("apply_slow", 30.0)
-		"curse":     normaldo.call("apply_invert", 30.0)
+		"invert":    normaldo.call("apply_invert", 30.0)
+		"hourglass": normaldo.call("_mark_world_slow", 30.0)
 		"armor":     normaldo.call("apply_casey_mask", 30.0)
 		_:
 			# Мгновенные — одним кругом; ловим кадр в его середине.

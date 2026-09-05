@@ -261,7 +261,7 @@ func restore_account(recovery_code: String) -> Dictionary:
 # ─── Internals ───────────────────────────────────────────────────────────────
 
 func _mode_name(mode: int) -> String:
-	return LeaderboardMock.mode_key(mode)
+	return LeaderboardModes.mode_key(mode)
 
 func _set_state(s: int) -> void:
 	if _state == s: return

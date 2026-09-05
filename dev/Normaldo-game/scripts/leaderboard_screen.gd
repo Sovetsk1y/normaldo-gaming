@@ -88,8 +88,13 @@ var _reset_seconds_left : float = 0.0
 # Cached server rows keyed by metric. When we get a successful fetch, we cache
 # rows here so tab-switching feels instant.
 var _server_rows  : Dictionary = {}
+# Сколько всего игроков в таблице режима — приходит с сервера (`total_players`).
+var _server_total : Dictionary = {}
+var _my_pos_hint  : Label = null
 var _server_window: Dictionary = {}
-var _data_origin  : String     = "demo"   # "live" once we successfully fetched
+# Источник данных теперь ровно один — сервер. Поля `_data_origin` со значением
+# «demo» больше нет вместе с самими демо-данными: пока оно было, экран умел
+# показывать выдуманную таблицу и молчать об этом.
 var _origin_lbl   : Label      = null
 var _fetch_busy   : bool       = false
 
@@ -100,11 +105,11 @@ func setup(hud: Node, initial_metric: int = 0) -> void:
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_active_metric = _initial_metric
-	_reset_seconds_left = LeaderboardMock.get_reset_seconds()
+	_reset_seconds_left = LeaderboardModes.seconds_to_week_reset()
 	var vp := get_viewport().get_visible_rect().size
 	_build(vp)
 	_refresh_tab_visual()
-	# Show loading placeholder first; live data (or mock fallback on error)
+	# Сначала «Загрузка…», потом настоящие данные (или объяснение, если их нет)
 	# replaces it via _fetch_from_server_async.
 	_show_loading_state()
 	_fetch_from_server_async()
@@ -236,18 +241,18 @@ func _build(vp: Vector2) -> void:
 	var tab_y : float = float(lay["tabs_y"])
 	var tab_w : float = 196.0
 	var gap   : float = 10.0
-	var n     : int   = LeaderboardMock.MODES.size()
+	var n     : int   = LeaderboardModes.MODES.size()
 	var strip_w : float = tab_w * float(n) + gap * float(n - 1)
 	var tabs_x  : float = (vp.x - strip_w) * 0.5
 
 	_tab_bg.clear()
 	_tab_lbl.clear()
 	for i in n:
-		var mode : int = int(LeaderboardMock.MODES[i])
+		var mode : int = int(LeaderboardModes.MODES[i])
 		var at := Vector2(tabs_x + (tab_w + gap) * float(i), tab_y)
 		var sz := Vector2(tab_w, tab_h)
 		_tab_bg.append(_tab_pill(at, sz))
-		_tab_lbl.append(_tab_label(LeaderboardMock.mode_label(mode), at, sz))
+		_tab_lbl.append(_tab_label(LeaderboardModes.mode_label(mode), at, sz))
 		# На закрытой вкладке рисуется замок. Без него закрытая вкладка выглядит
 		# рабочей и по нажатию молча ничего не делает — а тусклой её не считать:
 		# неактивная вкладка тоже тусклая.
@@ -453,7 +458,7 @@ func _build_podium_card(r: Dictionary, pos: Vector2, size: Vector2, place: int, 
 		pos + Vector2(34.0, sy - 2.0), Vector2(size.x - 44.0, 24.0))
 
 	_build_reward_block(_podium_root, pos + Vector2(10.0, size.y - 26.0),
-		size.x - 20.0, LeaderboardMock.reward_for_place(place), 18.0)
+		size.x - 20.0, LeaderboardModes.reward_for_place(place), 18.0)
 
 # Своя строка внизу экрана — видна всегда. Тап прокручивает список к себе
 # (бывшая плавающая кнопка «МОЯ ПОЗИЦИЯ», которая закрывала строки списка).
@@ -479,10 +484,10 @@ func _build_my_strip(vp: Vector2) -> void:
 	_my_strip_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_refresh_my_strip()
 
-	var hint := _label("ПОКАЗАТЬ В СПИСКЕ", 12, Color(0.80, 1.0, 0.70),
+	_my_pos_hint = _label("ПОКАЗАТЬ В СПИСКЕ", 12, Color(0.80, 1.0, 0.70),
 		pos + Vector2(size.x - 200.0, 0.0), Vector2(188.0, size.y), _my_pos_btn)
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	hint.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_my_pos_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_my_pos_hint.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 
 	var btn := Button.new()
 	btn.flat       = true
@@ -497,8 +502,19 @@ func _refresh_my_strip() -> void:
 		return
 	var rank : int = _player_rank_for_active_metric()
 	var nick : String = SaveData.display_name if SaveData.display_name != "" else "—"
-	var total : int = int(LeaderboardMock.MOCK_TOTAL_PLAYERS)
-	_my_strip_lbl.text = "%d место из %d   ·   %s" % [rank, total, nick]
+	# Сколько всего игроков — ТОЛЬКО с сервера (`total_players` в ответе). Тут
+	# стояло выдуманное 1247, и строка внизу экрана уверенно врала обеими
+	# половинами сразу: и местом, и числом соперников.
+	var total : int = int(_server_total.get(_active_metric, 0))
+	var known := rank > 0 and total > 0
+	if known:
+		_my_strip_lbl.text = "%d место из %d   ·   %s" % [rank, total, nick]
+	else:
+		_my_strip_lbl.text = "Место появится, когда придёт таблица   ·   %s" % nick
+	# Предлагать «показать в списке», когда списка нет, — обещание, которое
+	# некому выполнить: нажатие не сделает ничего, и игрок решит, что сломалось.
+	if is_instance_valid(_my_pos_hint):
+		_my_pos_hint.visible = known
 
 # Награда местом: иконка + число, как во всей остальной игре. Текст «+5000 $»
 # внутри игрового экрана читается как заглушка.
@@ -600,7 +616,7 @@ func _build_dev_prize_btn(vp: Vector2) -> void:
 # вкладку не видно ни на солнце, ни дальтонику.
 func _refresh_tab_visual() -> void:
 	for i in _tab_bg.size():
-		var mode : int = int(LeaderboardMock.MODES[i])
+		var mode : int = int(LeaderboardModes.MODES[i])
 		_set_tab_style(_tab_bg[i], _tab_lbl[i], mode == _active_metric)
 
 func _set_tab_style(pill: Panel, lbl: Label, active: bool) -> void:
@@ -628,12 +644,12 @@ func _set_tab_style(pill: Panel, lbl: Label, active: bool) -> void:
 # Эпизод 1 открыт всегда: с него игра и начинается. Эпизод N — после того как
 # пройден N−1. Бесконечный — после всей кампании.
 func _is_mode_unlocked(mode: int) -> bool:
-	if mode == LeaderboardMock.Mode.ENDLESS:
+	if mode == LeaderboardModes.Mode.ENDLESS:
 		return QuestManager.is_endless_unlocked()
 	return SaveData.episodes_done >= mode
 
 func _mode_lock_hint(mode: int) -> String:
-	if mode == LeaderboardMock.Mode.ENDLESS:
+	if mode == LeaderboardModes.Mode.ENDLESS:
 		return "Пройди все эпизоды"
 	return "Сначала пройди эпизод %d" % mode
 
@@ -675,28 +691,33 @@ func _on_my_position() -> void:
 	# rank == 0 → not on the board yet, just stay in current view
 
 func _player_rank_for_active_metric() -> int:
-	# Prefer cached server top-100 if present; fall back to mock.
-	# Демо-режим: строки подсунуты моком, и своего uid в них нет — ранг тоже
-	# берём у мока. Иначе экран честно писал «101 место», хотя данные мока
-	# говорят 47-е. Раньше это было незаметно: ранг спрашивала только кнопка
-	# прыжка, теперь он висит в строке внизу постоянно.
-	if _data_origin == "demo":
-		return LeaderboardMock.get_player_rank(_active_metric)
+	# Место ищется в том, что прислал сервер, и больше нигде. Прежде тут была
+	# ветка «демо»: строки подсовывал мок, своего uid в них не было, и ранг
+	# брался у мока же — экран показывал выдуманное «47 место» как настоящее.
 	if _server_rows.has(_active_metric):
 		var my_uid := LeaderboardClient.get_user_id()
 		var rows : Array = _server_rows[_active_metric]
+		# Строка, уже помеченная своей, — это и есть ответ: пометку ставит сам
+		# экран по uid, и спрашивать uid второй раз незачем. Без этой ветки
+		# место не находилось нигде, где uid ещё не известен (например, пока
+		# авторизация не поднялась), и экран честно говорил «за сотней».
+		for r in rows:
+			if r is Dictionary and bool(r.get("is_player", false)):
+				return int(r.get("rank", 0))
 		for r in rows:
 			if r is Dictionary and r.get("user_id", "") == my_uid:
 				return int(r.get("rank", 0))
-		# Not in top-100 — fall back to window lookup or mock
+		# В сотне нас нет — смотрим в окне «вокруг меня», если оно пришло
 		if _server_window.has(_active_metric):
 			var w : Array = _server_window[_active_metric]
 			for r in w:
 				if r is Dictionary and r.get("user_id", "") == my_uid:
 					return int(r.get("rank", 0))
-		# Unknown — return >100 to nudge into window view
+		# Есть таблица, а нас в ней нет: за сотней. Возвращаем 101, чтобы экран
+		# предложил вид «вокруг меня».
 		return 101
-	return LeaderboardMock.get_player_rank(_active_metric)
+	# Таблицы ещё нет — места тоже нет. Ноль, а не выдуманное число.
+	return 0
 
 # Прокрутить к своей строке и поставить её В СЕРЕДИНУ ОКНА СПИСКА.
 #
@@ -733,15 +754,10 @@ func _rebuild_list() -> void:
 			rows.append({"separator": true})
 			if _server_window.has(_active_metric):
 				rows.append_array((_server_window[_active_metric] as Array).duplicate(true))
-	else:
-		if _view_mode == 0:
-			rows = LeaderboardMock.get_top_n(_active_metric, 100)
-		else:
-			var top_rows := LeaderboardMock.get_top_n(_active_metric, 10)
-			rows.append_array(top_rows)
-			rows.append({"separator": true})
-			var window := LeaderboardMock.get_window_around_player(_active_metric, 5)
-			rows.append_array(window)
+	# Сервера нет — строк нет. Раньше здесь подставлялись двести выдуманных
+	# игроков с выдуманными очками, и отличить их от настоящих было нельзя
+	# ничем: ни пометки, ни другого вида. Пустая таблица с объяснением честнее
+	# полной таблицы из вымысла.
 	# Mark player row when using live data
 	if have_server and LeaderboardClient.is_ready():
 		var my_uid := LeaderboardClient.get_user_id()
@@ -850,7 +866,7 @@ func _add_player_row(r: Dictionary, cy: float, alt: bool) -> void:
 	score_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
 	_build_reward_block(_content, Vector2(w * 0.70, cy + (ROW_H - 16.0) * 0.5),
-		w * 0.28, LeaderboardMock.reward_for_place(rank), 16.0)
+		w * 0.28, LeaderboardModes.reward_for_place(rank), 16.0)
 
 func _reward_str(reward: Dictionary) -> String:
 	var d := int(reward.get("dollars", 0))
@@ -1068,7 +1084,16 @@ func _show_metric_tooltip(_metric: int) -> void:
 
 func _on_dev_prize_test() -> void:
 	if _hud and _hud.has_method("_show_prize_claim_modal"):
-		_hud._show_prize_claim_modal(LeaderboardMock.make_mock_prize_reward())
+		# Дев-кнопка: показывает окно приза на выдуманном месте. Выдумка здесь
+		# законна — кнопка живёт только в дев-сборке и нужна, чтобы посмотреть
+		# вёрстку окна, не выигрывая неделю по-настоящему.
+		_hud._show_prize_claim_modal({
+			"metric":       LeaderboardModes.mode_key(LeaderboardModes.Mode.ENDLESS),
+			"metric_label": LeaderboardModes.mode_label(LeaderboardModes.Mode.ENDLESS),
+			"place":        12,
+			"dollars":      1000,
+			"tokens":       2,
+		})
 
 # ── Server fetch ─────────────────────────────────────────────────────────────
 
@@ -1079,7 +1104,7 @@ func _fetch_from_server_async() -> void:
 		# Auth still pending — wait, then retry
 		await get_tree().create_timer(0.5).timeout
 		if not LeaderboardClient.is_ready():
-			_fall_back_to_mock()
+			_show_empty_state("Таблица не пришла: нет связи с сервером.\nПопробуй позже — результат забега уже засчитан.")
 			return
 	_fetch_busy = true
 	var captured_metric := _active_metric
@@ -1088,33 +1113,35 @@ func _fetch_from_server_async() -> void:
 	if not resp.ok:
 		push_warning("[Leaderboard] fetch failed: %s" % str(resp.get("error", "")))
 		if captured_metric == _active_metric:
-			_fall_back_to_mock()
+			_show_empty_state("Таблица не пришла: сервер не ответил.\nПопробуй позже — результат забега уже засчитан.")
 		return
-	_server_rows[captured_metric] = resp.data.get("rows", [])
-	_data_origin = "live"
+	_server_rows[captured_metric]  = resp.data.get("rows", [])
+	_server_total[captured_metric] = int(resp.data.get("total_players", 0))
 	if captured_metric == _active_metric:
 		_rebuild_list()
 
-func _fall_back_to_mock() -> void:
-	# Inject mock rows so _rebuild_list can show something
-	if not _server_rows.has(_active_metric):
-		var mock_rows := LeaderboardMock.get_top_n(_active_metric, 100)
-		# Своя строка — СО СВОИМ скином: тем, которым взят рекорд этого режима
-		# (`SaveData.record_skin`). Без сети сервер её не пришлёт, а показывать
-		# игроку чужого классика на его же месте — это ровно та подмена, ради
-		# которой выбираемый аватар и убрали.
-		var mine : String = String((SaveData.record_skin as Dictionary).get(
-			LeaderboardMock.mode_key(_active_metric), ""))
-		for r in mock_rows:
-			r["avatar_skin"] = "classic"
-			if bool(r.get("is_player", false)) and mine != "":
-				r["avatar_skin"] = mine
-			# Жир ПЕРВЫЙ у всех: строки таблицы обязаны отличаться именами, а не
-			# толщиной.
-			r["avatar_fat"]  = 0
-		_server_rows[_active_metric] = mock_rows
-	_data_origin = "demo"
-	_rebuild_list()
+# Сервер не ответил (нет сети, не поднялась авторизация, ошибка) — так и
+# говорим. Здесь стояла подстановка двухсот выдуманных строк, неотличимых от
+# настоящих; экран, который врёт молча, хуже экрана, который честно пуст.
+func _show_empty_state(reason: String) -> void:
+	for c in _content.get_children():
+		c.queue_free()
+	_build_podium([])
+	_refresh_my_strip()
+	var vp_w : float = (ZONE_W) * (get_viewport().get_visible_rect().size.x / CANVAS_W)
+	_content.custom_minimum_size = Vector2(vp_w, _scroll.size.y)
+	var lbl := Label.new()
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", 14)
+	_apply_text_fx(lbl)
+	lbl.text                 = reason
+	lbl.modulate             = Color(0.62, 0.62, 0.68)
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	lbl.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
+	lbl.size                 = Vector2(vp_w, _scroll.size.y)
+	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	_content.add_child(lbl)
 
 func _show_loading_state() -> void:
 	for c in _content.get_children():
@@ -1153,10 +1180,10 @@ func _fetch_window_async() -> void:
 		return
 	_server_window[captured_metric] = resp.data.get("rows", [])
 
+# Пометки «ДЕМО ДАННЫЕ» больше не существует, и заводить её незачем: помечать
+# нечего — либо на экране настоящая таблица, либо на нём написано, что её нет.
+# Функция осталась, чтобы прибрать ярлык, если он висит с прошлых сессий.
 func _update_origin_badge() -> void:
-	# "ДЕМО ДАННЫЕ" badge removed by request — the leaderboard reveals mock
-	# rows silently until the server fetch lands. Keep the cleanup of any
-	# leftover label from older sessions just in case.
 	if is_instance_valid(_origin_lbl):
 		_origin_lbl.queue_free()
 	_origin_lbl = null

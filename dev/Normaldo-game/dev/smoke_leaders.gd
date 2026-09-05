@@ -23,7 +23,7 @@ func _initialize() -> void:
 	await process_frame
 	var hud  : Node = game.get_node_or_null("HUD")
 	var qm   : Node = get_root().get_node_or_null("QuestManager")
-	var mock : Node = get_root().get_node_or_null("LeaderboardMock")
+	var mock : Node = get_root().get_node_or_null("LeaderboardModes")
 	if hud == null or qm == null or mock == null:
 		print("  FAIL сцена не собралась")
 		quit(1)
@@ -80,6 +80,26 @@ func _close(scr: Node) -> void:
 		scr.free()
 	await process_frame
 
+# Данные подаёт ТЕСТ, а не игра. Своих строк у экрана больше нет и не должно
+# быть — выдуманная таблица, неотличимая от настоящей, это ровно то, что мы
+# отсюда и убрали. Но проверять подиум, список и прокрутку на чём-то надо,
+# поэтому кладём ровно то, что положил бы ответ сервера.
+func _feed(scr: Node, metric: int, rank: int, tag: String = "И") -> void:
+	var rows : Array = []
+	for r in range(1, 61):
+		rows.append({
+			"rank": r,
+			"name": "%s%d" % [tag, r],
+			"score": 900 - r * 7,
+			"user_id": "u%d" % r,
+			"is_player": r == rank,
+			"avatar_skin": "classic",
+			"avatar_fat": 0,
+		})
+	(scr.get("_server_rows") as Dictionary)[metric]  = rows
+	(scr.get("_server_total") as Dictionary)[metric] = 137
+	scr.call("_rebuild_list")
+
 func _texts(node: Node, out: Array) -> Array:
 	if node is Label:
 		out.append(String((node as Label).text))
@@ -132,6 +152,8 @@ func _test_locks(hud: Node) -> void:
 # место дважды на экране, где каждая строка на счету.
 func _test_podium(hud: Node, mock: Node) -> void:
 	var scr : Node = await _open(hud, 0)
+	_feed(scr, 0, 12)
+	await process_frame
 	var podium : Array = scr.get("_podium_ranks")
 	var list   : Array = scr.get("_list_ranks")
 	_check(podium == [1, 2, 3], "на подиуме ровно первая тройка: %s" % [podium])
@@ -148,13 +170,9 @@ func _test_podium(hud: Node, mock: Node) -> void:
 	_check(t.has("1") and t.has("2") and t.has("3"),
 		"на карточках подиума стоят номера мест")
 
-	# Имена на подиуме — те же, что у первых трёх строк источника данных.
-	var top : Array = mock.get_top_n(0, 3)
-	var names_ok := true
-	for r in top:
-		if not t.has(String(r.get("name", ""))):
-			names_ok = false
-	_check(names_ok, "на подиуме те же игроки, что и в данных")
+	# Имена на подиуме — те же, что у первых трёх строк поданных данных.
+	var names_ok := t.has("И1") and t.has("И2") and t.has("И3")
+	_check(names_ok, "на подиуме те же игроки, что и в данных: %s" % [t])
 	await _close(scr)
 
 # Своя позиция видна всегда и обязана совпадать с данными. Отдельно ловим старую
@@ -162,13 +180,21 @@ func _test_podium(hud: Node, mock: Node) -> void:
 func _test_my_strip(hud: Node, mock: Node) -> void:
 	for metric in [0, 3]:
 		var scr : Node = await _open(hud, metric)
+		var want : int = 12 + metric
+		_feed(scr, metric, want)
+		await process_frame
 		var lbl : Label = scr.get("_my_strip_lbl")
-		_check(is_instance_valid(lbl) and lbl.text != "",
-			"метрика %d: своя строка на экране: «%s»" % [metric, lbl.text if is_instance_valid(lbl) else "нет"])
-		var want : int = int(mock.get_player_rank(metric))
 		_check(is_instance_valid(lbl) and lbl.text.begins_with("%d место" % want),
-			"метрика %d: показано место %d, как в данных" % [metric, want])
+			"метрика %d: показано место %d, как в данных: «%s»"
+				% [metric, want, lbl.text if is_instance_valid(lbl) else "нет"])
 		await _close(scr)
+
+	# Таблицы нет — и строка об этом ГОВОРИТ, а не показывает выдуманное место.
+	var empty : Node = await _open(hud, 0)
+	var elbl : Label = empty.get("_my_strip_lbl")
+	_check(is_instance_valid(elbl) and not ("место из" in elbl.text),
+		"без данных места не выдумывается: «%s»" % [elbl.text if is_instance_valid(elbl) else "нет"])
+	await _close(empty)
 
 func _test_tabs(hud: Node) -> void:
 	var scr : Node = await _open(hud, 0)
@@ -180,11 +206,15 @@ func _test_tabs(hud: Node) -> void:
 	_check(caps == ["ЭПИЗОД 1", "ЭПИЗОД 2", "ЭПИЗОД 3", "БЕСКОНЕЧНЫЙ"],
 		"на полосе четыре вкладки по режимам: %s" % [caps])
 
+	_feed(scr, 0, 12, "А")
+	await process_frame
 	var first : Array = (scr.get("_podium_ranks") as Array).duplicate()
 	var names_before : Array = _texts(scr.get("_podium_root"), [])
 	scr.call("_on_tab", 3)
 	for _i in 20:
 		await process_frame
+	_feed(scr, 3, 20, "Б")
+	await process_frame
 	_check(int(scr.get("_active_metric")) == 3, "вкладка переключилась на бесконечный")
 	var names_after : Array = _texts(scr.get("_podium_root"), [])
 	_check(names_before != names_after, "подиум перестроился под другой режим")
@@ -201,10 +231,12 @@ func _test_tabs(hud: Node) -> void:
 # глазами нельзя — промах выглядит как «ну, куда-то проскроллило».
 func _test_jump_to_me(hud: Node, mock: Node) -> void:
 	var scr : Node = await _open(hud, 0)
+	var rank : int = 27
+	_feed(scr, 0, rank)
+	await process_frame
 	await scr.call("_on_my_position")
 	for _i in 10:
 		await process_frame
-	var rank   : int = int(mock.get_player_rank(0))
 	var rows_y : Dictionary = scr.get("_list_row_y")
 	_check(rows_y.has(rank), "своя строка нашлась в списке: место %d" % rank)
 	if not rows_y.has(rank):

@@ -7315,10 +7315,10 @@ func _on_normaldo_died(total_pizzas: int, death_pos: Vector2) -> void:
 	SaveData.note_run_finished(total_pizzas)
 	var level_rewards := SaveData.add_xp(total_pizzas, "run_end")
 	# Результат уходит в таблицу СВОЕГО режима — эпизоды тоже, а не один
-	# бесконечный: у каждого режима своя таблица (см. LeaderboardMock.Mode).
+	# бесконечный: у каждого режима своя таблица (см. LeaderboardModes.Mode).
 	# Отправка не блокирует интерфейс.
 	if not _boss_test_mode:
-		_submit_score_async(LeaderboardMock.mode_for_episode(_run_episode),
+		_submit_score_async(LeaderboardModes.mode_for_episode(_run_episode),
 			total_pizzas, _elapsed_time)
 	_show_game_over(total_pizzas, level_rewards, xp_before, level_before)
 	_maybe_prompt_notif_permission()
@@ -7464,7 +7464,7 @@ func _build_notif_modal_btn(parent: Node, label_text: String,
 func _submit_score_async(mode: int, score: int, run_seconds: float) -> void:
 	if not LeaderboardClient.is_ready():
 		return
-	var key  : String = LeaderboardMock.mode_key(mode)
+	var key  : String = LeaderboardModes.mode_key(mode)
 	# Прошлое место запоминаем ДО отправки: после неё сервер вернёт новое, и
 	# сравнивать будет уже не с чем.
 	var was  : int = int((SaveData.mode_rank as Dictionary).get(key, 0))
@@ -9019,7 +9019,7 @@ func _build_go_rank_block(panel_x: float, panel_y: float, panel_w: float, pm: in
 	# Геометрию строки запоминаем: результат уходит на сервер вдогонку, и место
 	# оттуда приходит уже после того, как экран собран (см.
 	# `_submit_score_async`). Без этих чисел обновить строку было бы негде.
-	var mode : int = LeaderboardMock.mode_for_episode(_run_episode)
+	var mode : int = LeaderboardModes.mode_for_episode(_run_episode)
 	_go_rank_geom = { "x": rows_x, "y": rows_y + 10.0, "w": rows_w, "pm": pm, "mode": mode }
 	_build_go_rank_row_for_mode(mode)
 
@@ -9039,11 +9039,14 @@ func _build_go_rank_block(panel_x: float, panel_y: float, panel_w: float, pm: in
 var _go_rank_geom : Dictionary = {}
 var _go_rank_nodes : Array = []
 
-# Строка места для режима. Числа берутся НАСТОЯЩИЕ, если они есть: `mode_rank` в
-# сейве помнит прошлое место в этом режиме, и разница с новым и есть та стрелка,
-# которую ждёт игрок. Пока настоящего места нет (первый забег, нет сети,
-# демо-режим) — показываем мок: пустая строка на экране итогов хуже
-# правдоподобной.
+# Строка места для режима. Числа только НАСТОЯЩИЕ: `mode_rank` в сейве помнит
+# прошлое место в этом режиме, и разница с новым и есть та стрелка, которую ждёт
+# игрок.
+#
+# Нет настоящего места (первый забег, нет сети) — пишем прочерк. Раньше здесь
+# подставлялось выдуманное «#31 ▲7», и это худшее из возможного: игрок читает
+# число на экране итогов как свой результат и запоминает его, а числа не
+# существует. Прочерк ничего не обещает и ничему не противоречит.
 func _build_go_rank_row_for_mode(mode: int) -> void:
 	if _go_rank_geom.is_empty():
 		return
@@ -9052,7 +9055,7 @@ func _build_go_rank_row_for_mode(mode: int) -> void:
 			n.queue_free()
 	_go_rank_nodes.clear()
 
-	var key  : String = LeaderboardMock.mode_key(mode)
+	var key  : String = LeaderboardModes.mode_key(mode)
 	var rank : int    = int((SaveData.mode_rank as Dictionary).get(key, 0))
 	var delta : int
 	var is_new : bool
@@ -9060,11 +9063,10 @@ func _build_go_rank_row_for_mode(mode: int) -> void:
 		delta  = int(_go_rank_delta)
 		is_new = bool(_go_rank_is_new)
 	else:
-		rank   = LeaderboardMock.get_player_rank(mode)
-		delta  = LeaderboardMock.get_player_delta(mode)
-		is_new = LeaderboardMock.get_player_is_new(mode)
+		delta  = 0
+		is_new = false
 	_build_go_rank_row(float(_go_rank_geom["x"]), float(_go_rank_geom["y"]),
-		float(_go_rank_geom["w"]), LeaderboardMock.mode_label(mode).capitalize(),
+		float(_go_rank_geom["w"]), LeaderboardModes.mode_label(mode).capitalize(),
 		rank, delta, is_new, int(_go_rank_geom["pm"]))
 
 # Насколько поднялся и впервые ли попал — считается в момент ответа сервера,
@@ -9105,8 +9107,11 @@ func _build_go_rank_row(row_x: float, y: float, row_w: float,
 	place_lbl.add_theme_font_override("font", UI_FONT)
 	place_lbl.add_theme_font_size_override("font_size", 11)
 	_apply_menu_caption_fx(place_lbl)
-	place_lbl.text                 = "#%d" % place
-	place_lbl.modulate             = Color(1.0, 0.88, 0.40)
+	# Места ещё нет — прочерк вместо числа. Место придёт с ответом сервера, а до
+	# него любое число тут было бы выдуманным.
+	place_lbl.text                 = ("#%d" % place) if place > 0 else "—"
+	place_lbl.modulate             = Color(1.0, 0.88, 0.40) if place > 0 \
+		else Color(0.55, 0.58, 0.62)
 	place_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	place_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	place_lbl.size                 = Vector2(60.0, 18.0)
@@ -9116,6 +9121,8 @@ func _build_go_rank_row(row_x: float, y: float, row_w: float,
 	add_child(place_lbl)
 	_go_rank_nodes.append(place_lbl)
 
+	if place <= 0:
+		return          # нет места — нечему и меняться
 	var delta_text := ""
 	var delta_col  := Color(0.55, 0.95, 0.55)
 	if is_new:
@@ -9192,7 +9199,7 @@ func _on_death_exit_tapped() -> void:
 	_restart()
 
 func _on_death_rank_tapped() -> void:
-	_show_leaderboard(LeaderboardMock.mode_for_episode(_run_episode))
+	_show_leaderboard(LeaderboardModes.mode_for_episode(_run_episode))
 
 # ── Prize claim modal (Phase 1 mock) ─────────────────────────────────────────
 
@@ -9217,9 +9224,9 @@ func _show_unclaimed_pending_rewards(rewards: Array) -> void:
 			# режима, вместо того чтобы врать «Рекорд забега».
 			var metric := str(r.get("metric", ""))
 			var label := ""
-			var mi : int = LeaderboardMock.MODE_KEYS.find(metric)
+			var mi : int = LeaderboardModes.MODE_KEYS.find(metric)
 			if mi >= 0:
-				label = LeaderboardMock.mode_label(mi).capitalize()
+				label = LeaderboardModes.mode_label(mi).capitalize()
 			_show_prize_claim_modal({
 				"metric":       metric,
 				"metric_label": label,
