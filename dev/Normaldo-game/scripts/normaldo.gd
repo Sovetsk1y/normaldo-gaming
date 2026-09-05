@@ -3209,7 +3209,44 @@ func _status_flash(name: String, k: float = 1.7, dy: float = 0.0) -> void:
 	_status_on(name, k, dy)
 	# Повторное срабатывание ПРОДЛЕВАЕТ, а не начинает второй значок: два
 	# резиста подряд — это два события, но знак на голове один.
-	_status_flash_left[name] = float(StatusFx.FRAMES) / StatusFx.FPS
+	var life : float = float(StatusFx.FRAMES) / StatusFx.FPS
+	_status_flash_left[name] = life
+	_envelope_flash(name, life)
+
+# Вспышка не включается и не выключается рубильником, а НАДУВАЕТСЯ И СПАДАЕТ:
+# щит резиста вырастает вокруг головы пузырём и тает, а не появляется целиком и
+# не исчезает целиком. Разница в том, читается ли он как событие («меня сейчас
+# прикрыли») или как мигнувшая картинка.
+#
+# Огибающая общая для всех знаков головы: они все про мгновение, и мигать
+# по-разному им незачем.
+const FLASH_GROW_T : float = 0.16    # надувается
+const FLASH_FADE_T : float = 0.34    # спадает
+const FLASH_FROM_K : float = 0.55    # с какой доли размера начинает
+
+func _envelope_flash(name: String, life: float) -> void:
+	var n = _status_fx.get(name)
+	if n == null or not is_instance_valid(n):
+		return
+	# Полный размер запоминаем ОДИН раз: на повторном срабатывании узел уже
+	# отмасштабирован прошлой огибающей, и взяв его текущий размер за полный,
+	# мы бы ужимали знак с каждым следующим резистом.
+	if not n.has_meta("full_scale"):
+		n.set_meta("full_scale", n.scale)
+	var full : Vector2 = n.get_meta("full_scale")
+	# Тип пишем руками: `n` пришёл из словаря без типа, и вывести тип у
+	# `create_tween` движку не из чего.
+	var tw : Tween = n.create_tween()   # новый твин отменяет прошлый на узле
+	n.scale    = full * FLASH_FROM_K
+	n.modulate = Color(n.modulate.r, n.modulate.g, n.modulate.b, 1.0)
+	tw.tween_property(n, "scale", full, FLASH_GROW_T) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(maxf(0.0, life - FLASH_GROW_T - FLASH_FADE_T))
+	# Спадая, ещё чуть разрастается: так пузырь читается как лопнувший, а не
+	# как выключенный.
+	tw.parallel().tween_property(n, "scale", full * 1.18, FLASH_FADE_T) \
+		.set_delay(maxf(0.0, life - FLASH_FADE_T))
+	tw.tween_property(n, "modulate:a", 0.0, FLASH_FADE_T)
 
 func _status_clear() -> void:
 	_status_flash_left.clear()

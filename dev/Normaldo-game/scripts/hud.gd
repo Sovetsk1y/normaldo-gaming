@@ -5881,6 +5881,15 @@ func _process(delta: float) -> void:
 	elif QuestManager._run_is_campaign:
 		QuestManager.notify_campaign_time(_elapsed_time)
 
+# Нужен ли занавес перед забегом этого режима. Отдельным вопросом, а не строкой
+# внутри длинной функции: ответ на него проверяется тестом, а выражение посреди
+# `_start_game` проверить нечем — сам `_start_game` идёт секундами и через интро.
+#
+# Занавес нужен там, где фон МЕНЯЕТСЯ. Первый эпизод и бесконечный начинаются с
+# первого уровня — того же, на котором доиграло интро; закрывать им нечего.
+func _needs_curtain(episode: int) -> bool:
+	return episode > 1
+
 func _start_game() -> void:
 	# A tap during the menu-↔-screen camera pan would otherwise drop the player
 	# into a run with Background/Couch/Spawner/Tv/Normaldo frozen at half-pan.
@@ -5914,6 +5923,17 @@ func _start_game() -> void:
 		normaldo.stop_menu_idle()
 	await _play_intro_throw_sequence(normaldo, tv)
 
+	# ── Занавес перед вторым и третьим эпизодом ──────────────────────────────
+	# Домой Нормальдо возвращается между эпизодами, поэтому интро на диване
+	# верно для любого из них. А вот фон второго и третьего эпизода — не
+	# квартира, и до сих пор он подменялся прямо под игроком: интро доигрывало на
+	# одном фоне, следующим кадром за спиной был другой. Читалось как сбой.
+	#
+	# Занавес нужен только там, где фон и правда меняется: первый эпизод и
+	# бесконечный начинаются с того же уровня, на котором доиграло интро, и
+	# закрывать им нечего.
+	var need_curtain : bool = (not _boss_test_mode) and _needs_curtain(HUD._start_episode)
+
 	_refresh_fat_icons()
 	_rebuild_skin_panels()
 	_slide_in_hud()
@@ -5934,11 +5954,27 @@ func _start_game() -> void:
 			spawner.campaign_mode = true
 			spawner.endless_chain = is_endless
 			spawner.call("set_start_level", 0 if is_endless else _run_episode - 1)
+			# Фон меняем ЗА ЗАНАВЕСОМ, если он есть: смена декораций на глазах у
+			# зрителя — оговорка, за занавесом — приём.
+			var lvl : int = 1 if is_endless else _run_episode
 			if bg and bg.has_method("set_level"):
-				bg.call("set_level", 1 if is_endless else _run_episode)
+				if need_curtain:
+					await get_tree().create_timer(LevelTransition.AFTER_INTRO_T).timeout
+					await LevelTransition.play(self, "НЕМНОГО ПОЗДНЕЕ…",
+						func() -> void:
+							if is_instance_valid(bg):
+								bg.call("set_level", lvl))
+				else:
+					bg.call("set_level", lvl)
 		spawner.set_process(true)
 	if bg:
 		bg.start_scrolling()
+	# Секундомер забега стартует ЗДЕСЬ, когда игрок получает управление. Он
+	# запускался до интро, то есть считал и бросок пульта, и прыжок с дивана, а
+	# теперь считал бы ещё и занавес — полторы лишние секунды у второго и
+	# третьего эпизода против первого, в таблице, которая сравнивает секунды.
+	_elapsed_time   = 0.0
+	_last_shown_sec = -1
 	if normaldo:
 		normaldo.enable_input()
 		_build_skill_badges(normaldo)

@@ -14,7 +14,7 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 21
+const EXPECTED_CHECKS : int = 26
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -49,6 +49,8 @@ func _initialize() -> void:
 	_test_ring()
 	print("── Прохождение эпизода ──")
 	await _test_finish()
+	print("── Занавес перед сменой локации ──")
+	await _test_curtain()
 	print("── Вход в хвост ──")
 	await _test_hardcore_entry()
 	_finish()
@@ -167,6 +169,38 @@ func _test_hardcore_entry() -> void:
 		"бесконечный не засчитывает эпизоды: %d" % int(_save.get("episodes_done")))
 	_check(bool((_qm.get("story_completed") as Array)[_quest_idx("hardcore_reached")]),
 		"и задание книги «Всё и сразу» закрылось хвостом")
+
+# Занавес «НЕМНОГО ПОЗДНЕЕ…» стоит между интро на диване и уровнем, фон
+# которого не квартира. Ломается это молча в обе стороны: не показался — игрок
+# видит подмену фона под собой; показался там, где менять нечего, — полторы
+# секунды пустого ожидания перед первым эпизодом.
+func _test_curtain() -> void:
+	_check(not _hud.call("_needs_curtain", 1), "перед первым эпизодом занавеса нет")
+	_check(not _hud.call("_needs_curtain", 0), "и перед бесконечным тоже — он начинается с первого уровня")
+	_check(bool(_hud.call("_needs_curtain", 2)) and bool(_hud.call("_needs_curtain", 3)),
+		"а перед вторым и третьим — есть")
+
+	# Занавес обязан ЗАКРЫТЬСЯ ПОЛНОСТЬЮ и только потом отдать смену фона: в
+	# этом весь его смысл. Если бы он звал `on_covered` раньше, подмену было бы
+	# видно сквозь незакрытую шторку.
+	var covered : Array = [false]
+	var seen_alpha : Array = [0.0]
+	var t = load("res://scripts/level_transition.gd").new()
+	_hud.add_child(t)
+	t.call("_run", "НЕМНОГО ПОЗДНЕЕ…", func() -> void: covered[0] = true)
+	var t0 : int = Time.get_ticks_msec()
+	while not covered[0] and Time.get_ticks_msec() - t0 < 6000:
+		get_root().get_tree().paused = false
+		await process_frame
+		var r = t.get("_rect")
+		if r != null and is_instance_valid(r):
+			seen_alpha[0] = float((r.material as ShaderMaterial).get_shader_parameter("factor"))
+	_check(covered[0], "занавес отдал смену фона")
+	_check(seen_alpha[0] >= 0.999,
+		"и отдал её ЗАКРЫТЫМ: шторка на %.2f из 1.00" % seen_alpha[0])
+	if is_instance_valid(t):
+		t.queue_free()
+	await process_frame
 
 # Индекс сюжетного задания по его условию. По номеру искать нельзя: главы
 # книги перетасовывались уже дважды, и тест, прибитый к числу, переживает

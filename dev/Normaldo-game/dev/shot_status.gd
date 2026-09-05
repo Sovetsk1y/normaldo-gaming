@@ -49,9 +49,11 @@ func _initialize() -> void:
 		"hourglass": normaldo.call("_mark_world_slow", 30.0)
 		"armor":     normaldo.call("apply_casey_mask", 30.0)
 		_:
-			# Мгновенные — одним кругом; ловим кадр в его середине.
-			normaldo.call("_status_on", fx, 1.8, 0.0)
-	await _wait(0.9)
+			# Мгновенные — через тот же вход, что и в игре: он не просто вешает
+			# картинку, а надувает её и гасит, и кадр обязан показывать это, а не
+			# статичный значок.
+			normaldo.call("_status_flash", fx, 2.0, 0.0)
+	await _wait(0.34)
 
 	var d : Dictionary = normaldo.get("_status_fx")
 	print("значков на голове: ", d.keys())
