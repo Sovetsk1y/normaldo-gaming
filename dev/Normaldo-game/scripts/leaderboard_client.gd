@@ -117,8 +117,6 @@ func _init_or_sync_user() -> void:
 	var server_name := str(data.get("display_name", ""))
 	if server_name != "":
 		SaveData.display_name = server_name
-	SaveData.chosen_avatar_skin = str(data.get("avatar_skin", SaveData.chosen_avatar_skin))
-	SaveData.chosen_avatar_fat  = int(data.get("avatar_fat",  SaveData.chosen_avatar_fat))
 	SaveData.mode_best       = (data.get("mode_best", {}) as Dictionary).duplicate()
 	SaveData.current_week_id = str(data.get("week_id", ""))
 	var rewards := data.get("pending_rewards", []) as Array
@@ -135,12 +133,12 @@ func _init_or_sync_user() -> void:
 func submit_score(mode: int, score: int, run_seconds: float) -> Dictionary:
 	if not is_ready():
 		await _await_ready()
-	var avatar_skin := SaveData.chosen_avatar_skin
-	if avatar_skin == "":
-		avatar_skin = SaveData.active_skin
-	var avatar_fat := SaveData.chosen_avatar_fat
-	if avatar_fat < 0:
-		avatar_fat = 0
+	# Скин — ТОТ, КОТОРЫМ ИГРАЛИ, и жир ПЕРВЫЙ. Аватар в таблице рекордов это
+	# свидетельство, а не украшение: он говорит, кем взят результат. Жир к
+	# результату отношения не имеет и берётся первым у всех — иначе строки
+	# таблицы отличались бы толщиной, а не именами.
+	var avatar_skin := SaveData.active_skin
+	var avatar_fat  := 0
 	var resp := await _call_function("submitScore", {
 		"mode":        _mode_name(mode),
 		"score":       score,
@@ -152,6 +150,10 @@ func submit_score(mode: int, score: int, run_seconds: float) -> Dictionary:
 		var data : Dictionary = resp.data
 		if data.has("mode_best"):
 			SaveData.mode_best = (data.get("mode_best", {}) as Dictionary).duplicate()
+		# Запоминаем, каким скином взят рекорд этого режима: строка таблицы
+		# рисуется по нему, и после смены скина она обязана остаться прежней.
+		if int(data.get("best", 0)) > 0:
+			SaveData.record_skin[_mode_name(mode)] = avatar_skin
 		SaveData.current_week_id = str(data.get("week_id", SaveData.current_week_id))
 		SaveData._save()
 	return resp
@@ -172,13 +174,10 @@ func fetch_window(mode: int, radius: int = 5) -> Dictionary:
 		"radius": radius,
 	})
 
-func update_avatar(avatar_skin: String, avatar_fat: int) -> Dictionary:
-	if not is_ready():
-		await _await_ready()
-	return await _call_function("updateAvatar", {
-		"avatar_skin": avatar_skin,
-		"avatar_fat":  avatar_fat,
-	})
+# `updateAvatar` больше не зовётся: выбираемой картинки профиля нет, а скин
+# рекорда уходит на сервер вместе с самим рекордом (см. `submit_score`).
+# Серверная функция оставлена — старые строки таблицы, записанные до этой
+# правки, ею и правились.
 
 func set_display_name(new_name: String) -> Dictionary:
 	if not is_ready():

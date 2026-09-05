@@ -77,6 +77,9 @@ var _podium_root  : Control   = null
 # при разборе жалоб «почему я не вижу себя», и в прогоне dev/smoke_leaders.gd.
 var _podium_ranks : Array     = []
 var _list_ranks   : Array     = []
+# Место → его вертикаль внутри прокрутки. Заполняется тем же циклом, что строит
+# строки: считать её из номера места нельзя, подиум и разделитель сдвигают всё.
+var _list_row_y   : Dictionary = {}
 var _my_strip_lbl : Label     = null
 var _toast_node   : Node2D    = null
 
@@ -695,20 +698,25 @@ func _player_rank_for_active_metric() -> int:
 		return 101
 	return LeaderboardMock.get_player_rank(_active_metric)
 
+# Прокрутить к своей строке и поставить её В СЕРЕДИНУ ОКНА СПИСКА.
+#
+# Раньше номер строки СЧИТАЛСЯ из места: `rank - 1` в полном виде и своя
+# формула в оконном. Обе врали. Первая тройка уходит на подиум, и список
+# начинается с ЧЕТВЁРТОГО места — значит строка стоит на три ниже, чем думала
+# формула, и прокрутка промахивалась на 90 px: своя строка оказывалась не в
+# середине списка, а у его верхнего края, то есть примерно посреди экрана.
+# Ровно это и читалось как «выводит в центр экрана, а не в центр окна».
+#
+# Поэтому позиция берётся не из арифметики, а из САМОГО СПИСКА: `_list_row_y`
+# заполняется тем же циклом, что и строит строки. Разделитель «•••» в оконном
+# виде тоже занимает высоту — формула про него не знала, а список знает.
 func _scroll_to_player_row() -> void:
-	var rank := LeaderboardMock.get_player_rank(_active_metric)
-	var row_idx := -1
-	if _view_mode == 0:
-		row_idx = rank - 1
-	else:
-		var first := maxi(1, rank - 5)
-		row_idx = 10 + 1 + (rank - first)
-	if row_idx < 0:
+	var rank := _player_rank_for_active_metric()
+	if not _list_row_y.has(rank):
 		return
-	var target_y := row_idx * ROW_H
-	var scroll_h := _scroll.size.y
-	var v := maxf(0.0, target_y - scroll_h * 0.5 + ROW_H * 0.5)
-	_scroll.scroll_vertical = int(v)
+	var target_y : float = float(_list_row_y[rank])
+	var v : float = target_y - (_scroll.size.y - ROW_H) * 0.5
+	_scroll.scroll_vertical = int(maxf(0.0, v))
 
 # ── List rebuild ─────────────────────────────────────────────────────────────
 
@@ -766,6 +774,7 @@ func _rebuild_list() -> void:
 	for r in list_rows:
 		if not r.has("separator"):
 			_list_ranks.append(int(r.get("rank", 0)))
+	_list_row_y.clear()
 
 	var w : float = _scroll.size.x
 	_content.custom_minimum_size = Vector2(w, list_rows.size() * ROW_H + 10.0)
@@ -776,6 +785,9 @@ func _rebuild_list() -> void:
 			_add_separator_row(cy)
 		else:
 			_add_player_row(r, cy, alt)
+			# Где на самом деле встала строка каждого места — этим и пользуется
+			# прыжок к своей строке.
+			_list_row_y[int(r.get("rank", 0))] = cy
 			alt = not alt
 		cy += ROW_H
 
@@ -1087,8 +1099,18 @@ func _fall_back_to_mock() -> void:
 	# Inject mock rows so _rebuild_list can show something
 	if not _server_rows.has(_active_metric):
 		var mock_rows := LeaderboardMock.get_top_n(_active_metric, 100)
+		# Своя строка — СО СВОИМ скином: тем, которым взят рекорд этого режима
+		# (`SaveData.record_skin`). Без сети сервер её не пришлёт, а показывать
+		# игроку чужого классика на его же месте — это ровно та подмена, ради
+		# которой выбираемый аватар и убрали.
+		var mine : String = String((SaveData.record_skin as Dictionary).get(
+			LeaderboardMock.mode_key(_active_metric), ""))
 		for r in mock_rows:
 			r["avatar_skin"] = "classic"
+			if bool(r.get("is_player", false)) and mine != "":
+				r["avatar_skin"] = mine
+			# Жир ПЕРВЫЙ у всех: строки таблицы обязаны отличаться именами, а не
+			# толщиной.
 			r["avatar_fat"]  = 0
 		_server_rows[_active_metric] = mock_rows
 	_data_origin = "demo"

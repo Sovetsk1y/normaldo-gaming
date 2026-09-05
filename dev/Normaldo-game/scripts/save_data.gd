@@ -45,6 +45,11 @@ var recovery_code        : String = ""     # открытым текстом —
 # `total_endless`: рекорд и «гора пицц» одного-единственного режима. Режимов
 # стало четыре, и каждый ведёт СВОЙ рекорд — см. `LeaderboardMock.Mode`.
 var mode_best            : Dictionary = {}
+# Последнее известное МЕСТО в таблице по каждому режиму. Нужно ради одной вещи:
+# показать на экране смерти не только «ты 58-й», но и «поднялся на 4». Дельту
+# сервер не считает — её знает только тот, кто помнит прошлое место, то есть
+# клиент.
+var mode_rank            : Dictionary = {}
 var current_week_id      : String = ""
 var pending_rewards      : Array  = []     # locally cached copy of server pending_rewards
 
@@ -54,9 +59,16 @@ var pending_rewards      : Array  = []     # locally cached copy of server pendi
 # пройдена», и ровно по этому числу открывается бесконечный режим.
 var episodes_done        : int    = 0
 
-# ─── Player avatar (top-left menu cell) ──────────────────────────────────────
-var chosen_avatar_skin : String = ""       # "" → use active_skin
-var chosen_avatar_fat  : int    = -1       # -1 → use max unlocked for skin
+# ─── Скин, которым взят рекорд недели, по режимам ────────────────────────────
+# Ключ — имя режима сервера, значение — id скина. Именно он показывается в
+# таблице лидеров рядом с местом.
+#
+# ВЫБИРАЕМОЙ КАРТИНКИ ПРОФИЛЯ БОЛЬШЕ НЕТ. Раньше игрок ставил себе аватар сам
+# (`chosen_avatar_skin` + `chosen_avatar_fat`), и в таблице стояло что угодно:
+# скин, которым он не играл, в жире, которого не набирал. Аватар в таблице
+# рекордов — это не украшение профиля, а СВИДЕТЕЛЬСТВО: им показывают, кем взят
+# результат, и выбирать его отдельно нечего.
+var record_skin : Dictionary = {}
 
 # ─── Audio settings (0.0..1.0) ───────────────────────────────────────────────
 var sfx_volume   : float = 1.0
@@ -289,8 +301,7 @@ func dev_reset_owned_skins() -> void:
 	skin_xp                = 0
 	skin_level             = 1
 	_mastery_tokens_given  = 0
-	chosen_avatar_skin     = ""
-	chosen_avatar_fat      = -1
+	record_skin.clear()
 	_save()
 	data_changed.emit()
 
@@ -408,11 +419,11 @@ func _save() -> void:
 		"custom_display_name": custom_display_name,
 		"recovery_code":       recovery_code,
 		"mode_best":           mode_best,
+		"mode_rank":           mode_rank,
 		"current_week_id":     current_week_id,
 		"episodes_done":       episodes_done,
 		"pending_rewards":     pending_rewards,
-		"chosen_avatar_skin":  chosen_avatar_skin,
-		"chosen_avatar_fat":   chosen_avatar_fat,
+		"record_skin":         record_skin,
 		"sfx_volume":          sfx_volume,
 		"music_volume":        music_volume,
 		"notif_enabled":       notif_enabled,
@@ -483,12 +494,12 @@ func _load() -> void:
 	# режима. Он и есть рекорд бесконечного: терять его при обновлении не за
 	# что. «Гора пицц» (`total_endless`) не переносится — режима больше нет.
 	mode_best           = (d.get("mode_best", {}) as Dictionary).duplicate()
+	mode_rank           = (d.get("mode_rank", {}) as Dictionary).duplicate()
 	if not mode_best.has("endless") and int(d.get("best_endless", 0)) > 0:
 		mode_best["endless"] = int(d.get("best_endless", 0))
 	current_week_id     = str(d.get("current_week_id",     ""))
 	episodes_done       = int(d.get("episodes_done",       0))
-	chosen_avatar_skin  = str(d.get("chosen_avatar_skin",  ""))
-	chosen_avatar_fat   = int(d.get("chosen_avatar_fat",   -1))
+	record_skin         = (d.get("record_skin", {}) as Dictionary).duplicate()
 	sfx_volume          = float(d.get("sfx_volume",        1.0))
 	music_volume        = float(d.get("music_volume",      1.0))
 	notif_enabled       = bool(d.get("notif_enabled",       true))

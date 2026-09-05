@@ -618,16 +618,13 @@ func _avatar_texture(skin_id: String, fat_state: int) -> Texture2D:
 		tex = _CLASSIC_AVATAR_TEX[idx]
 	return tex
 
-# Returns the avatar the player has chosen for the player cell.
-# Falls back to active skin at its max unlocked fat state.
+# Картинка игрока в ячейке меню — ВСЕГДА активный скин в максимальном открытом
+# жире. Выбирать её отдельно больше нельзя: аватар — это «кем я играю», а не
+# самостоятельная настройка, и когда он выбирался, в меню и в таблице стоял
+# скин, которым игрок мог не играть вовсе.
 func _current_avatar() -> Dictionary:
-	var skin_id := SaveData.chosen_avatar_skin
-	var fat     := SaveData.chosen_avatar_fat
-	if skin_id == "" or not SaveData.owns_skin(skin_id):
-		skin_id = SaveData.active_skin
-	if fat < 0 or fat > _max_fat_state_for_skin(skin_id):
-		fat = _max_fat_state_for_skin(skin_id)
-	return {"skin_id": skin_id, "fat": fat}
+	var skin_id := SaveData.active_skin
+	return {"skin_id": skin_id, "fat": _max_fat_state_for_skin(skin_id)}
 
 func _draw_gear_icon(parent: Node, pos: Vector2, sz: float, col: Color) -> void:
 	# Pixel gear: outer ring made of 8 small teeth around a square hub with hole.
@@ -7493,15 +7490,29 @@ func _build_notif_modal_btn(parent: Node, label_text: String,
 func _submit_score_async(mode: int, score: int, run_seconds: float) -> void:
 	if not LeaderboardClient.is_ready():
 		return
+	var key  : String = LeaderboardMock.mode_key(mode)
+	# Прошлое место запоминаем ДО отправки: после неё сервер вернёт новое, и
+	# сравнивать будет уже не с чем.
+	var was  : int = int((SaveData.mode_rank as Dictionary).get(key, 0))
 	var resp = await LeaderboardClient.submit_score(mode, score, run_seconds)
 	if not resp.ok:
 		push_warning("[LB] submit_score failed: %s" % str(resp.get("error", "")))
 		return
+	var rank : int = int(resp.data.get("rank", 0))
 	print("[LB] submit_score: mode=%s rank=%d best=%d" % [
-		LeaderboardMock.mode_key(mode),
-		int(resp.data.get("rank", 0)),
-		int(resp.data.get("best", 0)),
+		key, rank, int(resp.data.get("best", 0)),
 	])
+	if rank <= 0:
+		return
+	# Место РАСТЁТ вверх по таблице, то есть число УМЕНЬШАЕТСЯ: дельта считается
+	# наоборот, иначе стрелка показывала бы вниз на подъёме.
+	_go_rank_delta  = was - rank if was > 0 else 0
+	_go_rank_is_new = was <= 0
+	SaveData.mode_rank[key] = rank
+	SaveData._save()
+	# Экран смерти уже собран на моке — перерисовываем строку настоящими числами.
+	if not _go_rank_geom.is_empty() and int(_go_rank_geom.get("mode", -1)) == mode:
+		_build_go_rank_row_for_mode(mode)
 
 # ── Экран смерти ─────────────────────────────────────────────────────────────
 # Две колонки: слева итог забега и действия, справа задания дня и баланс.
@@ -7602,8 +7613,12 @@ func _build_go_left(r: Rect2, total_pizzas: int, level_rewards: Array,
 	# неё игрок видит вдвое больше собранного и решает, что счётчик врал весь
 	# забег, — перк обязан назвать себя там же, где сработал.
 	var paid : int = _run_dollars_payout()
+	# Пометка называет перк СЛОВАМИ, а не только знаком. «×2» рядом с суммой
+	# читается как «здесь что-то удвоено», и игрок гадает, что именно и почему;
+	# «×2 ДВОЙНАЯ ВЫГОДА» — это имя из книги скина, по которому он находит, за
+	# что ему это дали.
 	_go_stat_row(Vector2(sx0, y + 26.0), sw, DOLLAR_TEXTURE,
-		("+ %d  ×2" % paid) if paid != _dollars_this_run else ("+ %d" % paid),
+		("+ %d  ×2 ДВОЙНАЯ ВЫГОДА" % paid) if paid != _dollars_this_run else ("+ %d" % paid),
 		Color(1.0, 0.88, 0.35), _pm, false)
 
 	var t_lbl := Label.new()
@@ -9026,12 +9041,13 @@ func _build_go_rank_block(panel_x: float, panel_y: float, panel_w: float, pm: in
 	# две, «Рекорд забега» и «Гора пицц», и обе про бесконечный: два взгляда на
 	# один и тот же забег. Теперь у каждого режима своя таблица, и на экране
 	# смерти осмысленна ровно та, куда сейчас ушёл результат.
+	#
+	# Геометрию строки запоминаем: результат уходит на сервер вдогонку, и место
+	# оттуда приходит уже после того, как экран собран (см.
+	# `_submit_score_async`). Без этих чисел обновить строку было бы негде.
 	var mode : int = LeaderboardMock.mode_for_episode(_run_episode)
-	_build_go_rank_row(rows_x, rows_y + 10.0, rows_w,
-		LeaderboardMock.mode_label(mode).capitalize(),
-		LeaderboardMock.get_player_rank(mode),
-		LeaderboardMock.get_player_delta(mode),
-		LeaderboardMock.get_player_is_new(mode), pm)
+	_go_rank_geom = { "x": rows_x, "y": rows_y + 10.0, "w": rows_w, "pm": pm, "mode": mode }
+	_build_go_rank_row_for_mode(mode)
 
 	# Hit area spans both rows — tap anywhere to open the full leaderboard.
 	var btn := Button.new()
@@ -9043,6 +9059,44 @@ func _build_go_rank_block(panel_x: float, panel_y: float, panel_w: float, pm: in
 	btn.pressed.connect(_play_btn_sfx)
 	btn.pressed.connect(_on_death_rank_tapped)
 	add_child(btn)
+
+# Геометрия строки места на экране смерти — чтобы перерисовать её, когда с
+# сервера придёт настоящее место.
+var _go_rank_geom : Dictionary = {}
+var _go_rank_nodes : Array = []
+
+# Строка места для режима. Числа берутся НАСТОЯЩИЕ, если они есть: `mode_rank` в
+# сейве помнит прошлое место в этом режиме, и разница с новым и есть та стрелка,
+# которую ждёт игрок. Пока настоящего места нет (первый забег, нет сети,
+# демо-режим) — показываем мок: пустая строка на экране итогов хуже
+# правдоподобной.
+func _build_go_rank_row_for_mode(mode: int) -> void:
+	if _go_rank_geom.is_empty():
+		return
+	for n in _go_rank_nodes:
+		if is_instance_valid(n):
+			n.queue_free()
+	_go_rank_nodes.clear()
+
+	var key  : String = LeaderboardMock.mode_key(mode)
+	var rank : int    = int((SaveData.mode_rank as Dictionary).get(key, 0))
+	var delta : int
+	var is_new : bool
+	if rank > 0:
+		delta  = int(_go_rank_delta)
+		is_new = bool(_go_rank_is_new)
+	else:
+		rank   = LeaderboardMock.get_player_rank(mode)
+		delta  = LeaderboardMock.get_player_delta(mode)
+		is_new = LeaderboardMock.get_player_is_new(mode)
+	_build_go_rank_row(float(_go_rank_geom["x"]), float(_go_rank_geom["y"]),
+		float(_go_rank_geom["w"]), LeaderboardMock.mode_label(mode).capitalize(),
+		rank, delta, is_new, int(_go_rank_geom["pm"]))
+
+# Насколько поднялся и впервые ли попал — считается в момент ответа сервера,
+# когда ещё известно ПРОШЛОЕ место (см. `_submit_score_async`).
+var _go_rank_delta  : int  = 0
+var _go_rank_is_new : bool = false
 
 func _build_go_rank_row(row_x: float, y: float, row_w: float,
 		metric_name: String, place: int, delta: int, is_new: bool, pm: int) -> void:
@@ -9057,6 +9111,7 @@ func _build_go_rank_row(row_x: float, y: float, row_w: float,
 	pod.mouse_filter      = Control.MOUSE_FILTER_IGNORE
 	pod.process_mode      = pm
 	add_child(pod)
+	_go_rank_nodes.append(pod)
 
 	var name_lbl := Label.new()
 	name_lbl.add_theme_font_override("font", UI_FONT)
@@ -9070,6 +9125,7 @@ func _build_go_rank_row(row_x: float, y: float, row_w: float,
 	name_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	name_lbl.process_mode         = pm
 	add_child(name_lbl)
+	_go_rank_nodes.append(name_lbl)
 
 	var place_lbl := Label.new()
 	place_lbl.add_theme_font_override("font", UI_FONT)
@@ -9084,6 +9140,7 @@ func _build_go_rank_row(row_x: float, y: float, row_w: float,
 	place_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	place_lbl.process_mode         = pm
 	add_child(place_lbl)
+	_go_rank_nodes.append(place_lbl)
 
 	var delta_text := ""
 	var delta_col  := Color(0.55, 0.95, 0.55)
@@ -9110,6 +9167,7 @@ func _build_go_rank_row(row_x: float, y: float, row_w: float,
 	delta_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	delta_lbl.process_mode         = pm
 	add_child(delta_lbl)
+	_go_rank_nodes.append(delta_lbl)
 
 # Death-screen action button — visual wrapper Control + Label + hit Button
 # so the standard press-shrink FX (`_menu_btn_press_anim`) applies cleanly.

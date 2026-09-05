@@ -38,6 +38,8 @@ func _initialize() -> void:
 	await _test_my_strip(hud, mock)
 	print("── Вкладки ──")
 	await _test_tabs(hud)
+	print("── Прыжок к своей строке ──")
+	await _test_jump_to_me(hud, mock)
 	print("── Раскладка ──")
 	await _test_layout(hud)
 	print("── Закрытие ──")
@@ -188,6 +190,34 @@ func _test_tabs(hud: Node) -> void:
 	_check(names_before != names_after, "подиум перестроился под другой режим")
 	_check((scr.get("_podium_ranks") as Array) == first,
 		"на другой вкладке подиум это снова места 1–3")
+	await _close(scr)
+
+# «ПОКАЗАТЬ В СПИСКЕ» ставит свою строку в СЕРЕДИНУ ОКНА СПИСКА.
+#
+# Раньше номер строки считался из места: `rank - 1`. Первая тройка уходит на
+# подиум, и список начинается с ЧЕТВЁРТОГО места — значит строка стоит на три
+# ниже, чем думала формула, и прокрутка промахивалась на 90 px: своя строка
+# оказывалась у верхнего края окна, то есть примерно посреди экрана. Мерить это
+# глазами нельзя — промах выглядит как «ну, куда-то проскроллило».
+func _test_jump_to_me(hud: Node, mock: Node) -> void:
+	var scr : Node = await _open(hud, 0)
+	await scr.call("_on_my_position")
+	for _i in 10:
+		await process_frame
+	var rank   : int = int(mock.get_player_rank(0))
+	var rows_y : Dictionary = scr.get("_list_row_y")
+	_check(rows_y.has(rank), "своя строка нашлась в списке: место %d" % rank)
+	if not rows_y.has(rank):
+		_check(false, "—")
+		await _close(scr)
+		return
+	var scroll : ScrollContainer = scr.get("_scroll")
+	# Куда строка встала ВНУТРИ ОКНА: её вертикаль минус прокрутка.
+	var in_view : float = float(rows_y[rank]) - float(scroll.scroll_vertical)
+	var want    : float = (scroll.size.y - 30.0) * 0.5
+	_check(absf(in_view - want) <= 2.0,
+		"и встала в середину окна: %.0f при середине %.0f (окно %.0f)"
+			% [in_view, want, scroll.size.y])
 	await _close(scr)
 
 # Подиум, список и своя строка не должны наезжать друг на друга и обязаны

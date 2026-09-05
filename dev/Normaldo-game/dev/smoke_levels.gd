@@ -22,7 +22,7 @@ const LEVELS : int = 3
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 44
+const EXPECTED_CHECKS : int = 46
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -235,6 +235,14 @@ func _test_advance() -> void:
 	_check(int(sp.get("_phase")) == int(SP.CAMPAIGN_LEVELS[1]["phase"]),
 		"фаза встала на планку уровня: %d" % int(sp.get("_phase")))
 	_check(sp.is_processing(), "поток снова идёт")
+	# И НЕ ЗАМОРОЖЕН. Проверка отдельная от «процесс идёт», потому что ломалось
+	# именно это: `_start_level` снимал заморозку, а потом звал `clear_items()`,
+	# который ставит её обратно. Процесс при этом возвращался, и снаружи всё
+	# выглядело исправным — а поток молчал до первой буквы NORMALDO, то есть
+	# четырнадцать секунд пустого экрана после победы над боссом.
+	_check(not bool(sp.get("_frozen")), "и не заморожен")
+	_check(float(sp.get("_spawn_timer")) <= 0.6,
+		"первый предмет придёт скоро: через %.2f с" % float(sp.get("_spawn_timer")))
 	_check(String(sp.call("level_name")) == String(SP.CAMPAIGN_LEVELS[1]["name"]),
 		"и название сменилось: %s" % sp.call("level_name"))
 
