@@ -13,7 +13,7 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 23
+const EXPECTED_CHECKS : int = 24
 
 # Все эффекты, которые обязаны лежать на диске. Список ЗДЕСЬ, а не читается из
 # папки: тест, спрашивающий у папки, что в ней лежит, согласен с любой папкой.
@@ -144,7 +144,7 @@ func _test_flash_follows() -> void:
 # то, что у значка проверить было нечем: она и правда появляется отдельным
 # узлом с материалом, надувается через `open_amount` и уходит сама.
 func _test_sphere() -> void:
-	_n.call("_sphere_flash", 2.3)
+	_n.call("_sphere_flash", 1.55)
 	await _wait_frames(2)
 	var s = _fx("sphere")
 	_check(s != null, "сфера появилась")
@@ -152,6 +152,18 @@ func _test_sphere() -> void:
 		return
 	_check(s.material is ShaderMaterial,
 		"и она считается шейдером, а не проигрывается кадрами")
+	# Носитель обязан быть ПРОЗРАЧНЫМ. Материал компилируется лениво, и в первый
+	# раз узел успевает нарисоваться носителем — квадратом во весь размер сферы;
+	# именно он и мелькал вокруг головы. Проверяем сам носитель, а не «нет ли
+	# квадрата на экране»: квадрат живёт один кадр и в кадр теста не попадёт.
+	var carrier : Image = (s as Sprite2D).texture.get_image()
+	var opaque := false
+	for x in carrier.get_width():
+		for y in carrier.get_height():
+			if carrier.get_pixel(x, y).a > 0.0:
+				opaque = true
+	_check(not opaque,
+		"а её носитель прозрачен — иначе он мелькнёт квадратом до компиляции шейдера")
 	# Надувается: сразу после запуска она ещё не раскрыта полностью.
 	var open0 : float = float((s.material as ShaderMaterial).get_shader_parameter("open_amount"))
 	await _wait_real(0.25)
