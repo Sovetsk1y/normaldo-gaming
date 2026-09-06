@@ -31,6 +31,9 @@ const MENU_ICON_SKINS    := preload("res://assets/ui/menu/icons/skins.png")
 const MENU_ICON_SLOTS    := preload("res://assets/ui/menu/icons/slots.png")
 const MENU_ICON_QUESTS   := preload("res://assets/ui/menu/icons/quests.png")
 const MENU_ICON_LEADERS  := preload("res://assets/ui/menu/icons/leaderboard.png")
+# Рисунок лежал в наборе с самого начала и не был ни к чему привязан: под него
+# не было экрана. Теперь есть.
+const MENU_ICON_AWARDS   := preload("res://assets/ui/menu/icons/achievements.png")
 const MENU_PENCIL_TEX        := preload("res://assets/ui/menu/pencil.png")
 const MENU_BADGE_TEX         := preload("res://assets/ui/menu/badge_dot.png")
 # Mode-selector button (single chip, sprite swaps between chapter1 ↔ endless on
@@ -1931,6 +1934,14 @@ func _build_menu_book_btn(vp: Vector2) -> void:
 	var book_btn := _build_menu_icon_btn(vp, MENU_ICON_BOOK, Vector2(217, 0),
 		"КНИГА\nУЧИТЕЛЯ", _show_achievements, 11)
 	_achieve_badge = _attach_canvas_badge(book_btn, QuestManager.has_story_badge())
+
+	# Достижения — рядом с книгой, а не в правом столбце. Столбец полон: четыре
+	# шайбы с шагом 40 канвас-px доходят до 162 при высоте канваса 192, и пятая
+	# просто не влезает вместе с подписью. Но соседство с книгой не вынужденное,
+	# а верное: книга про сюжет, достижения про прожитое, и оба отвечают на
+	# вопрос «что я уже сделал» — в отличие от скинов, слотов и лидеров.
+	_build_menu_icon_btn(vp, MENU_ICON_AWARDS, Vector2(283, 0),
+		"ДОСТИЖЕНИЯ", _show_awards, 9)
 
 # ── Player identity block (top-center) ───────────────────────────────────────
 
@@ -9051,6 +9062,13 @@ func _show_achievements(focus_story_idx: int = -1) -> void:
 	var screen := AchievementsScreen.new()
 	screen.setup(self, focus_story_idx)
 	screen.tree_exited.connect(_refresh_quest_badges)
+	add_child(screen)
+
+# Достижения Game Center. Имя `_show_achievements` занято КНИГОЙ УЧИТЕЛЯ — она
+# так называлась, когда других достижений в игре не было (см. awards_screen.gd).
+func _show_awards(category: int = 0) -> void:
+	var screen := AwardsScreen.new()
+	screen.setup(self, category)
 	add_child(screen)
 
 func _show_leaderboard(initial_metric: int = 0) -> void:
