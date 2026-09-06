@@ -3301,7 +3301,7 @@ func _status_sync() -> void:
 		n.global_position = global_position + Vector2(0.0, float(n.get_meta("dy", 0.0)))
 
 # Размер РИСУНКА головы на экране. Кадр 1000×1000 в основном пустой (см.
-# `_worn_crown_y`), поэтому значок статуса меряется по непрозрачной рамке, а не
+# `WornItem.crown_y`), поэтому значок статуса меряется по непрозрачной рамке, а не
 # по кадру: иначе на одном скине он колечко на макушке, на другом — во весь
 # экран. `get_image` на каждый вызов дорог, а статусы включаются и гаснут часто,
 # поэтому меряем раз на текстуру.
@@ -3713,64 +3713,36 @@ func _begin_scars(duration: float, gated: bool) -> void:
 # скинов разного размера, и пиксельный отступ уехал бы у каждого второго.
 func _spawn_worn(tex: Texture2D, width_k: float, pos: Vector2,
 		sink: float = -1.0) -> Sprite2D:
-	var w := Sprite2D.new()
-	w.texture        = tex
-	w.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	w.z_index        = 6
-	var head : Vector2 = _sprite.texture.get_size()
-	w.scale    = Vector2.ONE * (head.x * width_k / tex.get_size().x)
-	w.position = Vector2(pos.x * head.x, pos.y * head.y)
-	if sink >= 0.0:
-		w.position.y = _worn_crown_y(w, sink)
+	# Сам расчёт живёт в `worn_item.gd`: его зовёт ещё и лаборатория скинов, где
+	# посадку подбирают глазами, и вторая копия расчёта означала бы, что
+	# подбирают одну посадку, а в игре работает другая.
+	var w := WornItem.make(_sprite.texture, tex, width_k, pos, sink)
 	w.modulate = Color(1, 1, 1, 0.0)
 	_sprite.add_child(w)
 	var tw := w.create_tween()
 	tw.tween_property(w, "modulate:a", 1.0, 0.14)
 	return w
 
-# ── Посадка «на макушку», а не «на долю кадра» ────────────────────────────────
-# Кадр Нормальдо — квадрат 1000×1000, и рисунок занимает в нём хорошо если
-# треть: у классика он один, у викинга с рогами другой, у пирата со шляпой
-# третий. Доля кадра поэтому ничего не говорит о том, где макушка, и одна цифра
-# садилась по-разному на каждом скине — на ком-то шляпа лежала на голове, на
-# ком-то висела над ней.
-#
-# Считаем от НЕПРОЗРАЧНОЙ РАМКИ рисунка: берём её верх и опускаем вещь на `sink`
-# долей высоты рисунка вниз. Тогда «шляпа надета на 18% головы» означает одно и
-# то же на всех скинах, чем бы ни был набит кадр вокруг.
-func _worn_crown_y(w: Sprite2D, sink: float) -> float:
-	var head : Vector2 = _sprite.texture.get_size()
-	var used : Rect2i  = _sprite.texture.get_image().get_used_rect()
-	if used.size.y <= 0:
-		return -head.y * 0.5
-	var art_top : float = float(used.position.y) - head.y * 0.5
-	var art_h   : float = float(used.size.y)
-	# У САМОЙ ВЕЩИ кадр тоже с полями: у шляпы это 536×615, из которых рисунок
-	# занимает меньше половины по высоте. Считать от её геометрической середины
-	# значило бы повторить ту же ошибку с другой стороны — берём нижнюю кромку
-	# её РИСУНКА, то есть край полей шляпы, которым она и садится на голову.
-	var w_tex  : Vector2 = w.texture.get_size()
-	var w_used : Rect2i  = w.texture.get_image().get_used_rect()
-	if w_used.size.y <= 0:
-		return art_top + art_h * sink - w_tex.y * w.scale.y * 0.5
-	var w_bottom : float = (float(w_used.end.y) - w_tex.y * 0.5) * w.scale.y
-	return art_top + art_h * sink - w_bottom
-
 # Шляпа надевается СВЕРХУ и уже, чем маска: маска — это лицо, её кладут поверх
 # морды, а шляпа морду закрывать не должна.
 #
 # По вертикали она садится не по доле кадра, а по МАКУШКЕ РИСУНКА (см.
-# `_worn_crown_y`): HAT_SINK — насколько глубоко она надета, в долях высоты
+# `WornItem.crown_y`): `sink` — насколько глубоко она надета, в долях высоты
 # рисунка.
 #
-# 0.42, а не «примерно ноль», потому что в непрозрачную рамку самой шляпы входят
+# По умолчанию 0.42, а не «примерно ноль», потому что в непрозрачную рамку самой шляпы входят
 # ЖЁЛТЫЕ ЛУЧИ вокруг неё, и свисают они заметно ниже полей. Якорь по низу
 # рисунка ставит на голову луч, а поля оставляет висеть — цифра и добирает эту
 # разницу. Подобрана по кадру (`dev/shot_worn.gd`), а не выведена: где именно
-# кончается луч, знает только художник.
-const HAT_WIDTH_K : float = 0.74
-const HAT_POS     : Vector2 = Vector2(0.02, -0.33)
-const HAT_SINK    : float = 0.42
+# кончается луч, знает только художник. Теперь её же можно двигать глазами в
+# лаборатории скинов, и по каждому скину отдельно.
+# Числа переехали в `dev/skin_layout.json` (по скину и по жиру) и правятся в
+# лаборатории скинов. Здесь их больше нет намеренно: одна посадка на все
+# четырнадцать скинов работать не могла — у классика в кадре голова, у викинга
+# рога, у пирата своя шляпа, у Кусса кепка, — и «чуть пониже» для одного
+# означало «на глаза» для другого. Значения по умолчанию лежат в
+# `SkinMetrics.WORN_DEFAULTS` и равны бывшим константам, так что скин, которого
+# нет в файле, ведёт себя ровно как раньше.
 var _hat_worn  : Sprite2D = null
 var _hat_token : int = 0
 
@@ -3778,7 +3750,9 @@ func _wear_hat(duration: float) -> void:
 	_hat_token += 1
 	var tok := _hat_token
 	if not is_instance_valid(_hat_worn):
-		_hat_worn = _spawn_worn(_MAGIC_HAT_TEX, HAT_WIDTH_K, HAT_POS, HAT_SINK)
+		var w : Dictionary = SkinMetrics.worn_for(SaveData.active_skin, fat_state, "hat")
+		_hat_worn = _spawn_worn(_MAGIC_HAT_TEX, float(w["k"]),
+			Vector2(float(w["x"]), 0.0), float(w["sink"]))
 	# Подобрал вторую шляпу — эффект продлевается, и старый таймер снимать её
 	# больше не должен: по токену он поймёт, что он уже не последний.
 	get_tree().create_timer(duration).timeout.connect(func() -> void:
@@ -3787,7 +3761,9 @@ func _wear_hat(duration: float) -> void:
 			_hat_worn = null)
 
 func _spawn_scars_mask() -> void:
-	_scars_mask = _spawn_worn(_CASEY_TEX, 0.98, Vector2(0.0, -0.006))
+	var w : Dictionary = SkinMetrics.worn_for(SaveData.active_skin, fat_state, "mask")
+	_scars_mask = _spawn_worn(_CASEY_TEX, float(w["k"]),
+		Vector2(float(w["x"]), float(w["y"])))
 
 func _end_scars() -> void:
 	if not _scars_active:

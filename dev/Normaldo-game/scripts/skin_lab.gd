@@ -34,9 +34,16 @@ class_name SkinLab
 # оставляет правки в памяти до перезапуска: они видны в меню и в забеге, и это
 # нарочно — так проверяют правку в деле, прежде чем записать.
 #
-# Шляпа и маска — следующий шаг: сейчас `HAT_POS` одна на все четырнадцать
-# скинов, и разложить её по скинам и жирам это отдельная правка в игре, а не
-# только в лаборатории.
+# ── Шляпа и маска ─────────────────────────────────────────────────────────────
+# Кнопка ВЕЩЬ переключает «нет → шляпа → маска». Когда вещь надета, тяни-двигай
+# правит ЕЁ посадку, а не скин: иначе пришлось бы держать два набора кнопок и
+# помнить, к чему сейчас относится колесо.
+#
+# Вещь рисуется ТЕМ ЖЕ способом, что и в забеге, — `normaldo._spawn_worn`
+# считает её место от макушки рисунка, и повторять этот расчёт в лаборатории
+# значило бы получить вторую посадку, не совпадающую с игровой. Поэтому здесь
+# живёт настоящий узел Нормальдо: скин ставится ему, вещь надевается его же
+# кодом, и на экране ровно то, что увидит игрок.
 #
 # ── Что этот экран НЕ трогает ────────────────────────────────────────────────
 # Замеренные таблицы (`HEADS`, `POSE_K`, `POSE_OFF`) считает
@@ -55,6 +62,8 @@ class_name SkinLab
 # См. /Концепция/Скины.md, scripts/skin_metrics.gd
 
 const UI_FONT   := preload("res://assets/fonts/RussoOne-Regular.ttf")
+const TEX_HAT   := preload("res://assets/items/magic_hat.png")
+const TEX_MASK  := preload("res://assets/items/casey_mask.png")
 const TEX_TILE  := preload("res://assets/backgrounds/bg_loop.png")
 const TEX_ARROW := preload("res://assets/ui/quests/back_arrow.png")
 
@@ -95,6 +104,7 @@ var _skin  : int  = 0
 var _fat   : int  = 0
 var _root  : Control = null
 var _sprite : Sprite2D = null
+var _worn_spr : Sprite2D = null
 var _marks  : Marks   = null
 var _info   : Array   = []   # Label по строкам правой панели
 var _fat_lbl : Array  = []
@@ -111,6 +121,12 @@ var _status   : Label = null
 # у скинов вроде Джокера голова занимает четверть кадра, и попасть по ней
 # пальцем труднее, чем промахнуться.
 var _drag     : bool = false
+# Какая вещь надета: "" — никакой, "hat" — шляпа мага, "mask" — маска Кейси.
+# Тяни-двигай правит посадку надетой вещи, а не скина.
+var _worn      : String = ""
+var _worn_lbl  : Label  = null
+const WORN_ORDER : Array = ["", "hat", "mask"]
+const WORN_TITLE : Dictionary = { "": "ВЕЩЬ: НЕТ", "hat": "ВЕЩЬ: ШЛЯПА", "mask": "ВЕЩЬ: МАСКА" }
 var _skin_lbl : Label = null
 var _last_chip_label : Label = null
 var _head_ruler_lbl : Label = null
@@ -208,10 +224,10 @@ func _build_backdrop(vp: Vector2) -> void:
 func _build_panel(vp: Vector2) -> void:
 	var w : float = 250.0
 	var x : float = vp.x - w - 10.0
-	UiKit.panel(_root, Vector2(x, 10.0), Vector2(w, 250.0),
+	UiKit.panel(_root, Vector2(x, 10.0), Vector2(w, 292.0),
 		Color(0.05, 0.04, 0.03, 0.92), 10, Color(0.30, 0.26, 0.18, 0.95))
 	_info.clear()
-	for i in 11:
+	for i in 13:
 		_info.append(_label("", 11, CLR_TEXT, Vector2(x + 10.0, 16.0 + 21.0 * float(i)),
 			Vector2(w - 20.0, 20.0), HORIZONTAL_ALIGNMENT_LEFT))
 
@@ -235,6 +251,9 @@ func _build_controls(vp: Vector2) -> void:
 		_fat_lbl.append(_last_chip_label)
 
 	_chip(Vector2(390.0, y), Vector2(96.0, 26.0), "РАЗМЕТКА", _toggle_marks)
+	_chip(Vector2(390.0, y - 30.0), Vector2(96.0, 26.0), "", _cycle_worn)
+	_worn_lbl = _last_chip_label
+	_worn_lbl.text = String(WORN_TITLE[_worn])
 
 	# Размер: шаг 0.01 — с ним заметно за одно нажатие и не проскакивает мимо.
 	_chip(Vector2(500.0, y), Vector2(30.0, 26.0), "−", func(): _bump_tweak(-0.01))
@@ -284,6 +303,31 @@ func _label(text: String, size_px: int, col: Color, pos: Vector2, size: Vector2,
 	UiKit.place(parent if parent != null else _root, l, pos, size)
 	return l
 
+# Вещь пересобирается заново на каждое обновление: `WornItem.make` считает её
+# место от макушки РИСУНКА, а рисунок меняется и со скином, и с жиром, и с
+# размером — двигать уже созданный спрайт значило бы повторять этот расчёт.
+func _rebuild_worn(id: String, tex: Texture2D) -> void:
+	if is_instance_valid(_worn_spr):
+		_worn_spr.queue_free()
+	_worn_spr = null
+	if _worn.is_empty() or tex == null:
+		return
+	var w : Dictionary = SkinMetrics.worn_for(id, _fat, _worn)
+	if _worn == "hat":
+		_worn_spr = WornItem.make(tex, TEX_HAT, float(w["k"]),
+			Vector2(float(w["x"]), 0.0), float(w["sink"]))
+	else:
+		_worn_spr = WornItem.make(tex, TEX_MASK, float(w["k"]),
+			Vector2(float(w["x"]), float(w["y"])))
+	_sprite.add_child(_worn_spr)
+
+func _cycle_worn() -> void:
+	var i : int = WORN_ORDER.find(_worn)
+	_worn = String(WORN_ORDER[(i + 1) % WORN_ORDER.size()])
+	if is_instance_valid(_worn_lbl):
+		_worn_lbl.text = String(WORN_TITLE[_worn])
+	_refresh()
+
 # ── Правка ───────────────────────────────────────────────────────────────────
 # Ввод ловится на весь экран, а кнопки стоят выше в дереве и событие забирают
 # себе, — поэтому таскание не срабатывает поверх нижнего ряда и панели.
@@ -311,6 +355,9 @@ func _drag_by(delta: Vector2) -> void:
 	if tex == null:
 		return
 	var id : String = _skin_id()
+	if not _worn.is_empty():
+		_drag_worn(id, tex, delta)
+		return
 	var k : float = SkinMetrics.sprite_scale(id, _fat, tex.get_size())
 	var sz : Vector2 = tex.get_size()
 	if k <= 0.0 or sz.x <= 0.0 or sz.y <= 0.0:
@@ -319,8 +366,36 @@ func _drag_by(delta: Vector2) -> void:
 	n -= Vector2(delta.x / (sz.x * k), delta.y / (sz.y * k))
 	_apply(id, SkinMetrics.tweak_for(id, _fat), n)
 
+# Вертикаль у шляпы и маски задаётся ПО-РАЗНОМУ, и свести их к одному нельзя:
+# шляпа садится от макушки (`sink` растёт вниз), маска — по доле кадра (`y`).
+# Здесь это единственное место, где разница видна наружу.
+func _drag_worn(id: String, tex: Texture2D, delta: Vector2) -> void:
+	var k : float = SkinMetrics.sprite_scale(id, _fat, tex.get_size())
+	var sz : Vector2 = tex.get_size()
+	if k <= 0.0 or sz.x <= 0.0 or sz.y <= 0.0:
+		return
+	var w : Dictionary = SkinMetrics.worn_for(id, _fat, _worn).duplicate()
+	w["x"] = float(w["x"]) + delta.x / (sz.x * k)
+	if _worn == "hat":
+		w["sink"] = float(w["sink"]) + delta.y / (sz.y * k)
+	else:
+		w["y"] = float(w["y"]) + delta.y / (sz.y * k)
+	SkinMetrics.worn_set(id, _fat, _worn, w)
+	_dirty = true
+	_refresh()
+
 func _bump_tweak(d: float) -> void:
 	var id : String = _skin_id()
+	# Надета вещь — колесо и кнопки меняют ЕЁ ширину, а не размер скина: иначе
+	# пришлось бы держать два набора кнопок и помнить, к чему сейчас относится
+	# колесо.
+	if not _worn.is_empty():
+		var w : Dictionary = SkinMetrics.worn_for(id, _fat, _worn).duplicate()
+		w["k"] = clampf(float(w["k"]) + d, 0.05, 3.0)
+		SkinMetrics.worn_set(id, _fat, _worn, w)
+		_dirty = true
+		_refresh()
+		return
 	# Нижняя граница 0.10, а не 0: на нуле скин исчезает, и вернуть его можно
 	# только СБРОСОМ — а игрок к тому моменту уже не понимает, что произошло.
 	var t : float = clampf(SkinMetrics.tweak_for(id, _fat) + d, 0.10, 4.0)
@@ -332,6 +407,12 @@ func _apply(id: String, tweak: float, nudge: Vector2) -> void:
 	_refresh()
 
 func _reset_current() -> void:
+	if not _worn.is_empty():
+		SkinMetrics.worn_clear(_skin_id(), _fat, _worn)
+		_dirty = true
+		_refresh()
+		_set_status("посадка вещи сброшена к общей: %s, жир %d" % [_skin_id(), _fat + 1])
+		return
 	_apply(_skin_id(), 1.0, Vector2.ZERO)
 	_set_status("сброшено к замеру: %s, жир %d" % [_skin_id(), _fat + 1])
 
@@ -386,6 +467,7 @@ func _refresh() -> void:
 		_sprite.texture  = tex
 		_sprite.scale    = Vector2(s, s)
 		_sprite.position = _hero_pos + _sprite_offset(id, tex, s)
+	_rebuild_worn(id, tex)
 	_marks.queue_redraw()
 	_refresh_info(id, tex)
 	if tex != null and is_instance_valid(_head_ruler_lbl):
@@ -403,6 +485,18 @@ func _sprite_offset(id: String, tex: Texture2D, s: float) -> Vector2:
 # Правая панель. Показывает не «что нарисовано», а ЧИСЛА, по которым это
 # нарисовано, — и отдельно то, из чего они сложились: замер, коробка, ручная
 # правка. Иначе непонятно, почему скин мелкий: так замерили или так ужали.
+# Строка про надетую вещь. У шляпы и маски РАЗНЫЕ поля, и показывать надо те,
+# что реально правятся: иначе непонятно, куда уходит движение пальца. Разница не
+# косметическая — шляпа садится от макушки (`глуб` растёт вниз), маска по доле
+# кадра (`y`), и свести их к одному нельзя (см. `WornItem`).
+func _worn_line(id: String) -> String:
+	if _worn.is_empty():
+		return "—"
+	var w : Dictionary = SkinMetrics.worn_for(id, _fat, _worn)
+	if _worn == "hat":
+		return "шляпа ш%.2f x%.3f глуб%.3f" % [float(w["k"]), float(w["x"]), float(w["sink"])]
+	return "маска ш%.2f x%.3f y%.3f" % [float(w["k"]), float(w["x"]), float(w["y"])]
+
 func _refresh_info(id: String, tex: Texture2D) -> void:
 	if tex == null:
 		return
@@ -431,12 +525,14 @@ func _refresh_info(id: String, tex: Texture2D) -> void:
 		["голова", "%d×%d px" % [int(head_px.x), int(head_px.y)]],
 		["туша", "%d×%d px" % [int(body_px.x), int(body_px.y)]],
 		["сдвиг", "%.4f / %.4f" % [nudge.x, nudge.y]],
+		["", ""],
+		["вещь", _worn_line(id)],
 	]
 	# Звёздочка у ручной правки — единственный способ отличить «так и было
 	# замерено» от «я это подвинул»: числа в панели одинаковые в обоих случаях.
 	if not is_equal_approx(tweak, 1.0) or nudge != Vector2.ZERO:
 		rows[5][1] = String(rows[5][1]) + "  *"
-	for i in _info.size():
+	for i in mini(_info.size(), rows.size()):
 		var l : Label = _info[i]
 		var r : Array = rows[i]
 		if String(r[0]).is_empty():

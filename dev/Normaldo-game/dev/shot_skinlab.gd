@@ -1,9 +1,9 @@
 extends SceneTree
 
 # Кадр лаборатории скинов.
-#   xvfb-run -a godot --path . --script res://dev/shot_skinlab.gd -- <папка> <скин> <жир>
+#   xvfb-run -a godot --path . --script res://dev/shot_skinlab.gd -- <папка> <скин> <жир> [вещь]
 #
-# Скин — id из SkinRegistry, жир — 1…4. Проверять надо не «экран собрался», а
+# Скин — id из SkinRegistry, жир — 1…4, вещь — hat или mask. Проверять надо не «экран собрался», а
 # СХОДЯТСЯ ЛИ ЛИНИИ: лицо на хитбоксе, туша в коробке, голова у эталона.
 
 func _initialize() -> void:
@@ -30,11 +30,17 @@ func _initialize() -> void:
 				and String(c.get_script().resource_path).ends_with("skin_lab.gd"):
 			lab = c
 	lab.call("_set_fat", clampi(fat, 0, 3))
+	var worn : String = argv[3] if argv.size() > 3 else ""
+	while String(lab.get("_worn")) != worn:
+		lab.call("_cycle_worn")
 	for _i in 20:
 		get_root().get_tree().paused = false
 		await process_frame
 
 	await RenderingServer.frame_post_draw
-	get_root().get_texture().get_image().save_png("%s/skinlab_%s_%d.png" % [out, skin, fat + 1])
-	print("saved ", skin, " ", fat + 1)
+	var tag : String = "%s_%d" % [skin, fat + 1]
+	if not worn.is_empty():
+		tag += "_" + worn
+	get_root().get_texture().get_image().save_png("%s/skinlab_%s.png" % [out, tag])
+	print("saved ", tag)
 	quit(0)

@@ -42,7 +42,7 @@ func _const(node: Node, name: String):
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 19
+const EXPECTED_CHECKS : int = 26
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -61,6 +61,8 @@ func _initialize() -> void:
 	await _test_placement()
 	print("── Правка и запись ──")
 	await _test_editing()
+	print("── Шляпа и маска ──")
+	_test_worn()
 	_finish()
 
 # ── Геометрия ────────────────────────────────────────────────────────────────
@@ -255,6 +257,50 @@ func _test_editing() -> void:
 	# его сохранять, а не затирать.
 	_check((parsed as Dictionary).has("_comment"),
 		"в файле осталось пояснение, зачем он")
+
+# ── Шляпа и маска ────────────────────────────────────────────────────────────
+# Посадка вещей до этого была ОДНА на все четырнадцать скинов, и работать не
+# могла: у классика в кадре голова, у викинга рога, у пирата своя шляпа. Теперь
+# она по скину и по жиру, и ломается это тремя способами, все тихие.
+
+func _test_worn() -> void:
+	var snap : Dictionary = _met.call("layout_snapshot")
+
+	# 1. Скин, которого нет в файле, ведёт себя РОВНО КАК РАНЬШЕ. Иначе переезд
+	#    в файл молча сдвинул бы шляпу у десяти скинов из четырнадцати.
+	var defaults : Dictionary = _met.get("WORN_DEFAULTS")
+	var hat : Dictionary = _met.call("worn_for", "viking", 0, "hat")
+	var same := true
+	for key in (defaults["hat"] as Dictionary):
+		if not is_equal_approx(float(hat[key]), float((defaults["hat"] as Dictionary)[key])):
+			same = false
+	_check(same, "без записи в файле посадка та же, что была константой: %s" % [hat])
+
+	# 2. Правка ложится ТОЧЕЧНО: на свой скин, свой жир и свою вещь. Ошибка тут
+	#    особенно противная — поправил шляпу на одном скине, разъехалась у всех.
+	_met.call("worn_set", "viking", 1, "hat", { "k": 0.5, "x": 0.1, "sink": 0.2 })
+	_check(is_equal_approx(float(_met.call("worn_for", "viking", 1, "hat")["k"]), 0.5),
+		"правка вещи применилась")
+	_check(is_equal_approx(float(_met.call("worn_for", "viking", 0, "hat")["k"]),
+			float((defaults["hat"] as Dictionary)["k"])),
+		"соседний жир не тронут")
+	_check(is_equal_approx(float(_met.call("worn_for", "tyson", 1, "hat")["k"]),
+			float((defaults["hat"] as Dictionary)["k"])),
+		"соседний скин не тронут")
+	_check(is_equal_approx(float(_met.call("worn_for", "viking", 1, "mask")["k"]),
+			float((defaults["mask"] as Dictionary)["k"])),
+		"маска не тронута правкой шляпы")
+
+	# 3. Правка вещи и правка САМОГО СКИНА не затирают друг друга. Они лежат в
+	#    одной строке жира и правятся разными кнопками — при неаккуратной записи
+	#    движение скина сбрасывало бы шляпу, и заметно это только через раз.
+	_met.call("layout_set", "viking", 1, 1.4, Vector2(0.05, 0.05))
+	_check(is_equal_approx(float(_met.call("worn_for", "viking", 1, "hat")["k"]), 0.5),
+		"движение скина не сбросило посадку вещи")
+	_check(is_equal_approx(float(_met.call("tweak_for", "viking", 1)), 1.4),
+		"и правка скина на месте")
+
+	_met.call("layout_restore", snap)
 
 func _finish() -> void:
 	print("")

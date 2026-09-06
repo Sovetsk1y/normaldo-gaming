@@ -166,6 +166,36 @@ func _load_layout() -> void:
 		return
 	_layout = (parsed as Dictionary).get("skins", {})
 
+# ── Посадка надеваемых вещей ─────────────────────────────────────────────────
+# Шляпа мага и маска Кейси садятся на голову, и до сих пор садились ОДНИМ
+# набором чисел на все четырнадцать скинов. Работать это не могло: у классика в
+# кадре одна голова, у викинга рога, у пирата своя шляпа, а у Кусса кепка, —
+# и «чуть пониже» для одного означает «на глаза» для другого. Отсюда и правки
+# вроде «шляпу всем скинам надевай чуть ниже»: двигали единственное число,
+# чинили одного и ломали остальных.
+#
+# Теперь посадка лежит в том же `dev/skin_layout.json`, по скину и по жиру, и
+# правится в лаборатории глазами. Значения по умолчанию — те самые бывшие
+# константы: скин, которого нет в файле, ведёт себя ровно как раньше.
+#
+# У шляпы и маски РАЗНЫЕ вертикальные схемы, и сводить их к одной нельзя.
+# Шляпа садится «на макушку»: `sink` — насколько глубоко она надвинута, в долях
+# высоты РИСУНКА, считая от его непрозрачной верхней кромки (см.
+# `WornItem.crown_y`). Маска садится на ЛИЦО, то есть по доле кадра
+# сверху вниз, — макушка ей не ориентир.
+const WORN_DEFAULTS : Dictionary = {
+	"hat":  { "k": 0.74, "x": 0.02, "sink": 0.42 },
+	"mask": { "k": 0.98, "x": 0.0,  "y": -0.006 },
+}
+
+func worn_for(skin_id: String, fat_state: int, kind: String) -> Dictionary:
+	var base : Dictionary = (WORN_DEFAULTS.get(kind, {}) as Dictionary).duplicate()
+	var worn : Dictionary = _layout_row(skin_id, fat_state).get("worn", {})
+	var mine : Dictionary = worn.get(kind, {})
+	for key in mine:
+		base[key] = mine[key]
+	return base
+
 # ── Правка ручного слоя из лаборатории ───────────────────────────────────────
 # Лаборатория меняет значения ПРЯМО ЗДЕСЬ, а не держит свою копию, и это главное
 # решение всей затеи: после `layout_set` пересчитывается всё разом — масштаб,
@@ -179,15 +209,46 @@ func layout_set(skin_id: String, fat_state: int, tweak: float, nudge: Vector2) -
 	var fats : Array = row.get("fat", [])
 	while fats.size() < 4:
 		fats.append({ "tweak": 1.0, "nudge": [0.0, 0.0] })
-	fats[clampi(fat_state, 0, 3)] = {
+	var i : int = clampi(fat_state, 0, 3)
+	# Посадка вещей живёт в той же строке жира и правится ОТДЕЛЬНОЙ кнопкой:
+	# затирать её здесь значило бы сбрасывать шляпу при каждом движении скина.
+	var keep : Dictionary = (fats[i] as Dictionary).get("worn", {})
+	fats[i] = {
 		"tweak": snappedf(tweak, 0.001),
 		"nudge": [snappedf(nudge.x, 0.0001), snappedf(nudge.y, 0.0001)],
 	}
+	if not keep.is_empty():
+		fats[i]["worn"] = keep
 	row["fat"] = fats
 	_layout[skin_id] = row
 
 # Снимок на случай отмены. Глубокая копия: вложенные словари жиров иначе уедут
 # вместе с правкой, и «отмена» вернула бы то же самое.
+# Посадка вещи. Пишется отдельно от размера и сдвига по той же причине, по
+# которой отдельно и правится: это разные величины, и трогают их порознь.
+func worn_set(skin_id: String, fat_state: int, kind: String, vals: Dictionary) -> void:
+	if not _layout.has(skin_id):
+		_layout[skin_id] = { "fat": [] }
+	var row : Dictionary = _layout[skin_id]
+	var fats : Array = row.get("fat", [])
+	while fats.size() < 4:
+		fats.append({ "tweak": 1.0, "nudge": [0.0, 0.0] })
+	var i : int = clampi(fat_state, 0, 3)
+	var cur : Dictionary = fats[i]
+	var worn : Dictionary = cur.get("worn", {})
+	var clean : Dictionary = {}
+	for key in vals:
+		clean[key] = snappedf(float(vals[key]), 0.0001)
+	worn[kind] = clean
+	cur["worn"] = worn
+	fats[i] = cur
+	row["fat"] = fats
+	_layout[skin_id] = row
+
+func worn_clear(skin_id: String, fat_state: int, kind: String) -> void:
+	var worn : Dictionary = _layout_row(skin_id, fat_state).get("worn", {})
+	worn.erase(kind)
+
 func layout_snapshot() -> Dictionary:
 	return _layout.duplicate(true)
 
