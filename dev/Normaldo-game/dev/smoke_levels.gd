@@ -15,9 +15,11 @@ extends SceneTree
 # См. /Концепция/Уровни/Кампания — три уровня.md
 
 const SP := preload("res://scripts/spawner.gd")
+const BG := preload("res://scripts/background.gd")
 
-# Уровней три. Полос фона по-прежнему пять — полосы 2 и 3 склеены в уровень 2,
-# 4 и 5 в уровень 3, — но КАМПАНИЯ считается уровнями, а не полосами.
+# Уровней три. Фон у них устроен по-разному — первый на плитке, второй и третий
+# на нарисованных полосах (полосы 2 и 3 склеены в уровень 2, 4 и 5 в уровень 3),
+# — но КАМПАНИЯ считается уровнями, а не полосами и не плитками.
 const LEVELS : int = 3
 
 var _fails  : int = 0
@@ -41,7 +43,7 @@ func _initialize() -> void:
 	await _test_letters_end_level()
 	print("── Переход на следующий уровень ──")
 	await _test_advance()
-	print("── Фон: своя полоса на уровень ──")
+	print("── Фон: свой на каждый уровень ──")
 	await _test_background()
 	print("── Эпизод против бесконечного ──")
 	await _test_chain()
@@ -271,19 +273,31 @@ func _test_background() -> void:
 		e["game"].queue_free()
 		await process_frame
 		return
-	# У каждого уровня СВОЯ лента, и начинается она со своего куска. Один и тот же
-	# кусок на двух уровнях означал бы, что смена локации не читается вовсе.
+	# У каждого уровня СВОЙ фон, но устроены они по-разному: первый — плитка из
+	# набора `bg_loop*`, второй и третий — куски своих нарисованных полос.
+	# Проверяется не «текстуры разные», а ЧТО ИМЕННО стоит на каждом уровне:
+	# «разные» прошло бы и на случайной плитке, подставленной второму уровню.
 	var texs : Array = []
 	for lvl in range(1, LEVELS + 1):
 		bg.call("set_level", lvl)
 		await process_frame
 		var t : Texture2D = (bg.get_node("BgA") as Sprite2D).texture
-		_check(t != null, "уровень %d: полоса загрузилась" % lvl)
-		texs.append(t.resource_path if t != null else "")
+		var f : String = String(t.resource_path).get_file() if t != null else ""
+		texs.append(f)
+		if lvl == 1:
+			_check(f.begins_with("bg_loop"), "уровень 1 — плитка: %s" % f)
+		else:
+			# Полосы уровня объявлены в раскладке; кусок обязан быть из них.
+			var ok := false
+			for strip in (BG.LEVEL_STRIPS.get(lvl, []) as Array):
+				if f.begins_with("level%d_" % int(strip)):
+					ok = true
+			_check(ok, "уровень %d — кусок своей полосы %s: %s"
+				% [lvl, BG.LEVEL_STRIPS.get(lvl, []), f])
 	var distinct : Dictionary = {}
 	for t in texs:
 		distinct[t] = true
-	_check(distinct.size() == LEVELS, "и у всех трёх она своя: %d разных" % distinct.size())
+	_check(distinct.size() == LEVELS, "и у всех трёх фон свой: %d разных" % distinct.size())
 	e["game"].queue_free()
 	await process_frame
 
