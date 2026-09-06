@@ -7,8 +7,10 @@ extends SceneTree
 # Без номера снимается «menu» — главный экран с кнопкой достижений: проверять
 # надо и то, куда игрок нажимает, а не только то, куда он попадает.
 #
-# Прогресс на экране фальшивый и ДЕТЕРМИНИРОВАННЫЙ (achievements_mock.gd),
-# поэтому кадры воспроизводимы и их можно сравнивать между собой.
+# Прогресс НАСТОЯЩИЙ — из achievement_manager.gd. Чтобы кадры были
+# воспроизводимы, а не зависели от того, кто сколько наиграл на своей машине,
+# счётчики перед съёмкой выставляются здесь же (см. `_pose`): экран для показа
+# должен показывать и взятое, и недобранное, и полоски посередине.
 
 func _initialize() -> void:
 	await _bail_out()
@@ -24,6 +26,7 @@ func _initialize() -> void:
 	var save : Node = get_root().get_node_or_null("SaveData")
 	save.dollars = 12400
 	save.tokens  = 37
+	_pose(get_root().get_node_or_null("AchievementManager"))
 
 	if mode != "menu":
 		hud.call("_show_awards", int(mode))
@@ -43,6 +46,27 @@ func _wait(sec: float) -> void:
 		get_root().get_tree().paused = false
 		await process_frame
 		t += 1.0 / 60.0
+
+# Показательная раскладка счётчиков: что-то взято целиком, что-то на полпути,
+# что-то не начато. Ставится ЧЕРЕЗ `set_max`, то есть через ту же дверь, что и
+# настоящая игра, — иначе кадр показывал бы состояние, в которое игра прийти не
+# может.
+const POSE : Dictionary = {
+	"runs_total": 214, "pizzas_total": 38400, "pizzas_run_best": 412,
+	"money_total": 61200, "money_run_best": 240, "fat_max": 3, "uber_runs": 7,
+	"episodes_done": 2, "nodmg_episodes": 1, "boss_reached": 1,
+	"bosses_beaten": 9, "endless_best": 415, "endless_runs": 22,
+	"skins_owned": 6, "skins_bought": 5, "skin_lvl_max": 10, "skins_at_10": 1,
+	"spell_casts": 340, "resists": 41, "clean_best": 96, "codex_seen": 31,
+	"slot_spins": 63, "slot_best_match": 3, "best_rank_inv": 12,
+	"item:money_bag": 34, "item:magic_box": 18, "minigame:fat_boss": 4,
+}
+
+func _pose(am: Node) -> void:
+	if am == null:
+		return
+	for k in POSE:
+		am.call("set_max", String(k), int(POSE[k]))
 
 func _bail_out() -> void:
 	for _i in 4000:

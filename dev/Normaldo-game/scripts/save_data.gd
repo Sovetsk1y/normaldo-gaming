@@ -422,6 +422,10 @@ func mark_seen(id: String) -> bool:
 		return false
 	seen_entries[id] = true
 	_save()
+	# Каталог считается ЗДЕСЬ, потому что это единственная точка, где запись
+	# становится встреченной. Считать его снаружи значило бы искать все места,
+	# откуда сюда приходят, — а их ровно затем и свели в одно.
+	AchievementManager.on_codex_seen(seen_entries.size())
 	return true
 
 func _save() -> void:

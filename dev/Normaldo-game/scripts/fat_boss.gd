@@ -401,6 +401,7 @@ func _on_mutagen_caught() -> void:
 # ── Phase A: grow ─────────────────────────────────────────────────────────────
 
 func _run_grow() -> void:
+	AchievementManager.on_minigame("fat_boss")
 	_state = State.GROW
 	if _normaldo.has_method("begin_fat_boss"):
 		_normaldo.begin_fat_boss()

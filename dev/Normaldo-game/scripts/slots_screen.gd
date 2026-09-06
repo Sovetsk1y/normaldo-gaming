@@ -1020,6 +1020,10 @@ func _on_all_reels_stopped() -> void:
 		_spin_audio.stop()
 	_note_result(_last_result)
 	QuestManager.notify_slot_spin(int(_last_result.get("count", 1)))
+	# Джекпот — три «нормальдо» подряд, самая верхняя строка таблицы выигрышей.
+	AchievementManager.on_slot_spin(int(_last_result.get("count", 1)),
+		String(_last_result.get("sym", "")) == "normaldo"
+			and int(_last_result.get("count", 1)) >= 3)
 	_show_win_popup(_last_result)
 
 # Строка результата под автоматом и лента слева. Окно выигрыша игрок закроет и

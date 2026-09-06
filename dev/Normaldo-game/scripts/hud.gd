@@ -220,6 +220,14 @@ static var _restart_episode  : int  = 1
 # `_start_episode` к концу забега уже сброшен, а экран смерти и отправка
 # результата в таблицу спрашивают именно «какой режим только что играли».
 var _run_episode : int = 1
+# ── Секундомеры под достижения ───────────────────────────────────────────────
+# Отсчитываются от `_elapsed_time`, а не своими таймерами: забег уже считает
+# время, и второй счётчик разошёлся бы с первым на паузах и на боях.
+# −1 значит «ещё не начиналось».
+var _clean_from      : float = 0.0    # с какой секунды идёт без урона
+var _hardcore_from   : float = -1.0   # с какой секунды идёт СУПЕР ХАРД
+var _boss_started_at : float = -1.0   # с какой секунды идёт бой с боссом
+var _boss_kind       : String = ""    # кто вышел: ninja / croc / club
 
 var _go_fill_rect       : ColorRect = null
 var _go_shimmer_rect    : ColorRect = null
@@ -333,6 +341,7 @@ func _ready() -> void:
 		spawner.hardcore_tier_up.connect(_on_hardcore_tier_up)
 	QuestManager.quests_updated.connect(_refresh_quest_badges)
 	QuestManager.daily_quest_completed.connect(_show_quest_complete_toast)
+	AchievementManager.unlocked.connect(_on_achievement_unlocked)
 	# Skin XP changes (level-ups, prestige resets) flip the СКИНЫ badge.
 	SaveData.data_changed.connect(_refresh_quest_badges)
 	LeaderboardClient.pending_rewards_loaded.connect(_on_pending_rewards_loaded)
@@ -3924,6 +3933,7 @@ func _build_shop_card(hbox: HBoxContainer, skin_data: Dictionary,
 			_play_btn_sfx()
 			if SaveData.buy_skin(skin_id):
 				QuestManager.notify_skin_bought()
+				AchievementManager.on_skin_bought()
 				var saved_scroll := scroll.scroll_horizontal
 				overlay.queue_free()
 				# Shop is already on-screen and the scene siblings are already
@@ -4262,6 +4272,7 @@ func _skin_action_button(parent: Control, x: float, y: float, w: float, h: float
 			else:
 				if SaveData.buy_skin(skin_id):
 					QuestManager.notify_skin_bought()
+					AchievementManager.on_skin_bought()
 			refresh.call())
 		btn.button_down.connect(_menu_btn_press_anim.bind(visual, true))
 		btn.button_up.connect(_menu_btn_press_anim.bind(visual, false))
@@ -5901,8 +5912,13 @@ func _process(delta: float) -> void:
 	if whole != _last_shown_sec:
 		_last_shown_sec = whole
 		_time_label.text = "%d:%02d" % [whole / 60, whole % 60]
+	AchievementManager.on_run_time(_elapsed_time)
+	AchievementManager.on_clean_time(_elapsed_time - _clean_from)
+	if _hardcore_from >= 0.0:
+		AchievementManager.on_hardcore_time(_elapsed_time - _hardcore_from)
 	if QuestManager._run_is_endless:
 		QuestManager.notify_endless_time(_elapsed_time)
+		AchievementManager.on_endless_time(_elapsed_time)
 	elif QuestManager._run_is_campaign:
 		QuestManager.notify_campaign_time(_elapsed_time)
 
@@ -6039,6 +6055,10 @@ func _start_game() -> void:
 			music.start()
 	_run_outcome = "death"
 	QuestManager.notify_run_started(is_campaign, is_endless)
+	AchievementManager.on_run_started(is_campaign, is_endless, _run_episode)
+	_clean_from      = 0.0
+	_hardcore_from   = -1.0
+	_boss_started_at = -1.0
 	Analytics.event("run_started", {
 		"mode":               ("campaign" if is_campaign else ("endless" if is_endless else "boss_test")),
 		"skin_id":            str(SaveData.active_skin),
@@ -6101,6 +6121,7 @@ func _play_intro_throw_sequence(normaldo: Node, tv: Node) -> void:
 		fly_tw.tween_callback(func():
 			if is_instance_valid(tv) and tv.has_method("trigger_crash"):
 				tv.trigger_crash()
+				AchievementManager.on_menu_remote()
 			if is_instance_valid(remote):
 				remote.queue_free()
 		)
@@ -6923,6 +6944,7 @@ func _refresh_dev_immortal_visual() -> void:
 # ничего о них не знает и подписан на него не только бой.
 func _on_boss_time() -> void:
 	QuestManager.notify_boss_reached()
+	AchievementManager.on_boss_reached()
 	# Дев-кнопка «БОСС» зовёт этот метод напрямую, минуя уровни: там босс всегда
 	# Нога Ниндзя, и уровень после него не меняется.
 	if _boss_test_mode:
@@ -6981,9 +7003,16 @@ func _summon_boss(kind: String) -> void:
 			boss = nf
 	game_root.add_child(boss)
 	boss.connect("defeated", _on_boss_defeated)
+	# Кто именно вышел — знает только эта функция: `_on_boss_defeated` приходит
+	# по сигналу и о драке ничего не помнит.
+	_boss_kind       = kind
+	_boss_started_at = _elapsed_time
+	AchievementManager.on_boss_fight_started()
 
 
 func _on_boss_defeated() -> void:
+	AchievementManager.on_boss_beaten(_boss_kind,
+		(_elapsed_time - _boss_started_at) if _boss_started_at >= 0.0 else -1.0)
 	await _run_win_word()
 	# В БЕСКОНЕЧНОМ бой — не конец, а шов: за ним карточка следующего уровня, и
 	# забег продолжается тем же забегом, с тем же жиром, деньгами и счётчиком
@@ -7017,8 +7046,10 @@ func _on_boss_defeated() -> void:
 	# закрывает именно этот эпизод, а не «любой босс». Общего задания «победи
 	# босса» больше нет — оно было написано, когда босс в игре был один.
 	QuestManager.notify_episode_done(_run_episode)
+	AchievementManager.on_episode_done(_run_episode)
 	if SaveData.episodes_done >= _episode_count():
 		QuestManager.notify_campaign_complete()
+		AchievementManager.on_campaign_complete()
 	_endless_unlock_pending = (not unlocked_before) and QuestManager.is_endless_unlocked()
 	if _endless_unlock_pending:
 		Analytics.event("endless_unlocked", { "episodes_done": int(SaveData.episodes_done) })
@@ -7033,6 +7064,10 @@ func _on_boss_defeated() -> void:
 	# (avatar + XP + balance + rank). The "ВЫЙГРАЛ" framing is conveyed by
 	# the unlock badge.
 	if is_instance_valid(normaldo) and normaldo.has_method("_die"):
+		# Это ПОБЕДА, а не смерть: причину смерти забываем, иначе скрытое
+		# достижение «умри от бочки бомжа» выдавалось бы за пройденный эпизод.
+		if normaldo.has_method("forget_death_cause"):
+			normaldo.forget_death_cause()
 		normaldo._die()
 	else:
 		# Safety net — if normaldo is gone (shouldn't happen), still surface
@@ -7101,6 +7136,8 @@ func _enter_hardcore() -> void:
 
 	Analytics.event("hardcore_entered", { "time_in_run": int(_elapsed_time) })
 	QuestManager.notify_hardcore()
+	AchievementManager.on_hardcore()
+	_hardcore_from = _elapsed_time
 	await _show_shout("СУПЕР ХАРД", "ВСЁ И СРАЗУ", HARDCORE_CARD_T,
 		Color(1.0, 0.42, 0.30), Color(1.0, 0.80, 0.55))
 
@@ -7339,6 +7376,7 @@ func _on_dollars_changed(count: int) -> void:
 	_dollars_this_run = count
 	_dollar_label.text = str(count)
 	QuestManager.notify_dollars_changed(count)
+	AchievementManager.on_dollars_changed(count)
 
 func _on_normaldo_died(total_pizzas: int, death_pos: Vector2) -> void:
 	_timer_running = false
@@ -7398,6 +7436,11 @@ func _on_normaldo_died(total_pizzas: int, death_pos: Vector2) -> void:
 	_go_best_before = SaveData.get_skin_best_for(SaveData.active_skin)
 	SaveData.note_run_finished(total_pizzas)
 	var level_rewards := SaveData.add_xp(total_pizzas, "run_end")
+	# Забег закончился: подводятся счётчики за забег и накопленные плашки
+	# уходят на экран. ПОСЛЕ `note_run_finished` — «примерочная» смотрит на
+	# забеги по скинам, а этот забег записан именно там.
+	AchievementManager.on_skin_level(SaveData.skin_level)
+	AchievementManager.on_run_finished()
 	# Результат уходит в таблицу СВОЕГО режима — эпизоды тоже, а не один
 	# бесконечный: у каждого режима своя таблица (см. LeaderboardModes.Mode).
 	# Отправка не блокирует интерфейс.
@@ -7568,6 +7611,7 @@ func _submit_score_async(mode: int, score: int, run_seconds: float) -> void:
 	_go_rank_is_new = was <= 0
 	SaveData.mode_rank[key] = rank
 	SaveData._save()
+	AchievementManager.on_rank(rank, key)
 	# Экран смерти уже собран на моке — перерисовываем строку настоящими числами.
 	if not _go_rank_geom.is_empty() and int(_go_rank_geom.get("mode", -1)) == mode:
 		_build_go_rank_row_for_mode(mode)
@@ -8870,8 +8914,13 @@ func _on_stats_changed(fat_state: int, pizza_count: int, total_pizzas: int) -> v
 
 	if fat_state < _prev_fat_state and _prev_fat_state <= max_fat:
 		QuestManager.notify_damage_taken()
+		AchievementManager.on_damage_taken()
+		# Секундомер «чисто» обнуляется ровно тем же событием, что и урон:
+		# отдельного признака «получил по морде» в игре нет — есть сбитый жир.
+		_clean_from = _elapsed_time
 
 	QuestManager.notify_stats_changed(fat_state, total_pizzas, _prev_fat_state)
+	AchievementManager.on_stats_changed(fat_state, total_pizzas)
 	_prev_fat_state = fat_state
 
 func _refresh_menu_skin_card() -> void:
@@ -9686,6 +9735,129 @@ func _spawn_intro_quest_toast(title: String, desc: String, done_cb: Callable) ->
 			root.queue_free()
 		done_cb.call()
 	)
+
+# ── Плашка достижения ────────────────────────────────────────────────────────
+# Достижения открываются ПОСРЕДИ забега, а показываются ПОСЛЕ него: менеджер
+# копит их и отпускает разом (`flush_pending`). Отпускает разом — значит могут
+# прийти три подряд, и без очереди третья затёрла бы первую в тот же кадр.
+var _ach_queue      : Array = []
+var _ach_toast_busy : bool  = false
+
+func _on_achievement_unlocked(a: Dictionary) -> void:
+	_ach_queue.append(a)
+	if not _ach_toast_busy:
+		_drain_ach_queue()
+
+func _drain_ach_queue() -> void:
+	if _ach_queue.is_empty():
+		_ach_toast_busy = false
+		return
+	_ach_toast_busy = true
+	var a : Dictionary = _ach_queue.pop_front()
+	await _show_achievement_toast(a)
+	_drain_ach_queue()
+
+# Цвет веса берётся ОТТУДА ЖЕ, откуда его берёт экран достижений: своя копия
+# палитры разошлась бы с ним, и золото в плашке оказалось бы не тем золотом,
+# которое игрок увидит в списке.
+func _show_achievement_toast(a: Dictionary) -> void:
+	if is_instance_valid(_toast_node):
+		_toast_node.queue_free()
+	var vp : Vector2 = get_viewport().get_visible_rect().size
+
+	const TOAST_W : float = 320.0
+	const TOAST_H : float = 64.0
+	const HOLD    : float = 2.2
+	const SLIDE   : float = 0.30
+	var target_y  : float = vp.y - TOAST_H - 28.0
+	var start_y   : float = vp.y + 20.0
+	var tier      : int   = clampi(int(a.get("tier", 1)), 0, AwardsScreen.TIER_COLOR.size() - 1)
+	var col       : Color = AwardsScreen.TIER_COLOR[tier]
+
+	var root := Control.new()
+	root.size         = Vector2(TOAST_W, TOAST_H)
+	root.position     = Vector2((vp.x - TOAST_W) * 0.5, start_y)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.process_mode = Node.PROCESS_MODE_ALWAYS
+	root.z_index      = 70
+	add_child(root)
+	_toast_node = root
+
+	var bg := ColorRect.new()
+	bg.color = Color(0.07, 0.06, 0.04, 0.95)
+	bg.size  = Vector2(TOAST_W, TOAST_H)
+	root.add_child(bg)
+
+	var stripe := ColorRect.new()
+	stripe.color = col
+	stripe.size  = Vector2(TOAST_W, 2.0)
+	root.add_child(stripe)
+
+	# Медаль слева — тот же кружок с числом очков, что и в списке: игрок узнаёт
+	# плашку по нему ещё до того, как прочитает название.
+	var medal := ColorRect.new()
+	medal.color    = Color(col.r, col.g, col.b, 0.28)
+	medal.size     = Vector2(30.0, 30.0)
+	medal.position = Vector2(9.0, 17.0)
+	root.add_child(medal)
+	var pts := Label.new()
+	pts.add_theme_font_override("font", UI_FONT)
+	pts.add_theme_font_size_override("font_size", 13)
+	pts.text                 = str(Achievements.points(a))
+	pts.modulate             = col
+	pts.size                 = medal.size
+	pts.position             = medal.position
+	pts.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pts.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	root.add_child(pts)
+
+	var lbl_header := Label.new()
+	lbl_header.add_theme_font_override("font", UI_FONT)
+	lbl_header.add_theme_font_size_override("font_size", 11)
+	_apply_menu_caption_fx(lbl_header)
+	lbl_header.text               = "ДОСТИЖЕНИЕ ОТКРЫТО"
+	lbl_header.modulate           = col
+	lbl_header.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl_header.clip_text          = true
+	lbl_header.size               = Vector2(TOAST_W - 60.0, 18.0)
+	lbl_header.position           = Vector2(48.0, 6.0)
+	root.add_child(lbl_header)
+
+	var lbl_name := Label.new()
+	lbl_name.add_theme_font_override("font", UI_FONT)
+	lbl_name.add_theme_font_size_override("font_size", 13)
+	_apply_menu_caption_fx(lbl_name)
+	lbl_name.text               = String(a.get("title", "")).to_upper()
+	lbl_name.modulate           = Color(1.00, 0.96, 0.88)
+	lbl_name.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl_name.clip_text          = true
+	lbl_name.size               = Vector2(TOAST_W - 60.0, 16.0)
+	lbl_name.position           = Vector2(48.0, 24.0)
+	root.add_child(lbl_name)
+
+	var lbl_desc := Label.new()
+	lbl_desc.add_theme_font_override("font", UI_FONT)
+	lbl_desc.add_theme_font_size_override("font_size", 11)
+	_apply_menu_caption_fx(lbl_desc)
+	lbl_desc.text               = String(a.get("desc", ""))
+	lbl_desc.modulate           = Color(0.78, 0.75, 0.68)
+	lbl_desc.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl_desc.clip_text          = true
+	lbl_desc.size               = Vector2(TOAST_W - 60.0, 14.0)
+	lbl_desc.position           = Vector2(48.0, 42.0)
+	root.add_child(lbl_desc)
+
+	var tw := create_tween()
+	tw.tween_property(root, "position:y", target_y, SLIDE)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(HOLD)
+	tw.tween_property(root, "position:y", start_y, SLIDE)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	await tw.finished
+	if is_instance_valid(root):
+		root.queue_free()
+	if _toast_node == root:
+		_toast_node = null
 
 func _show_quest_complete_toast(slot: int, title: String, desc: String) -> void:
 	# Drop any previous toast so two completions in quick succession don't

@@ -183,6 +183,7 @@ func _process(delta: float) -> void:
 func _start() -> void:
 	if not is_instance_valid(_spawner) or not is_instance_valid(_background):
 		return
+	AchievementManager.on_minigame("pizza_party")
 	if _spawner.has_method("current_phase_speed"):
 		_base_item_speed = _spawner.current_phase_speed()
 

@@ -13,11 +13,17 @@ class_name AwardsScreen
 # экран ради красоты имени, поэтому этот файл называется наградами. Внутри
 # путаницы нет: книга — про сюжет, награды — про Game Center.
 #
-# ── Экран собран НА МОКАХ ────────────────────────────────────────────────────
-# Машинерии счётчиков ещё нет; числа берутся из `achievements_mock.gd`. Список
-# достижений при этом НАСТОЯЩИЙ — он сгенерирован из спеки, и когда появится
-# менеджер, поменяется ровно источник прогресса: три вызова `_done`, `_counter`,
-# `_progress` ниже.
+# ── Источник прогресса — одна прослойка ──────────────────────────────────────
+# Числа приходят из `achievement_manager.gd` через пять функций внизу (`_done`,
+# `_counter`, `_progress`, `_cat_done`, `_summary`) — больше экран о их
+# происхождении не знает ничего. Прослойка появилась, когда счётчиков ещё не
+# было и экран собирался на моках, и переезд на живые данные стоил ровно этих
+# пяти строк. Разбирать её незачем: следующим источником будет сервер.
+#
+# ── Game Center — зеркало, а не хозяин ───────────────────────────────────────
+# Кнопка «GAME CENTER» появляется, только когда зеркало доступно (iOS со
+# собранным плагином). Без него экран обязан работать ОДИНАКОВО: «достижения
+# только у залогиненных» — поломка, которую на своём устройстве не увидишь.
 #
 # См. /Концепция/Достижения.md, /Концепция/UI — паттерны интерфейса.md
 
@@ -60,6 +66,9 @@ const RES_RIGHT_PAD : float = 10.0
 const RES_Y         : float = 7.0
 const RES_ICON_SZ   : float = 16.0
 const RES_NUM_W     : float = 36.0
+# Кегль цифр под полосой. Константа, а не число в двух местах: по ней же
+# отмеряется ширина под подпись, и разойдись они — цифры снова обрежутся.
+const NUM_FONT_SZ   : int   = 9
 const RES_FONT_SZ   : int   = 14
 
 # Разворот: корешок слева, страница справа.
@@ -102,13 +111,13 @@ func _ready() -> void:
 		.set_trans(SLIDE_TRANS).set_ease(Tween.EASE_IN)
 
 # ── Источник прогресса ───────────────────────────────────────────────────────
-# Три функции, и больше экран о происхождении чисел ничего не знает. Появится
-# менеджер — меняется только их нутро.
-func _done(a: Dictionary) -> bool:      return AchievementsMock.is_done(a)
-func _counter(a: Dictionary) -> int:    return AchievementsMock.counter(a)
-func _progress(a: Dictionary) -> float: return AchievementsMock.progress(a)
-func _cat_done(key: String) -> int:     return AchievementsMock.category_done(key)
-func _summary() -> Dictionary:          return AchievementsMock.summary()
+# Пять функций, и больше экран о происхождении чисел ничего не знает. Пока их
+# отвечал мок, экран рисовался ровно так же — за этим слой и заводился.
+func _done(a: Dictionary) -> bool:      return AchievementManager.is_done(a)
+func _counter(a: Dictionary) -> int:    return AchievementManager.counter(a)
+func _progress(a: Dictionary) -> float: return AchievementManager.progress(a)
+func _cat_done(key: String) -> int:     return AchievementManager.category_done(key)
+func _summary() -> Dictionary:          return AchievementManager.summary()
 
 # ── Сборка ───────────────────────────────────────────────────────────────────
 
@@ -133,6 +142,7 @@ func _build(vp: Vector2) -> void:
 		HORIZONTAL_ALIGNMENT_CENTER, _slide_root)
 	_build_top_resources(vp)
 	_build_summary(vp)
+	_build_gc_btn(vp)
 	_build_spine()
 	_build_page()
 
@@ -163,6 +173,30 @@ func _build_back_btn() -> void:
 	btn.button_down.connect(UiKit.press_anim.bind(visual, true))
 	btn.button_up.connect(UiKit.press_anim.bind(visual, false))
 	btn.mouse_exited.connect(UiKit.press_anim.bind(visual, false))
+	_slide_root.add_child(btn)
+
+# ── Кнопка Game Center ───────────────────────────────────────────────────────
+# Есть ТОЛЬКО когда зеркало доступно: на Андроиде, в редакторе и на iOS-сборке
+# без плагина её нет вовсе. Кнопка, которая ничего не делает, хуже отсутствующей
+# — игрок жмёт и решает, что игра сломана.
+#
+# Экран в игре при этом основной, а не её продолжение: без Game Center здесь
+# ровно то же самое, и в этом весь смысл раскладки.
+func _build_gc_btn(vp: Vector2) -> void:
+	if not AchievementManager.backend.available():
+		return
+	var size := Vector2(58.0 * _sx, 13.0 * _sy)
+	var pos  := Vector2(BACK_BTN_POS.x * _sx + BACK_BTN_SIZE.x * _sx + 8.0 * _sx,
+		BACK_BTN_POS.y * _sy)
+	UiKit.panel(_slide_root, pos, size, CLR_SPINE_SEL, 2)
+	_label("GAME CENTER", 9, CLR_GOLD, pos, size,
+		HORIZONTAL_ALIGNMENT_CENTER, _slide_root)
+	var btn := Button.new()
+	btn.flat       = true
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.size       = size
+	btn.position   = pos
+	btn.pressed.connect(func(): AchievementManager.backend.show_ui())
 	_slide_root.add_child(btn)
 
 func _build_top_resources(vp: Vector2) -> void:
@@ -364,15 +398,22 @@ func _add_row(a: Dictionary, cy: float, w: float) -> void:
 	var goal : int = int(a["goal"])
 	var bar_y : float = cy + ROW_H - 12.0
 	if goal > 1 and not hidden_now:
-		var bw : float = tw - 66.0
+		# Место под цифры ОТМЕРЯЕТСЯ, а не назначается. Фиксированные 60 пикселей
+		# хватало, пока в счётчиках стояли мок-числа; на живых «250 000 / 250 000»
+		# подпись обрезалась ровно посередине — то есть исчезало именно то, ради
+		# чего полоса и нарисована.
+		var txt : String = "%s / %s" % [_num(mini(_counter(a), goal)), _num(goal)]
+		var num_w : float = UI_FONT.get_string_size(
+			txt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, NUM_FONT_SZ).x + 8.0
+		var bw : float = maxf(tw * 0.25, tw - num_w - 6.0)
 		UiKit.panel(_page_body, Vector2(tx, bar_y), Vector2(bw, 5.0),
 			Color(0.20, 0.18, 0.12, 0.95), 2)
 		var p : float = _progress(a)
 		if p > 0.0:
 			UiKit.panel(_page_body, Vector2(tx, bar_y), Vector2(maxf(3.0, bw * p), 5.0),
 				CLR_DONE_EDGE if done else TIER_COLOR[tier], 2)
-		_label("%s / %s" % [_num(mini(_counter(a), goal)), _num(goal)], 9,
-			CLR_TEXT_DIM, Vector2(tx + bw + 6.0, bar_y - 5.0), Vector2(60.0, 14.0),
+		_label(txt, NUM_FONT_SZ, CLR_TEXT_DIM,
+			Vector2(tx + bw + 6.0, bar_y - 5.0), Vector2(num_w, 14.0),
 			HORIZONTAL_ALIGNMENT_LEFT, _page_body)
 
 	# Взятое помечается галочкой справа — цвет рамки один и тот же зелёный, а

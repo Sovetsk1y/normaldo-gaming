@@ -173,6 +173,10 @@ var _dead           : bool  = false
 # killed the player).
 var _last_hit_group : String = ""
 var _last_hit_name  : String = ""
+# Тег того, ЧТО ударило, — тот же, которым предмет называется резистам. Группа
+# отвечает «препятствие», имя файла — «item»; ни то ни другое не годится на
+# вопрос «от чего умер».
+var _last_hit_tag   : String = ""
 var _invincible     : bool  = false
 var _input_enabled  : bool  = false
 var _fat_boss_active : bool = false   # ЖИРОБОСС mini-game in progress
@@ -1487,6 +1491,7 @@ func _fire_time_slow() -> void:
 	# На боссе и в мини-играх поток принадлежит им — туда не лезем.
 	if bool(spawner.get("_frozen")):
 		return
+	AchievementManager.on_time_stop()
 	spawner.call("apply_slow_mo", spawner.SLOW_MO_FACTOR, TIME_SLOW_LEN)
 	_mark_world_slow(TIME_SLOW_LEN)
 	start_skill_cd("perk:time_slow", TIME_SLOW_PERIOD)
@@ -1500,6 +1505,7 @@ func _fire_time_slow() -> void:
 func _try_spider_reflex(area: Area2D) -> bool:
 	if not _perk_reflex or not is_skill_ready("perk:spider_reflex"):
 		return false
+	AchievementManager.on_reflex()
 	start_skill_cd("perk:spider_reflex", REFLEX_PERIOD)
 	_vfx_dodge_flash()
 	# Паучья реакция — тоже «удар не прошёл», и оболочка та же. Красная, а не
@@ -1684,6 +1690,25 @@ func _area_tag(area: Area2D) -> String:
 			if fn.begins_with("stone"): return "stone"
 	return ""
 
+# Как предмет называется для СЧЁТА. Берёт тот же тег, что и резисты, — второй
+# способ назвать предмет разошёлся бы с первым в первую же правку. Пицца,
+# доллар, мешок и мэджик бокс своего тега не имеют (резистить их незачем), и
+# только для них названы группы.
+const COUNT_GROUPS : Array = ["pizza", "pizza_pack", "dollar", "money_bag",
+	"magic_box", "magnet", "mutagen", "slot_machine", "cola", "casey_mask",
+	"magic_hat", "hourglass", "casino_chip", "molotov", "bomb"]
+
+func _count_tag(area: Area2D) -> String:
+	var t := _area_tag(area)
+	if t != "":
+		# Девочка-зазывала в потоке и миньон Фэт Фейса — один и тот же узел, и
+		# тег у него от босса. Для игрока это «зазывала», ею и считаем.
+		return "girl" if t == "club_girl" else t
+	for g in COUNT_GROUPS:
+		if area.is_in_group(g):
+			return g
+	return ""
+
 func _skill_matches(skill: Dictionary, area: Area2D) -> bool:
 	var in_group := false
 	for g in skill["groups"]:
@@ -1807,6 +1832,7 @@ func _build_skin_runtime() -> void:
 
 # A resist fired: break the item instead of taking the hit, start its cooldown.
 func _trigger_resist(tag: String, area: Area2D) -> void:
+	AchievementManager.on_resist(tag)
 	start_skill_cd("resist:" + tag, float(_resist_cd_for.get(tag, 8.0)))
 	_skill_audio.stream    = _RESIST_SFX
 	_skill_audio.volume_db = -6.0
@@ -1906,6 +1932,7 @@ func _try_fire_ability(target: Vector2) -> void:
 		if not _POSE_SKIP.has(String(_ability_cfg.get("id", ""))):
 			_show_spell_pose(pose_time_for(String(_ability_cfg.get("id", ""))))
 		_cast_spell(str(_ability_cfg.get("id", "")), dir)
+	AchievementManager.on_spell_cast(String(SaveData.active_skin))
 	# Consume a charge; start the cooldown only when they're all gone.
 	_active_charges -= 1
 	if _active_charges <= 0:
@@ -2130,6 +2157,7 @@ func _melee_hit_handler() -> Callable:
 		var pos : Vector2 = (node as Node2D).global_position if hit else Vector2.ZERO
 		var res = base.call(node)
 		if hit:
+			AchievementManager.on_spell_hit(String(SaveData.active_skin))
 			_pop_power(pos)
 		return res
 
@@ -2452,6 +2480,7 @@ func _web_handler() -> Callable:
 				_vfx_resist_break(n.global_position)
 				_kill_item(n)
 				return false     # ломаем и летим дальше
+		AchievementManager.on_spell_hit("spider_man")
 		_web_pull(n)
 		return true              # первое хорошее — забрали и погасли
 
@@ -3824,6 +3853,13 @@ func _show_x3_popup(pos: Vector2) -> void:
 	tw.chain().tween_property(spr, "modulate:a", 0.0, 0.4)
 	tw.chain().tween_callback(spr.queue_free)
 
+# Победа над боссом ДОИГРЫВАЕТСЯ через `_die()` — так игрок получает ту же
+# панель итогов. Причина смерти при этом остаётся от последнего удара за забег,
+# и достижение «умри от бочки бомжа» выдавалось бы за ПОБЕДУ. Перед
+# церемониальной смертью причину забывают.
+func forget_death_cause() -> void:
+	_last_hit_tag = ""
+
 func _die() -> void:
 	_dead = true
 	_touching = false
@@ -3844,6 +3880,7 @@ func _die() -> void:
 		"fat_level":      int(fat_state),
 		"pizza_count":    int(_total_pizza_count),
 	})
+	AchievementManager.on_death(_last_hit_tag)
 	died.emit(_total_pizza_count + _skill_bonus_xp, position)
 
 # Maps a colliding obstacle to one of the cause buckets used by analytics.
@@ -3858,6 +3895,11 @@ func _classify_hit_group(area: Area2D) -> String:
 
 func _on_area_entered(area: Area2D) -> void:
 	if _dead: return
+	# Счёт предметов для достижений. ОДНА точка на всю игру и на все предметы
+	# сразу, а не по строке на каждое достижение: сегодня из этих счётчиков
+	# читаются три (мешки, мэджик боксы, зазывалы), а собираются все — под
+	# любое достижение, которое напишут потом, счётчик уже будет.
+	AchievementManager.on_item(_count_tag(area))
 
 	# Электрический рывок Очков проходит НАСКВОЗЬ через всё, что бьёт: ни удара,
 	# ни замедления, ни эффектов. А вот пиццу и доллары по пути он СОБИРАЕТ —
@@ -4044,6 +4086,7 @@ func _handle_obstacle(area: Area2D) -> void:
 	# group (snake/glove/molotov/fire) and fall back to the scene-file name.
 	_last_hit_group = _classify_hit_group(area)
 	_last_hit_name  = area.scene_file_path.get_file().get_basename() if area.scene_file_path != "" else area.name
+	_last_hit_tag   = _count_tag(area)
 
 	# Резист, открытый уровнем скина: если не на откате — предмет разбивается
 	# вместо удара, и защита уходит на перезарядку.
@@ -4078,6 +4121,9 @@ func _handle_obstacle(area: Area2D) -> void:
 	if area.has_meta("slow_duration"):
 		apply_slow(float(area.get_meta("slow_duration")))
 	if area.has_meta("invert_duration"):
+		# Реверс от ШАМАНА (у компаса своя ветка выше): достижение «Мимо шамана»
+		# закрывается тем, что за время проклятия игрок не потерял жизнь.
+		AchievementManager.on_curse_started(float(area.get_meta("invert_duration")))
 		apply_invert(float(area.get_meta("invert_duration")))
 		_show_floating_text("ПРОКЛЯТИЕ!", Color(0.55, 1.00, 0.45))
 	_crack_or_kill(area)
