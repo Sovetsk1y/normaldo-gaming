@@ -1443,6 +1443,18 @@ func _build_menu_dev_xp_btn(vp: Vector2) -> void:
 	var chip := _menu_dev_chip(Vector2(8.0 + (SZ + GAP) * 4.0, vp.y - SZ - 8.0),
 		"ОПЫТ", Color(0.55, 1.00, 0.55), _toggle_menu_xp_row)
 	_menu_overlay.add_child(chip)
+	# Лаборатория скинов — третий чип под голым ENABLED, и это не размывание
+	# правила, а его же буква: правило про чипы, СТОЯЩИЕ НА ИГРОВОМ ЭКРАНЕ
+	# (см. dev_flags.gd), а этот живёт в меню, как и соседний ОПЫТ.
+	var lab := _menu_dev_chip(Vector2(8.0 + (SZ + GAP) * 5.0, vp.y - SZ - 8.0),
+		"СКИНЫ", Color(0.55, 0.80, 1.00), _show_skin_lab)
+	_menu_overlay.add_child(lab)
+
+func _show_skin_lab() -> void:
+	_play_btn_sfx()
+	var lab := SkinLab.new()
+	lab.setup(self)
+	add_child(lab)
 
 func _toggle_menu_xp_row() -> void:
 	_play_btn_sfx()
