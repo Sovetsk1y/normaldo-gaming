@@ -42,7 +42,7 @@ func _const(node: Node, name: String):
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 11
+const EXPECTED_CHECKS : int = 19
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -59,6 +59,8 @@ func _initialize() -> void:
 	await _test_geometry()
 	print("── Посадка спрайта ──")
 	await _test_placement()
+	print("── Правка и запись ──")
+	await _test_editing()
 	_finish()
 
 # ── Геометрия ────────────────────────────────────────────────────────────────
@@ -180,6 +182,79 @@ func _test_placement() -> void:
 
 	game.queue_free()
 	await process_frame
+
+# ── Правка ───────────────────────────────────────────────────────────────────
+# Круг, ради которого лаборатория и существует: подвинул → игра увидела →
+# записалось в файл → прочиталось обратно. Рвётся он тихо в каждом из четырёх
+# мест, и снаружи все четыре выглядят одинаково — «я подвинул, а ничего не
+# изменилось».
+
+func _test_editing() -> void:
+	var snap : Dictionary = _met.call("layout_snapshot")
+
+	# 1. Правка доходит до ИГРЫ, а не только до экрана. Меряется `sprite_scale`
+	#    — та самая функция, по которой игра ставит скин в забеге.
+	var id : String = "viking"
+	var before : float = float(_met.call("sprite_scale", id, 0, Vector2(500, 500)))
+	_met.call("layout_set", id, 0, 1.25, Vector2(0.01, -0.02))
+	var after : float = float(_met.call("sprite_scale", id, 0, Vector2(500, 500)))
+	_check(is_equal_approx(after, before * 1.25),
+		"правка размера доходит до забега: %.4f → %.4f" % [before, after])
+
+	var nudge : Vector2 = _met.call("nudge_for", id, 0)
+	_check(nudge.is_equal_approx(Vector2(0.01, -0.02)),
+		"правка сдвига доходит до забега: %s" % str(nudge))
+
+	# 2. Правка НЕ ЗАДЕВАЕТ соседние жиры. Ошибка тут особенно противная: правишь
+	#    один жир, а разъезжаются все четыре, и заметно это не сразу.
+	_check(is_equal_approx(float(_met.call("tweak_for", id, 1)), 1.0),
+		"соседний жир не тронут: %.3f" % float(_met.call("tweak_for", id, 1)))
+
+	# 3. Отмена возвращает СНИМОК, а не «примерно как было».
+	_met.call("layout_restore", snap)
+	_check(is_equal_approx(float(_met.call("sprite_scale", id, 0, Vector2(500, 500))), before),
+		"отмена возвращает исходное: %.4f" % float(_met.call("sprite_scale", id, 0, Vector2(500, 500))))
+
+	# 4. Запись и чтение обратно. Пишем во временный файл рядом, а не в
+	#    настоящий: тест не имеет права переписать рабочую раскладку.
+	var path : String = String(_met.get("LAYOUT_PATH"))
+	var f := FileAccess.open(path, FileAccess.READ)
+	_check(f != null, "раскладка лежит на месте: %s" % path)
+	if f == null:
+		return
+	var raw : String = f.get_as_text()
+	f.close()
+	var parsed = JSON.parse_string(raw)
+	_check(typeof(parsed) == TYPE_DICTIONARY and (parsed as Dictionary).has("skins"),
+		"раскладка разбирается как JSON со списком скинов")
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+
+	# Числа в файле обязаны совпасть с тем, что отдаёт игра. Расхождение значит,
+	# что читатель и писатель понимают файл по-разному, — а это ровно тот случай,
+	# когда «сохранил, перезапустил, и всё стало другим».
+	var skins : Dictionary = (parsed as Dictionary)["skins"]
+	var bad : Array = []
+	for sid in skins:
+		var fats : Array = (skins[sid] as Dictionary).get("fat", [])
+		for i in fats.size():
+			var row : Dictionary = fats[i]
+			var want_t : float = float(row.get("tweak", 1.0))
+			var got_t : float = float(_met.call("tweak_for", String(sid), i))
+			if not is_equal_approx(want_t, got_t):
+				bad.append("%s/%d размер %.3f против %.3f" % [sid, i + 1, got_t, want_t])
+			var n : Array = row.get("nudge", [0.0, 0.0])
+			var want_n := Vector2(float(n[0]), float(n[1]))
+			var got_n : Vector2 = _met.call("nudge_for", String(sid), i)
+			if not got_n.is_equal_approx(want_n):
+				bad.append("%s/%d сдвиг %s против %s" % [sid, i + 1, str(got_n), str(want_n)])
+	_check(bad.is_empty(), "игра читает из файла ровно то, что в нём написано: %s" % [bad])
+
+	# Пояснение вверху файла — часть данных: без него следующий читатель не
+	# узнает ни откуда числа, ни почему их нельзя править в коде. Запись обязана
+	# его сохранять, а не затирать.
+	_check((parsed as Dictionary).has("_comment"),
+		"в файле осталось пояснение, зачем он")
 
 func _finish() -> void:
 	print("")

@@ -21,10 +21,22 @@ class_name SkinLab
 #   MAX_SPREAD     — не разлетелся ли реквизит в соседние лейны;
 #   линейка 91 px  — эталон головы: к нему приводятся все скины.
 #
-# ── Первый заход: только смотреть ────────────────────────────────────────────
-# Правки руками (тянуть размер, двигать голову, класть шляпу) — следующий шаг.
-# Здесь их ещё нет намеренно: сначала должно быть ВИДНО, что не сходится, иначе
-# править нечего, а сравнивать не с чем.
+# ── Правка ────────────────────────────────────────────────────────────────────
+# Тянешь скин — двигается посадка головы, колесо и кнопки −/+ меняют размер.
+# Правится РУЧНОЙ СЛОЙ, лежащий в `dev/skin_layout.json`, и правится он прямо в
+# `SkinMetrics`: после каждого шага пересчитывается всё разом — масштаб, посадка,
+# рамки, числа в панели и сам Нормальдо в меню за спиной. Своя копия значений в
+# лаборатории означала бы вторую реализацию `sprite_scale`, то есть инструмент,
+# показывающий не то, что покажет игра.
+#
+# СОХРАНИТЬ пишет файл, ОТМЕНА возвращает всё к снимку на момент открытия,
+# СБРОС — к чистому замеру (множитель 1.0, сдвиг 0). Выход без сохранения
+# оставляет правки в памяти до перезапуска: они видны в меню и в забеге, и это
+# нарочно — так проверяют правку в деле, прежде чем записать.
+#
+# Шляпа и маска — следующий шаг: сейчас `HAT_POS` одна на все четырнадцать
+# скинов, и разложить её по скинам и жирам это отдельная правка в игре, а не
+# только в лаборатории.
 #
 # ── Что этот экран НЕ трогает ────────────────────────────────────────────────
 # Замеренные таблицы (`HEADS`, `POSE_K`, `POSE_OFF`) считает
@@ -90,6 +102,15 @@ var _fat_lbl : Array  = []
 # Что показывать поверх скина. Разметка мешает смотреть на сам рисунок, поэтому
 # гасится целиком одной кнопкой.
 var _show_marks : bool = true
+
+# Снимок ручного слоя на момент открытия — для ОТМЕНЫ.
+var _snapshot : Dictionary = {}
+var _dirty    : bool = false
+var _status   : Label = null
+# Перетаскивание. Тянуть можно за любое место кадра, а не только за сам рисунок:
+# у скинов вроде Джокера голова занимает четверть кадра, и попасть по ней
+# пальцем труднее, чем промахнуться.
+var _drag     : bool = false
 var _skin_lbl : Label = null
 var _last_chip_label : Label = null
 var _head_ruler_lbl : Label = null
@@ -102,6 +123,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	layer = 90
 	_read_live_geometry()
+	_snapshot = SkinMetrics.layout_snapshot()
 	_build()
 	_refresh()
 
@@ -214,6 +236,16 @@ func _build_controls(vp: Vector2) -> void:
 
 	_chip(Vector2(390.0, y), Vector2(96.0, 26.0), "РАЗМЕТКА", _toggle_marks)
 
+	# Размер: шаг 0.01 — с ним заметно за одно нажатие и не проскакивает мимо.
+	_chip(Vector2(500.0, y), Vector2(30.0, 26.0), "−", func(): _bump_tweak(-0.01))
+	_chip(Vector2(534.0, y), Vector2(30.0, 26.0), "+", func(): _bump_tweak(0.01))
+	_chip(Vector2(576.0, y), Vector2(66.0, 26.0), "СБРОС", _reset_current)
+	_chip(Vector2(648.0, y), Vector2(72.0, 26.0), "ОТМЕНА", _revert_all)
+	_chip(Vector2(726.0, y), Vector2(92.0, 26.0), "СОХРАНИТЬ", _save)
+
+	_status = _label("", 10, CLR_DIM, Vector2(10.0, y - 22.0), Vector2(500.0, 18.0),
+		HORIZONTAL_ALIGNMENT_LEFT)
+
 func _chip(pos: Vector2, size: Vector2, text: String, on_press: Callable) -> void:
 	var visual := Control.new()
 	visual.size         = size
@@ -251,6 +283,78 @@ func _label(text: String, size_px: int, col: Color, pos: Vector2, size: Vector2,
 	l.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	UiKit.place(parent if parent != null else _root, l, pos, size)
 	return l
+
+# ── Правка ───────────────────────────────────────────────────────────────────
+# Ввод ловится на весь экран, а кнопки стоят выше в дереве и событие забирают
+# себе, — поэтому таскание не срабатывает поверх нижнего ряда и панели.
+
+func _unhandled_input(ev: InputEvent) -> void:
+	if ev is InputEventMouseButton:
+		var mb := ev as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
+			_bump_tweak(0.01)
+		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
+			_bump_tweak(-0.01)
+		elif mb.button_index == MOUSE_BUTTON_LEFT:
+			_drag = mb.pressed
+	elif ev is InputEventScreenTouch:
+		_drag = (ev as InputEventScreenTouch).pressed
+	elif _drag and (ev is InputEventMouseMotion or ev is InputEventScreenDrag):
+		_drag_by(ev.relative)
+
+# Пиксели тянущего пальца → доли кадра. Знак обратный: спрайт ставится в
+# `герой − сдвиг × кадр × масштаб`, то есть уводя сдвиг влево, рисунок едет
+# вправо. Делим на РАЗМЕР КАДРА В ПИКСЕЛЯХ ЭКРАНА — иначе на мелком скине палец
+# тащил бы рисунок через весь экран, а на крупном не сдвинул бы вовсе.
+func _drag_by(delta: Vector2) -> void:
+	var tex : Texture2D = _tex()
+	if tex == null:
+		return
+	var id : String = _skin_id()
+	var k : float = SkinMetrics.sprite_scale(id, _fat, tex.get_size())
+	var sz : Vector2 = tex.get_size()
+	if k <= 0.0 or sz.x <= 0.0 or sz.y <= 0.0:
+		return
+	var n : Vector2 = SkinMetrics.nudge_for(id, _fat)
+	n -= Vector2(delta.x / (sz.x * k), delta.y / (sz.y * k))
+	_apply(id, SkinMetrics.tweak_for(id, _fat), n)
+
+func _bump_tweak(d: float) -> void:
+	var id : String = _skin_id()
+	# Нижняя граница 0.10, а не 0: на нуле скин исчезает, и вернуть его можно
+	# только СБРОСОМ — а игрок к тому моменту уже не понимает, что произошло.
+	var t : float = clampf(SkinMetrics.tweak_for(id, _fat) + d, 0.10, 4.0)
+	_apply(id, t, SkinMetrics.nudge_for(id, _fat))
+
+func _apply(id: String, tweak: float, nudge: Vector2) -> void:
+	SkinMetrics.layout_set(id, _fat, tweak, nudge)
+	_dirty = true
+	_refresh()
+
+func _reset_current() -> void:
+	_apply(_skin_id(), 1.0, Vector2.ZERO)
+	_set_status("сброшено к замеру: %s, жир %d" % [_skin_id(), _fat + 1])
+
+func _revert_all() -> void:
+	SkinMetrics.layout_restore(_snapshot)
+	_dirty = false
+	_refresh()
+	_set_status("все правки отменены")
+
+func _save() -> void:
+	var err : String = SkinMetrics.layout_save()
+	if err.is_empty():
+		_dirty = false
+		_set_status("сохранено в dev/skin_layout.json")
+	else:
+		# Отдельным цветом и словами: запись в res:// работает только при
+		# запуске из редактора, и молчаливый отказ съел бы всю правку.
+		_set_status("НЕ СОХРАНЕНО: %s" % err, CLR_WARN)
+
+func _set_status(text: String, col: Color = CLR_DIM) -> void:
+	if is_instance_valid(_status):
+		_status.text = text
+		_status.modulate = col
 
 # ── Обновление ───────────────────────────────────────────────────────────────
 
@@ -328,6 +432,10 @@ func _refresh_info(id: String, tex: Texture2D) -> void:
 		["туша", "%d×%d px" % [int(body_px.x), int(body_px.y)]],
 		["сдвиг", "%.4f / %.4f" % [nudge.x, nudge.y]],
 	]
+	# Звёздочка у ручной правки — единственный способ отличить «так и было
+	# замерено» от «я это подвинул»: числа в панели одинаковые в обоих случаях.
+	if not is_equal_approx(tweak, 1.0) or nudge != Vector2.ZERO:
+		rows[5][1] = String(rows[5][1]) + "  *"
 	for i in _info.size():
 		var l : Label = _info[i]
 		var r : Array = rows[i]
