@@ -229,7 +229,7 @@ def create(tok, det_id, p):
 
 
 def localize(tok, ach_id, p):
-    call("POST", "/gameCenterAchievementLocalizations", tok, {
+    return call("POST", "/gameCenterAchievementLocalizations", tok, {
         "data": {
             "type": "gameCenterAchievementLocalizations",
             "attributes": {
@@ -240,7 +240,34 @@ def localize(tok, ach_id, p):
             },
             "relationships": {"gameCenterAchievement": {
                 "data": {"type": "gameCenterAchievements", "id": ach_id}}},
-        }})
+        }})["data"]["id"]
+
+
+# ── Картинки ─────────────────────────────────────────────────────────────────
+# КАРТИНКА ВИСИТ НЕ НА ДОСТИЖЕНИИ, А НА ЕГО ЛОКАЛИЗАЦИИ. Из этого следует то,
+# ради чего разделение и сделано: заводить записи можно СЕЙЧАС, а картинки
+# приносить потом, по мере готовности. Догрузка ничего в самой записи не
+# трогает — ни `vendorIdentifier`, ни очки, ни то, что уже открыто у игроков.
+#
+# Тридцать девять иконок — работа художника, и ждать её, чтобы начать заводить
+# семьдесят семь записей, незачем.
+
+def localization(tok, ach_id):
+    """Локализация достижения на нашем языке: (id, есть ли уже картинка)."""
+    res = call("GET", "/gameCenterAchievements/%s/localizations"
+               "?include=gameCenterAchievementImage" % ach_id, tok)
+    for loc in res.get("data", []):
+        if loc["attributes"].get("locale") != LOCALE:
+            continue
+        rel = loc.get("relationships", {}).get("gameCenterAchievementImage", {})
+        return loc["id"], rel.get("data") is not None
+    return None, False
+
+
+def drop_image(tok, img_id):
+    """Снять старую картинку. Удалять КАРТИНКУ безопасно — в отличие от самого
+    достижения, которое у игроков не отзывается."""
+    call("DELETE", "/gameCenterAchievementImages/" + img_id, tok)
 
 
 def find_image(images_dir, aid):
@@ -289,7 +316,11 @@ def main():
     ap.add_argument("--push", action="store_true",
                     help="завести недостающие достижения")
     ap.add_argument("--images", metavar="ДИР",
-                    help="папка с картинками: <id>.png рядом по имени достижения")
+                    help="папка с картинками: <id>.png рядом по имени достижения. "
+                         "Можно позже и отдельным заходом — картинка висит на "
+                         "локализации, а не на самой записи")
+    ap.add_argument("--replace-images", action="store_true",
+                    help="перезалить и там, где картинка уже стоит")
     args = ap.parse_args()
 
     rs = rows()
@@ -305,6 +336,10 @@ def main():
         raise SystemExit("достижений больше ста — Apple столько не примет")
     if total > 1000:
         raise SystemExit("очков больше тысячи — Apple столько не примет")
+
+    if args.images:
+        got = sum(1 for p in ship if find_image(args.images, p["id"]))
+        print("картинок в %s: %d из %d" % (args.images, got, len(ship)))
 
     if args.dry_run or not (args.diff or args.push):
         for p in ship:
@@ -341,15 +376,50 @@ def main():
                 print("  ? %s заведено, но в спеке его нет" % ref)
         return
 
+    made = {}
     for p in new:
         ach_id = create(tok, det_id, p)
         localize(tok, ach_id, p)
+        made[p["ref"]] = ach_id
+        print("  + %s" % p["id"])
+    if new:
+        print("заведено: %d" % len(new))
+
+    if not args.images:
+        if new:
+            print("картинок не грузили — придут позже, тем же скриптом "
+                  "с --images ДИР")
+        return
+
+    # ── Догрузка картинок ────────────────────────────────────────────────────
+    # Идёт по ВСЕМ достижениям выгрузки, а не только по свежесозданным: в этом
+    # и смысл — заводим сейчас, картинки приносим по мере готовности.
+    put = skip = miss = 0
+    for p in ship:
         img = find_image(args.images, p["id"])
-        if img:
-            loc = call("GET", "/gameCenterAchievements/%s/localizations" % ach_id, tok)
-            upload_image(tok, loc["data"][0]["id"], img)
-        print("  + %s%s" % (p["id"], "  (с картинкой)" if img else ""))
-    print("готово: заведено %d" % len(new))
+        if img is None:
+            miss += 1
+            continue
+        ach_id = made.get(p["ref"]) or have.get(p["ref"], {}).get("id")
+        if ach_id is None:
+            continue
+        loc_id, has_img = localization(tok, ach_id)
+        if loc_id is None:
+            print("  ? %s: нет локализации %s" % (p["id"], LOCALE))
+            continue
+        if has_img and not args.replace_images:
+            skip += 1
+            continue
+        if has_img:
+            cur = call("GET", "/gameCenterAchievementLocalizations/%s"
+                       "/gameCenterAchievementImage" % loc_id, tok)
+            if cur.get("data"):
+                drop_image(tok, cur["data"]["id"])
+        upload_image(tok, loc_id, img)
+        put += 1
+        print("  🖼 %s ← %s" % (p["id"], img.name))
+    print("картинки: загружено %d, уже стояли %d, файла нет у %d"
+          % (put, skip, miss))
 
 
 if __name__ == "__main__":
