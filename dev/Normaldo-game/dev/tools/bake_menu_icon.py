@@ -95,6 +95,7 @@ SET = {
     'quests.png':      ('cap.png',   1),   # ЗАДАНИЯ — тёмно-синяя шапочка
     'skins.png':       ('skull.png', 0),   # СКИНЫ
     'leaderboard.png': ('crown.png', 0),   # ЛИДЕРЫ
+    'awards.png':      ('shuriken.png', 0),  # ДОСТИЖЕНИЯ
 }
 
 

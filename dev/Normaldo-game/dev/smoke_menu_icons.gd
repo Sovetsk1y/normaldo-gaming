@@ -39,6 +39,7 @@ const ICONS : Dictionary = {
 	"res://assets/ui/menu/icons/slots.png":       4,   # СЛОТЫ — авторский рисунок
 	"res://assets/ui/menu/icons/quests.png":      4,   # ЗАДАНИЯ
 	"res://assets/ui/menu/icons/leaderboard.png": 4,   # ЛИДЕРЫ
+	"res://assets/ui/menu/icons/awards.png":      4,   # ДОСТИЖЕНИЯ — сюрикен
 }
 
 # Замер по авторской иконке слотов. Кадр 55×55, центр (27, 27) — В ЕДИНИЦАХ
@@ -64,7 +65,7 @@ const RING_MIN : float = 0.25
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 28
+const EXPECTED_CHECKS : int = 32
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1

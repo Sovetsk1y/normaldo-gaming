@@ -31,9 +31,11 @@ const MENU_ICON_SKINS    := preload("res://assets/ui/menu/icons/skins.png")
 const MENU_ICON_SLOTS    := preload("res://assets/ui/menu/icons/slots.png")
 const MENU_ICON_QUESTS   := preload("res://assets/ui/menu/icons/quests.png")
 const MENU_ICON_LEADERS  := preload("res://assets/ui/menu/icons/leaderboard.png")
-# Рисунок лежал в наборе с самого начала и не был ни к чему привязан: под него
-# не было экрана. Теперь есть.
-const MENU_ICON_AWARDS   := preload("res://assets/ui/menu/icons/achievements.png")
+# Сюрикен на той же шайбе, что и остальные пять (`dev/tools/bake_menu_icon.py`).
+# Готовый `achievements.png` из набора автора — горящий череп — оставлен на
+# месте, но не используется: череп в этом меню уже занят СКИНАМИ, и два черепа в
+# одном ряду читаются как одна и та же кнопка дважды.
+const MENU_ICON_AWARDS   := preload("res://assets/ui/menu/icons/awards.png")
 const MENU_PENCIL_TEX        := preload("res://assets/ui/menu/pencil.png")
 const MENU_BADGE_TEX         := preload("res://assets/ui/menu/badge_dot.png")
 # Mode-selector button (single chip, sprite swaps between chapter1 ↔ endless on
