@@ -200,6 +200,12 @@ def main():
     w("# percentComplete, а не «да/нет». Разовые достижения — это goal = 1, отдельного")
     w("# вида для них не нужно.")
     w("#")
+    w("# `reserved` — достижение объявлено, но в App Store Connect НЕ ЗАВОДИТСЯ.")
+    w("# В Game Center достижение у игрока не отзывается (GameKit умеет только")
+    w("# resetAchievements, а он стирает у игрока все достижения приложения разом),")
+    w("# поэтому заведённое живёт вечно, а незаведённый id ничего не стоит. Такое")
+    w("# достижение показывается на экране отдельной меткой и не уходит в выгрузку.")
+    w("#")
     w("# `stat` пока НЕ СЧИТАЕТСЯ НИКЕМ: машинерии счётчиков ещё нет, экран собран на")
     w("# моках (см. mock_progress). Имена счётчиков при этом настоящие — под них")
     w("# и будут заводиться хуки.")
@@ -225,9 +231,11 @@ def main():
           % (r["id"], cat, TIER_KEY[r["Вес"]], r["Волна"]))
         w('\t  "title": "%s", "desc": "%s",'
           % (esc(r["Название"]), esc(r["Условие"])))
-        w('\t  "stat": "%s", "goal": %d, "hidden": %s, "chain": "%s", "step": "%s" },'
+        w('\t  "stat": "%s", "goal": %d, "hidden": %s, "reserved": %s,'
           % (stat, goal, "true" if r["Скрытое"] == "да" else "false",
-             esc(r["Лестница"]), r["Ступень"]))
+             "true" if r.get("Резерв") else "false"))
+        w('\t  "chain": "%s", "step": "%s" },'
+          % (esc(r["Лестница"]), r["Ступень"]))
     w("]")
     w("")
     w("static func by_id(aid: String) -> Dictionary:")
@@ -245,6 +253,14 @@ def main():
     w("")
     w("static func points(a: Dictionary) -> int:")
     w('\treturn int(TIER_POINTS[int(a["tier"])])')
+    w("")
+    w("# Что реально заводится в App Store Connect: всё, кроме зарезервированного.")
+    w("static func registerable() -> Array:")
+    w("\tvar out : Array = []")
+    w("\tfor a in ALL:")
+    w('\t\tif not bool(a.get("reserved", false)):')
+    w("\t\t\tout.append(a)")
+    w("\treturn out")
     w("")
     w("static func total_points() -> int:")
     w("\tvar n := 0")

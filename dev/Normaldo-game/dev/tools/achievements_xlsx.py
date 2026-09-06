@@ -106,9 +106,16 @@ def parse(md_path):
         if not c[1].startswith("`"):
             continue
         tier_name, pts = TIER[c[4]]
+        # Три состояния, а не два. ✅ — первая волна, пусто — вторая, ⏳ —
+        # ЗАРЕЗЕРВИРОВАНО: достижение объявлено, но в App Store Connect не
+        # заводится. Нужно это потому, что в Game Center достижение у игрока не
+        # отзывается: заведённое живёт вечно, а незаведённый id ничего не стоит.
+        # Волна у зарезервированного не «вторая» — она ещё не определена, и
+        # ставится второй только чтобы поле не пустовало.
         out.append({
             "Категория": cat,
             "Волна":     1 if c[0] == "✅" else 2,
+            "Резерв":    c[0] == "⏳",
             "id":        c[1].strip("`"),
             "Название":  c[2],
             "Условие":   c[3],
@@ -153,7 +160,13 @@ def build(rows, out_path):
 
     for i, r in enumerate(rows, start=2):
         for j, h in enumerate(HEAD, start=1):
-            c = ws.cell(row=i, column=j, value=r[h])
+            var = r[h]
+            # В колонке волны у зарезервированного стоит слово, а не число:
+            # «2» читалось бы как «сделаем во вторую волну», а его не делают
+            # вообще, пока эпизодов три.
+            if h == "Волна" and r.get("Резерв"):
+                var = "резерв"
+            c = ws.cell(row=i, column=j, value=var)
             c.font = Font(name=ARIAL, size=10, bold=(h == "Название"))
             c.border = border
             c.alignment = Alignment(
@@ -162,6 +175,8 @@ def build(rows, out_path):
                 horizontal="center" if h in ("Волна", "Очки", "Ступень", "Скрытое") else "left")
             if h == "Вес":
                 c.fill = TIER_FILL[r["Вес"]]
+            elif h == "Волна" and r.get("Резерв"):
+                c.fill = PatternFill("solid", fgColor="F0E4C8")
             elif h == "Волна" and r["Волна"] == 1:
                 c.fill = WAVE1_FILL
 

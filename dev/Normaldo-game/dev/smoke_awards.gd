@@ -23,7 +23,7 @@ const MOCK := preload("res://scripts/achievements_mock.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 22
+const EXPECTED_CHECKS : int = 25
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -165,6 +165,9 @@ func _test_table() -> void:
 func _test_apple() -> void:
 	var n : int = ACH.ALL.size()
 	_check(n <= 100, "достижений не больше ста: %d" % n)
+	# Очки считаются по ВСЕМУ списку, включая зарезервированное. Бюджет за ним
+	# держится: снимешь его двадцать очков — потратишь на что-то другое, а потом
+	# при заведении окажешься за тысячей.
 	var pts : int = ACH.total_points()
 	_check(pts <= 1000, "очков не больше тысячи: %d" % pts)
 	var over : Array = []
@@ -172,6 +175,27 @@ func _test_apple() -> void:
 		if ACH.points(a) > 100:
 			over.append(String(a["id"]))
 	_check(over.is_empty(), "ни одно не дороже ста очков: %s" % [over])
+
+	# ЗАРЕЗЕРВИРОВАННОЕ не уходит в App Store Connect. Проверка нужна потому, что
+	# ошибка здесь необратима: в Game Center достижение у игрока не отзывается,
+	# и заведённое по недосмотру останется у всех навсегда. Одна забытая строка в
+	# скрипте выгрузки — и вернуть уже нечего.
+	var reg : Array = ACH.registerable()
+	var leaked : Array = []
+	for a in reg:
+		if bool(a.get("reserved", false)):
+			leaked.append(String(a["id"]))
+	_check(leaked.is_empty(), "зарезервированное не попадает в выгрузку: %s" % [leaked])
+	_check(reg.size() < ACH.ALL.size(),
+		"и выгрузка короче списка: %d из %d" % [reg.size(), ACH.ALL.size()])
+
+	# Зарезервированное не может стоять в ПЕРВОЙ волне: волна — это «когда
+	# делаем», резерв — «пока не делаем вовсе», и одновременно они не бывают.
+	var both : Array = []
+	for a in ACH.ALL:
+		if bool(a.get("reserved", false)) and int(a["wave"]) == 1:
+			both.append(String(a["id"]))
+	_check(both.is_empty(), "резерв не заявлен первой волной: %s" % [both])
 
 # ── Моки ─────────────────────────────────────────────────────────────────────
 

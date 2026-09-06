@@ -338,12 +338,23 @@ func _add_row(a: Dictionary, cy: float, w: float) -> void:
 	_label(desc, 10, CLR_TEXT_DIM, Vector2(tx, cy + 19.0), Vector2(tw - 60.0, 14.0),
 		HORIZONTAL_ALIGNMENT_LEFT, _page_body)
 
-	# Метка второй волны. Экран показывают на согласовании, и отличить
-	# «сделаем сразу» от «сделаем потом» надо прямо здесь, а не по таблице.
-	if int(a.get("wave", 1)) == 2:
+	# Метка очереди. Экран показывают на согласовании, и отличить «сделаем
+	# сразу» от «сделаем потом» надо прямо здесь, а не по таблице.
+	#
+	# «Резерв» — не третья волна, а отдельное состояние: достижение объявлено, но
+	# в App Store Connect не заводится вовсе (см. Achievements.reserved). Метка
+	# «2-я волна» на нём была бы враньём — его не сделают и во вторую.
+	var tag : String = ""
+	var tag_edge : Color = Color(0.42, 0.36, 0.24, 0.90)
+	if bool(a.get("reserved", false)):
+		tag = "резерв"
+		tag_edge = Color(0.62, 0.50, 0.24, 0.95)
+	elif int(a.get("wave", 1)) == 2:
+		tag = "2-я волна"
+	if not tag.is_empty():
 		UiKit.panel(_page_body, Vector2(w - 58.0, cy + 5.0), Vector2(50.0, 13.0),
-			Color(0.16, 0.14, 0.10, 0.95), 6, Color(0.42, 0.36, 0.24, 0.90))
-		_label("2-я волна", 8, CLR_TEXT_DIM, Vector2(w - 58.0, cy + 4.0),
+			Color(0.16, 0.14, 0.10, 0.95), 6, tag_edge)
+		_label(tag, 8, CLR_TEXT_DIM, Vector2(w - 58.0, cy + 4.0),
 			Vector2(50.0, 13.0), HORIZONTAL_ALIGNMENT_CENTER, _page_body)
 
 	# ── Полоса выполнения ────────────────────────────────────────────────────
