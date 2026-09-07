@@ -797,7 +797,7 @@ func apply_slow_mo(factor: float = SLOW_MO_FACTOR, duration: float = SLOW_MO_DUR
 		_scale_live_speeds(factor)
 	world_speed_mult = factor
 	_set_background_mult(factor)
-	_set_world_gray(true)
+	_set_slow_mo_fx(true, factor)
 	if owns_pause:
 		pause_for_event()
 
@@ -810,20 +810,27 @@ func apply_slow_mo(factor: float = SLOW_MO_FACTOR, duration: float = SLOW_MO_DUR
 	_scale_live_speeds(1.0 / factor)
 	world_speed_mult = 1.0
 	_set_background_mult(1.0)
-	_set_world_gray(false)
+	_set_slow_mo_fx(false, 1.0)
 	if owns_pause:
 		resume_after_event()
 
-# Мир в чёрно-белом на время замедления. Ставится ЗДЕСЬ, а не у песочных часов и
-# венца мага по отдельности: `apply_slow_mo` — единственная воронка, через
-# которую проходит любое замедление, и заводить эффект на каждом источнике
-# значило бы забыть его на третьем.
+# Обвязка замедления: мир в чёрно-белом и музыка в замедленном темпе. Ставится
+# ЗДЕСЬ, а не у песочных часов и венца мага по отдельности: `apply_slow_mo` —
+# единственная воронка, через которую проходит любое замедление, и заводить
+# эффект на каждом источнике значило бы забыть его на третьем.
+#
+# Картинка и звук идут ВМЕСТЕ и одним вызовом: разъехавшись, они читаются как
+# поломка — либо «картинка подвисла», либо «звук отвалился», — а вместе как одно
+# событие.
 const WORLD_GRAY := preload("res://scripts/world_gray.gd")
 
-func _set_world_gray(on: bool) -> void:
+func _set_slow_mo_fx(on: bool, factor: float) -> void:
 	var g : Node = WORLD_GRAY.ensure(get_parent())
 	if g != null and g.has_method("set_gray"):
 		g.call("set_gray", on)
+	var music : Node = get_parent().get_node_or_null("Music")
+	if music != null and music.has_method("set_slow_mo"):
+		music.call("set_slow_mo", on, factor)
 
 func _scale_live_speeds(k: float) -> void:
 	for child in get_children():

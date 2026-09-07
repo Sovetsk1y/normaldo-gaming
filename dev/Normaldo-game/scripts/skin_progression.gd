@@ -248,6 +248,27 @@ const RESIST_ICONS : Dictionary = {
 
 func resist_icon(item: String) -> Texture2D:
 	return RESIST_ICONS.get(item, null)
+
+# ── Картинки венцов 10-го уровня ─────────────────────────────────────────────
+# Лежат ЗДЕСЬ, рядом с резистами, а не у того, кто рисует. Венец показывается в
+# трёх местах — кружок в забеге (`skill_badges.gd`), карточка награды уровня и
+# окно «уровень взят» (оба в `hud.gd`), — и в каждом рисовался по-своему: в
+# забеге картинкой, в карточках звёздочкой «★». Из-за этого паучью реакцию в
+# забеге узнавали по руке, а на экране скина — никак.
+#
+# Не у всех венцов есть своя картинка, и это нормально: у кого нет — остаётся
+# звёздочка. Заводить рисунок ради заполнения таблицы незачем.
+const PERK_ICONS : Dictionary = {
+	"spider_reflex": preload("res://assets/skills/spider_man/reflex_hand.png"),
+	# Часы — та же картинка, что у предмета «песочные часы»: перк мага делает
+	# ровно то же, что предмет, и разные рисунки под одно действие заставляли бы
+	# игрока искать разницу, которой нет.
+	"time_slow":     preload("res://assets/items/hourglass.png"),
+}
+
+func perk_icon(perk_id: String) -> Texture2D:
+	return PERK_ICONS.get(perk_id, null)
+
 func item_name(item: String) -> String:
 	return String(ITEM_NAMES.get(item, item))
 

@@ -15,15 +15,9 @@ const COMPASS_TEX := preload("res://assets/items/compass.png")
 const SHROOM_TEX  := preload("res://assets/items/mushroom.png")
 const HAT_TEX     := preload("res://assets/items/magic_hat.png")
 const COLA_TEX    := preload("res://assets/items/cola.png")
-# Венцы 10-го уровня. Часы — та же картинка, что у предмета «песочные часы», и
-# это НЕ лень: перк мага делает ровно то же, что предмет, и разные картинки под
-# одно действие заставляли бы игрока искать разницу, которой нет.
-const HOURGLASS_TEX := preload("res://assets/items/hourglass.png")
-# Паучья реакция — РУКА, а не кадр паутины. `web1.png` — кадр анимации 2000×2000,
-# в котором сама паутина занимает угол 914×492; кружок масштабирует ВЕСЬ кадр, и
-# в 46 пикселях от неё оставалось два десятка точек с краю. Снаружи это читалось
-# как чёрный диск — то есть как поломка, а не как значок.
-const WEB_TEX       := preload("res://assets/skills/spider_man/reflex_hand.png")
+# Картинки венцов 10-го уровня здесь НЕ объявляются: они лежат в
+# `SkinProgression.PERK_ICONS`, откуда их берут все три места, где венец
+# показывается. См. комментарий там.
 
 # 34 было мало: кружок в углу экрана и так на периферии зрения.
 const D    : float = 40.0
@@ -121,21 +115,24 @@ func setup(nrm: Node) -> void:
 	# копится. Динамический (появляющийся только на время действия) отвечал бы
 	# на вопрос «действует ли», а у этих двоих вопрос обратный — «есть ли он у
 	# меня на следующий удар».
+	# Картинки венцов берутся у `SkinProgression.perk_icon` — там же, откуда их
+	# берут карточки уровней и окно «уровень взят». Свои `preload` здесь были
+	# второй копией той же связки «перк → рисунок», и рука Спайди появилась в
+	# забеге, а на экране скина осталась звёздочка.
 	var lvl : int = int(SaveData.skin_level)
 	if SkinProgression.has_perk(sid, lvl, "time_slow"):
-		specs.append({ "key": "perk:time_slow", "tex": HOURGLASS_TEX, "sym": "",
-			"mod": Color(1, 1, 1), "ring": Color(0.55, 0.85, 1.00),
+		specs.append({ "key": "perk:time_slow", "tex": SkinProgression.perk_icon("time_slow"),
+			"sym": "", "mod": Color(1, 1, 1), "ring": Color(0.55, 0.85, 1.00),
 			"title": "ОСТАНОВКА ВРЕМЕНИ",
 			"desc": "Раз в 30 c мир сам замедляется на 3 c." })
 	if SkinProgression.has_perk(sid, lvl, "spider_reflex"):
-		specs.append({ "key": "perk:spider_reflex", "tex": WEB_TEX, "sym": "",
-			"mod": Color(1, 1, 1), "ring": Color(0.95, 0.25, 0.30),
+		specs.append({ "key": "perk:spider_reflex", "tex": SkinProgression.perk_icon("spider_reflex"),
+			"sym": "", "mod": Color(1, 1, 1), "ring": Color(0.95, 0.25, 0.30),
 			"title": "ПАУЧЬЯ РЕАКЦИЯ",
 			"desc": "Раз в 10 c один удар уходит в пустоту сам." })
 
 	# Laid out from this layer's origin — the HUD positions the layer itself
 	# (under the resources strip, right of the fat panel).
-	var x := 0.0
 	for s in specs:
 		var b := Badge.new()
 		b.nrm      = nrm
@@ -148,16 +145,66 @@ func setup(nrm: Node) -> void:
 		b.charges_badge = s.get("chg", false)
 		b.title    = s.get("title", "")
 		b.desc     = s.get("desc", "")
-		b.position = Vector2(x, 0.0)
 		add_child(b)
 		if s["key"] == "active":
 			_active_badge = b
-		x += D + GAP
+	_relayout(true)
+	set_process(true)
 
 	# Pulse the active badge when the player tries to fire it during cooldown.
 	if is_instance_valid(nrm) and nrm.has_signal("active_denied") \
 			and not nrm.active_denied.is_connected(_on_active_denied):
 		nrm.active_denied.connect(_on_active_denied)
+
+# ── Ряд БЕЗ ДЫРОК ────────────────────────────────────────────────────────────
+# Раньше место в ряду раздавалось один раз, при сборке, и доставалось ВСЕМ
+# кружкам — включая динамические (компас, гриб, шляпа, кола), которые почти весь
+# забег невидимы. Из-за этого венец десятого уровня — единственный кружок,
+# стоящий в списке после них, — висел в четырёх слотах правее остальных, посреди
+# пустого места, и выглядел не частью ряда, а случайной кнопкой на экране.
+#
+# Теперь место получают только видимые. Пересчёт идёт по смене СОСТАВА видимых, а
+# не каждый кадр: пока ничего не появилось и не погасло, считать нечего.
+var _vis_sig : int = -1
+
+func _process(_delta: float) -> void:
+	var sig := 0
+	var bit := 1
+	for c in get_children():
+		if c is Badge and (c as Badge).visible:
+			sig |= bit
+		bit <<= 1
+	if sig != _vis_sig:
+		# Первый проход — БЕЗ ПОЕЗДКИ. Динамические кружки прячут себя в своём
+		# `_ready`, то есть уже после сборки ряда, и первая же пересборка состава
+		# случается на первом кадре. Съезжаться там нечему: игрок ещё не видел
+		# предыдущей раскладки, и поездка выглядела бы дёрганьем на старте.
+		var instant := _vis_sig == -1
+		_vis_sig = sig
+		_relayout(instant)
+
+# `instant` — при первой сборке: там ехать неоткуда, кружки только что созданы.
+func _relayout(instant: bool) -> void:
+	var x := 0.0
+	for c in get_children():
+		if not (c is Badge):
+			continue
+		var b := c as Badge
+		if not b.visible:
+			continue
+		var to := Vector2(x, 0.0)
+		if instant or b.position.distance_to(to) < 0.5:
+			b.position = to
+		else:
+			# Съезжаются, а не прыгают: кружок, скачком поменявший место, читается
+			# как другой кружок, а не как тот же самый на новом месте.
+			var tw := b.create_tween()
+			if tw == null:
+				b.position = to
+			else:
+				tw.tween_property(b, "position", to, 0.16)\
+					.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		x += D + GAP
 
 func _on_active_denied() -> void:
 	if is_instance_valid(_active_badge):

@@ -78,6 +78,21 @@ func _close(overlay: Variant) -> void:
 		(overlay as Node).free()
 	await process_frame
 
+# Есть ли где-нибудь в поддереве узел, показывающий именно эту картинку.
+# Рисуют её по-разному — TextureRect в одних местах, Sprite2D в других, — и
+# искать по типу узла значит промахнуться на первой же перестановке вёрстки.
+func _has_texture(node: Node, want: Texture2D) -> bool:
+	if want == null:
+		return false
+	if node is TextureRect and (node as TextureRect).texture == want:
+		return true
+	if node is Sprite2D and (node as Sprite2D).texture == want:
+		return true
+	for c in node.get_children():
+		if _has_texture(c, want):
+			return true
+	return false
+
 func _texts(node: Node, out: Array) -> Array:
 	if node is Label:
 		out.append(String((node as Label).text))
@@ -285,7 +300,30 @@ func _test_action(hud: Node, save: Node, reg: Node) -> void:
 	_reset(save, ["classic"], "classic", 1)
 	save.dollars = 10
 	var ov3 : Control = await _open(hud, reg, "joker")
-	_check(_count(_texts(ov3, []), "НЕТ ДЕНЕГ") == 1, "без денег — «НЕТ ДЕНЕГ»")
+	# Без денег кнопка показывает ЦЕНУ, а не «НЕТ ДЕНЕГ»: игрок и так видит
+	# баланс, а вот сколько ещё копить — только здесь.
+	var t3 : Array = _texts(ov3, [])
+	_check(_count(t3, "НЕТ ДЕНЕГ") == 0, "слов «нет денег» больше нет")
+	var price3 : int = int((reg.get_skin("joker") as Dictionary).get("price", 0))
+	_check(_count(t3, str(price3)) >= 1, "а написана цена %d: %s" % [price3, t3])
+
+	# ── ВЕНЕЦ ПОКАЗАН СВОЕЙ КАРТИНКОЙ ────────────────────────────────────────
+	# У венца 10-го уровня три места показа: кружок в забеге, строка лестницы на
+	# карточке и окно «уровень взят». В забеге он рисовался картинкой, а в
+	# карточке — общей звёздочкой «★», и паучью реакцию, которую игрок узнаёт по
+	# руке, на экране скина нельзя было отличить от остановки времени.
+	#
+	# Проверяем не «есть ли звёздочка», а лежит ли на карточке ИМЕННО ТА
+	# картинка, которую отдаёт `SkinProgression.perk_icon`: если кто-то заведёт
+	# венцу свой `preload` рядом, тест этого не заметит, а вот подмену источника
+	# — заметит.
+	var ov4 : Control = await _open(hud, reg, "spider_man")
+	var prog : Node = get_root().get_node_or_null("SkinProgression")
+	var want_tex : Texture2D = prog.call("perk_icon", "spider_reflex")
+	_check(want_tex != null, "у паучьей реакции заведена картинка")
+	_check(_has_texture(ov4, want_tex),
+		"и она стоит на карточке скина, а не звёздочка")
+	await _close(ov4)
 	await _close(ov3)
 
 # Карточка обязана собираться для КАЖДОГО скина: у них разные наборы

@@ -403,7 +403,18 @@ func _test_states(hud: Node, save: Node) -> void:
 	var t : Array = _texts(overlay, [])
 	_check(t.has("АКТИВЕН"), "активный скин подписан словом")
 	_check(t.has("НАДЕТЬ"),  "купленный скин подписан словом")
-	_check(t.has("НЕТ ДЕНЕГ"), "недоступный скин подписан словом")
+	# У НЕДОСТУПНОГО СКИНА ТОЖЕ ЦЕНА, а не слова. Раньше там было «НЕТ ДЕНЕГ» —
+	# надпись, повторявшая то, что игрок и так видит по своему балансу, и
+	# занимавшая ровно ту строку, где могла стоять цена. Проверяем, что цена
+	# эпического (9999) на экране есть, хотя купить его не на что.
+	_check(not t.has("НЕТ ДЕНЕГ"), "слов «нет денег» на экране больше нет")
+	# Баланс 5200: «редкий» за 5000 по карману, «легендарный» за 20000 — нет.
+	# Значит цена легендарного и есть цена НЕДОСТУПНОГО скина.
+	var has_locked_price := false
+	for line in t:
+		if String(line).begins_with("20000"):
+			has_locked_price = true
+	_check(has_locked_price, "у недоступного видна его цена: %s" % [t])
 	var has_price := false
 	for line in t:
 		if String(line) == "5000":
@@ -489,7 +500,15 @@ func _test_broke(hud: Node, save: Node) -> void:
 	_check(cell != null, "карточка недоступного скина на экране")
 	if cell != null:
 		_check(_action_button(cell) == null, "на недоступной карточке нет кнопки покупки")
-		_check(_texts(cell, []).has("НЕТ ДЕНЕГ"), "и написано, почему")
+		# На месте бывшего «НЕТ ДЕНЕГ» — цена: сколько фармить, столько и
+		# написано.
+		var ct : Array = _texts(cell, [])
+		_check(not ct.has("НЕТ ДЕНЕГ"), "слов «нет денег» на карточке нет")
+		var shows_price := false
+		for line in ct:
+			if String(line).begins_with(str(int(data.get("price", 0)))):
+				shows_price = true
+		_check(shows_price, "и написана цена: %s" % [ct])
 	var d0 : int = int(save.get("dollars"))
 	for _i in 5:
 		await process_frame

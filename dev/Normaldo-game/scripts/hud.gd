@@ -3979,17 +3979,15 @@ func _build_shop_card(hbox: HBoxContainer, skin_data: Dictionary,
 		lock_bg.mouse_filter = Control.MOUSE_FILTER_PASS
 		wrapper.add_child(lock_bg)
 
-		# ── «ЕЩЁ N $» ВМЕСТО «НЕТ ДЕНЕГ» ─────────────────────────────────────
-		# «Нет денег» игрок и так видит: цена написана прямо над кнопкой, баланс
-		# — в шапке. Надпись повторяла очевидное и занимала единственную строку,
-		# где могло стоять то, чего игрок НЕ знает, — сколько ещё осталось
-		# накопить. Теперь там разница, и карточка отвечает «сколько фармить», а
-		# не «нельзя».
+		# ── ЦЕНА ВМЕСТО «НЕТ ДЕНЕГ» ──────────────────────────────────────────
+		# «Нет денег» игрок и так видит по своему балансу в шапке — надпись
+		# повторяла очевидное и занимала единственную строку, где могла стоять
+		# цена. Теперь стоит цена: сколько фармить, столько и написано.
 		var lock_lbl := Label.new()
 		lock_lbl.add_theme_font_override("font", UI_FONT)
 		lock_lbl.add_theme_font_size_override("font_size", 12)
 		_apply_menu_caption_fx(lock_lbl)
-		lock_lbl.text                 = "ЕЩЁ %d $" % maxi(0, price - SaveData.dollars)
+		lock_lbl.text                 = "%d $" % price
 		lock_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lock_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 		lock_lbl.modulate             = Color(0.95, 0.72, 0.45, 0.95)
@@ -5226,7 +5224,12 @@ func _build_reward_card(vbox: VBoxContainer, lvl: int, cw: float, skin_id: Strin
 			pc.position = Vector2(10.0, (CH - 52.0) * 0.5); pc.size = Vector2(52.0, 52.0)
 			pc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			panel.add_child(pc)
-			_ability_badge(pc, 0.0, 0.0, 52.0, Color(1.00, 0.80, 0.15), null, Color(1, 1, 1), "★")
+			# Картинка венца, если она есть, и звёздочка, если нет. Раньше здесь
+			# всегда стояла звёздочка, и паучью реакцию, которую в забеге узнают
+			# по руке, на экране скина было не отличить от остановки времени.
+			var ptex : Texture2D = SkinProgression.perk_icon(String(rw.get("perk", "")))
+			_ability_badge(pc, 0.0, 0.0, 52.0, Color(1.00, 0.80, 0.15), ptex,
+				Color(1, 1, 1), "" if ptex != null else "★")
 			_reward_caption(panel, pw, String(rw.get("label", "")), String(rw.get("desc", "")))
 		_:
 			_reward_pair(panel, Vector2(8.0, row_y), pw - 16.0, TOKEN_TEXTURE, t_rwd, DOLLAR_TEXTURE, d_rwd, icon_sz)
@@ -5771,7 +5774,11 @@ func _show_skin_levels_popup(parent_overlay: Control, skin_id: String = "") -> v
 				rwd_text = "РЕЗИСТ: %s" % SkinProgression.item_name(tag).to_upper()
 				rwd_col  = Color(1.00, 0.55, 0.50)
 			"perk":
-				slot_star = "★"
+				# Картинка венца, если она заведена (см. SkinProgression.PERK_ICONS),
+				# иначе звёздочка. Строка лестницы на экране скина — то самое
+				# место, где игрок разглядывает, что ему даст десятый уровень.
+				slot_tex  = SkinProgression.perk_icon(String(rw.get("perk", "")))
+				slot_star = "" if slot_tex != null else "★"
 				rwd_text  = String(rw.get("label", ""))
 				rwd_col   = Color(1.00, 0.80, 0.20)
 			_:
@@ -8437,7 +8444,8 @@ func _show_level_reward_popup(new_level: int, reward_d: int, reward_t: int) -> v
 		"perk":
 			unlock_title = String(rw.get("label", ""))
 			unlock_desc  = String(rw.get("desc", ""))
-			unlock_star  = "★"
+			unlock_tex   = SkinProgression.perk_icon(String(rw.get("perk", "")))
+			unlock_star  = "" if unlock_tex != null else "★"
 			unlock_col   = Color(1.00, 0.85, 0.30)
 			unlock_bg    = Color(0.26, 0.20, 0.05, 0.92)
 

@@ -64,10 +64,23 @@ func _initialize() -> void:
 	_check(rect != null and int(rect.get("z_index")) >= 1000,
 		"прямоугольник выше всего игрового по z")
 
+	# МУЗЫКА ЕДЕТ ЗА КАРТИНКОЙ. Замедление, при котором трек играет в прежнем
+	# темпе, читается как подвисание игры, а не как замедленное время. Проверяем
+	# именно связку: включает их один вызов, и разъехаться они могут только если
+	# кто-то развёл их по разным местам.
+	var music : Node = game.get_node_or_null("Music")
+	_check(music != null, "проигрыватель музыки на месте")
+	if music != null:
+		_check(float(music.get("pitch_scale")) < 0.99,
+			"и трек замедлился вместе с миром: %.2f" % float(music.get("pitch_scale")))
+
 	# И снимается сам, когда замедление кончилось.
 	for _i in 90:
 		await process_frame
 	_check(not bool(gray.call("is_gray")), "по окончании цвет вернулся")
+	if music != null:
+		_check(is_equal_approx(float(music.get("pitch_scale")), 1.0),
+			"и темп музыки тоже: %.2f" % float(music.get("pitch_scale")))
 	_done()
 
 func _is_under(node: Node, root: Node) -> bool:

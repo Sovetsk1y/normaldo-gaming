@@ -225,6 +225,33 @@ func _test_badges(hud: Node, normaldo: Node, save: Node) -> void:
 			small.append("%s=%.0f" % [b.get("key"), (b as Control).size.x])
 	_check(small.is_empty(), "кружки не мельче 40 px: %s" % [small])
 
+	# ── РЯД БЕЗ ДЫРОК ────────────────────────────────────────────────────────
+	# Место в ряду раздавалось один раз при сборке и доставалось ВСЕМ кружкам,
+	# включая динамические — компас, гриб, шляпу, колу, — которые почти весь
+	# забег невидимы. Венец 10-го уровня стоит в списке после них и висел в
+	# четырёх слотах правее остальных, посреди пустого места: не край ряда, а
+	# случайная кнопка на экране.
+	#
+	# Проверяем ШАГ между видимыми кружками. Сами координаты проверять нельзя —
+	# они зависят от того, сколько резистов у скина; а вот равномерность шага не
+	# зависит ни от чего и ломается ровно от этой ошибки.
+	var xs : Array = []
+	for b in layer.get_children():
+		if (b as Control).visible:
+			xs.append(float((b as Control).position.x))
+	xs.sort()
+	var gaps : Array = []
+	for i in range(1, xs.size()):
+		gaps.append(float(xs[i]) - float(xs[i - 1]))
+	var uneven : Array = []
+	for g in gaps:
+		if not is_equal_approx(float(g), float(gaps[0])):
+			uneven.append("%.0f" % float(g))
+	_check(uneven.is_empty(),
+		"видимые кружки идут ровным шагом, без дырок: шаги %s" % [gaps])
+	_check(xs.size() > 0 and is_equal_approx(float(xs[0]), 0.0),
+		"и ряд начинается от края слоя: %.1f" % (float(xs[0]) if xs.size() > 0 else -1.0))
+
 func _test_fat_bar(hud: Node, normaldo: Node, save: Node) -> void:
 	_use_skin(normaldo, save, "viking")
 	var names : Array = hud.get("_FAT_NAMES")
