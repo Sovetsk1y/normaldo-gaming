@@ -3842,7 +3842,10 @@ func _build_shop_card(hbox: HBoxContainer, skin_data: Dictionary,
 		price_lbl.text                 = "%d $" % price
 		price_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		price_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		price_lbl.modulate             = Color(1.0, 0.88, 0.35) if can_buy else Color(0.40, 0.40, 0.45)
+		# Недоступную цену приглушаем, но НЕ гасим: 0.40/0.40/0.45 на тёмной
+		# карточке читалось с трудом, а это ровно то число, ради которого игрок
+		# сюда и смотрит.
+		price_lbl.modulate             = Color(1.0, 0.88, 0.35) if can_buy else Color(0.72, 0.66, 0.55)
 		price_lbl.size                 = Vector2(cw, 28.0)
 		price_lbl.position             = Vector2(0.0, mid_y)
 		wrapper.add_child(price_lbl)
@@ -3976,14 +3979,20 @@ func _build_shop_card(hbox: HBoxContainer, skin_data: Dictionary,
 		lock_bg.mouse_filter = Control.MOUSE_FILTER_PASS
 		wrapper.add_child(lock_bg)
 
+		# ── «ЕЩЁ N $» ВМЕСТО «НЕТ ДЕНЕГ» ─────────────────────────────────────
+		# «Нет денег» игрок и так видит: цена написана прямо над кнопкой, баланс
+		# — в шапке. Надпись повторяла очевидное и занимала единственную строку,
+		# где могло стоять то, чего игрок НЕ знает, — сколько ещё осталось
+		# накопить. Теперь там разница, и карточка отвечает «сколько фармить», а
+		# не «нельзя».
 		var lock_lbl := Label.new()
 		lock_lbl.add_theme_font_override("font", UI_FONT)
 		lock_lbl.add_theme_font_size_override("font_size", 12)
 		_apply_menu_caption_fx(lock_lbl)
-		lock_lbl.text                 = "НЕТ ДЕНЕГ"
+		lock_lbl.text                 = "ЕЩЁ %d $" % maxi(0, price - SaveData.dollars)
 		lock_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lock_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		lock_lbl.modulate             = Color(0.45, 0.40, 0.40, 0.80)
+		lock_lbl.modulate             = Color(0.95, 0.72, 0.45, 0.95)
 		lock_lbl.size                 = Vector2(cw - 16.0, btn_h)
 		lock_lbl.position             = Vector2(8.0, btn_y)
 		wrapper.add_child(lock_lbl)
@@ -4207,7 +4216,33 @@ func _skin_first_tex(skin_data: Dictionary) -> Texture2D:
 		return load(tex_dir + "state1.png") as Texture2D
 	return FAT_TEXTURES[0]
 
-# Кнопка карточки скина: АКТИВЕН / НАДЕТЬ / цена / замок с «НЕТ ДЕНЕГ».
+# Цена со значком доллара, по центру отведённого куска кнопки. Одна функция на
+# оба состояния — «можно купить» и «не хватает»: раньше цену рисовала только
+# зелёная ветка, и во второй её просто не было.
+func _skin_price_row(visual: Control, w: float, h: float, price: int,
+		col: Color, left_pad: float) -> void:
+	var dsz : float  = minf(h * 0.72, 18.0)
+	var txt : String = str(price)
+	var tw  : float  = UI_FONT.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+	var bx  : float  = left_pad + (w - left_pad - tw - 3.0 - dsz) * 0.5
+	var pl := Label.new()
+	pl.add_theme_font_override("font", UI_FONT)
+	pl.add_theme_font_size_override("font_size", 12)
+	_apply_menu_caption_fx(pl)
+	pl.text     = txt
+	pl.modulate = col
+	pl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	pl.size     = Vector2(tw + 2.0, h)
+	pl.position = Vector2(bx, 0.0)
+	pl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	visual.add_child(pl)
+	var dlr := _make_icon(DOLLAR_TEXTURE, dsz)
+	dlr.position     = Vector2(bx + tw + 3.0, (h - dsz) * 0.5)
+	dlr.modulate     = col
+	dlr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	visual.add_child(dlr)
+
+# Кнопка карточки скина: АКТИВЕН / НАДЕТЬ / цена (зелёная) / цена под замком.
 # `refresh` пересобирает экран после покупки или смены скина.
 func _skin_action_button(parent: Control, x: float, y: float, w: float, h: float,
 		skin_id: String, refresh: Callable) -> void:
@@ -4241,46 +4276,30 @@ func _skin_action_button(parent: Control, x: float, y: float, w: float, h: float
 	elif can_buy:
 		UiKit.panel(visual, Vector2.ZERO, size, Color(0.07, 0.20, 0.08, 0.96), 8,
 			Color(0.50, 1.0, 0.55, 0.95))
-		# Цена с иконкой доллара — валюта во всей игре показана спрайтом.
-		var dsz : float = minf(h * 0.72, 18.0)
-		var txt : String = str(price)
-		var tw  : float  = UI_FONT.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-		var bx  : float  = (w - tw - 3.0 - dsz) * 0.5
-		var pl := Label.new()
-		pl.add_theme_font_override("font", UI_FONT); pl.add_theme_font_size_override("font_size", 12)
-		_apply_menu_caption_fx(pl)
-		pl.text = txt; pl.modulate = Color(0.62, 1.0, 0.66)
-		pl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		pl.size = Vector2(tw + 2.0, h); pl.position = Vector2(bx, 0.0)
-		pl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		visual.add_child(pl)
-		var dlr := _make_icon(DOLLAR_TEXTURE, dsz)
-		dlr.position     = Vector2(bx + tw + 3.0, (h - dsz) * 0.5)
-		dlr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		visual.add_child(dlr)
+		_skin_price_row(visual, w, h, price, Color(0.62, 1.0, 0.66), 0.0)
 	else:
-		# Недоступно: замок И слово, а не только приглушённый цвет.
+		# ── НЕ ХВАТАЕТ ДЕНЕГ: ТОЖЕ ЦЕНА, А НЕ СЛОВА ──────────────────────────
+		# Раньше тут было «НЕТ ДЕНЕГ» вместо числа. Игрок и так знает, что не
+		# хватает — он видит свой баланс в шапке; чего он НЕ знает, так это
+		# сколько ещё фармить, а именно за этим на карточку и заходят. Слова
+		# занимали место цены и не сообщали ничего.
+		#
+		# Красный оттенок и замок остаются: они говорят «пока нельзя», и этого
+		# достаточно. Цена от них не спорит — она отвечает на другой вопрос.
 		UiKit.panel(visual, Vector2.ZERO, size, Color(0.13, 0.09, 0.09, 0.92), 8,
 			Color(0.45, 0.30, 0.30, 0.9))
+		var lsz : float = h * 0.52
 		var lock := TextureRect.new()
 		lock.texture       = _lock_tex()
 		lock.stretch_mode  = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		lock.expand_mode   = TextureRect.EXPAND_IGNORE_SIZE
 		lock.modulate      = Color(0.85, 0.55, 0.55, 0.95)
-		lock.size          = Vector2(h * 0.62, h * 0.62)
-		lock.position      = Vector2(8.0, (h - h * 0.62) * 0.5)
+		lock.size          = Vector2(lsz, lsz)
+		lock.position      = Vector2(7.0, (h - lsz) * 0.5)
 		lock.mouse_filter  = Control.MOUSE_FILTER_IGNORE
 		visual.add_child(lock)
-		var nl := Label.new()
-		nl.add_theme_font_override("font", UI_FONT); nl.add_theme_font_size_override("font_size", 11)
-		_apply_menu_caption_fx(nl)
-		nl.text = "НЕТ ДЕНЕГ"; nl.modulate = Color(0.95, 0.60, 0.55)
-		nl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		nl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		nl.size = Vector2(w - h * 0.62 - 8.0, h)
-		nl.position = Vector2(h * 0.62 + 8.0, 0.0)
-		nl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		visual.add_child(nl)
+		# Цена центруется в остатке кнопки, справа от замка.
+		_skin_price_row(visual, w, h, price, Color(0.95, 0.62, 0.58), lsz + 7.0)
 
 	if is_owned or can_buy:
 		var btn := Button.new()

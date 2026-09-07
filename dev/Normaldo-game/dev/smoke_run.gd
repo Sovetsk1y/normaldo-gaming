@@ -72,6 +72,8 @@ func _initialize() -> void:
 	await process_frame
 	await _test_effects(normaldo, spawner)
 
+	print("── Разворот лицом ──")
+	await _test_facing(normaldo)
 	print("── Множитель мини-игр ──")
 	await _test_multiplier(normaldo)
 	print("── Итоговые барабаны ──")
@@ -200,6 +202,45 @@ func _test_effects(normaldo: Node, spawner: Node) -> void:
 	_check(not bool(normaldo.get("_dead")), "наручники больше не убивают")
 	_check(float(normaldo.get("_slow_remaining")) > 0.0,
 		"а сковывают: замедление %.1f с" % normaldo.get("_slow_remaining"))
+
+# РАЗВОРОТ ЛИЦОМ ПО ХОДУ ДВИЖЕНИЯ.
+#
+# Голова нарисована в профиль вправо, и влево Нормальдо ехал затылком вперёд.
+# Разворот сделан зеркалом кадра — и вот тут прячется то, ради чего тест и нужен:
+# спрайт СДВИНУТ относительно хитбокса, потому что голова в кадре нарисована не
+# по центру. Зеркало отражает кадр вокруг центра спрайта, значит голова уезжает
+# на удвоенный сдвиг, если сдвиг не отразить вместе с ней. У классики это 28 px
+# — почти полголовы, и удары засчитывались бы по воздуху сбоку.
+#
+# Глазами это не ловится: голова смотрит влево, всё «выглядит правильно», а
+# хитбокс молча стоит не там.
+func _test_facing(normaldo: Node) -> void:
+	var spr : Sprite2D = normaldo.get_node_or_null("Sprite2D")
+	if spr == null:
+		for c in normaldo.get_children():
+			if c is Sprite2D:
+				spr = c
+				break
+	if spr == null:
+		_check(false, "спрайт головы найден")
+		return
+
+	normaldo.call("_set_facing", false)
+	await process_frame
+	var right_x : float = spr.position.x
+	_check(not spr.flip_h, "вправо — кадр не отражён")
+
+	normaldo.call("_set_facing", true)
+	await process_frame
+	_check(spr.flip_h, "влево — кадр отражён")
+	_check(is_equal_approx(spr.position.x, -right_x),
+		"и сдвиг головы отражён вместе с ней: %.1f при %.1f" % [spr.position.x, right_x])
+
+	# Возврат туда же, откуда начали: направление живёт между забегами.
+	normaldo.call("_set_facing", false)
+	await process_frame
+	_check(is_equal_approx(spr.position.x, right_x) and not spr.flip_h,
+		"обратный разворот возвращает и кадр, и сдвиг")
 
 func _test_multiplier(normaldo: Node) -> void:
 	# Учёт добычи: набрали N, бросок ×M — на счету должно стать N × M.

@@ -413,8 +413,40 @@ func _apply_head_offset() -> void:
 		var sz  : Vector2 = tex.get_size()
 		var off := SkinMetrics.offset_for(SaveData.active_skin, fat_state)
 		pos = Vector2(-off.x * sz.x * _base_scale.x, -off.y * sz.y * _base_scale.y)
+	# СДВИГ ЗЕРКАЛИТСЯ ВМЕСТЕ С КАДРОМ. Он существует ровно затем, чтобы голова
+	# села на хитбокс: голова нарисована не по центру кадра, и спрайт подвинут на
+	# эту разницу. `flip_h` отражает кадр относительно центра САМОГО спрайта —
+	# значит голова уезжает на ту же разницу в другую сторону, и не поправить
+	# сдвиг значит промахнуться мимо хитбокса вдвое. У классики это 28 px, то
+	# есть почти полголовы: удары засчитывались бы по воздуху сбоку.
+	if _facing_left:
+		pos.x = -pos.x
 	_sprite.position = pos
 	_recalc_head_anchor(tex, pos)
+
+# ── Куда смотрит Нормальдо ───────────────────────────────────────────────────
+# Голова у всех скинов нарисована в профиль ВПРАВО. Пока поворота не было, при
+# движении влево она ехала затылком вперёд — читалось как «его тащит», а не «он
+# летит».
+#
+# Разворот — зеркало кадра, а не поворот на 180°: поворот показал бы лицо вверх
+# ногами. Тем же зеркалом пользуется удар Тайсона (`_snap_face_to`), поэтому он
+# возвращает кадр не в «не отражён», а в текущее направление взгляда.
+var _facing_left : bool = false
+
+func _set_facing(left: bool) -> void:
+	if left == _facing_left:
+		return
+	_facing_left = left
+	if not is_instance_valid(_sprite):
+		return
+	_sprite.flip_h = left
+	_apply_head_offset()
+
+# Порог, ниже которого направление НЕ меняется. Без него голова дёргается на
+# каждом дрожании пальца: палец, стоящий на месте, всё равно шлёт события с
+# `relative` в доли пикселя, и знак у них скачет.
+const FACE_TURN_DEADZONE : float = 0.6
 
 # Точка, в которой стоит ЦЕНТР ГОЛОВЫ обычного кадра. К ней прикалываются кадры
 # варианта (см. _place_head): у них своя рамка, и без якоря голова на подмене
@@ -556,6 +588,10 @@ func enable_input() -> void:
 	# kept the menu wobble running through gameplay.
 	_bobbing = false
 	_bob_t   = 0.0
+	# Забег начинается лицом ВПРАВО — туда, откуда летят предметы. Направление
+	# взгляда живёт между забегами (спрайт тот же узел), и без сброса второй
+	# забег стартовал бы затылком к потоку.
+	_set_facing(false)
 	if is_instance_valid(_sprite):
 		_sprite.position.y = _head_home.y
 	_skill_bonus_xp = 0
@@ -1141,6 +1177,12 @@ func _input(event: InputEvent) -> void:
 			if _invert_remaining > 0.0:
 				speed = -speed   # компас: свайп в одну сторону двигает в другую (и по X, и по Y)
 			position  += d.relative * speed
+			# Разворот считается по ФАКТИЧЕСКОМУ смещению, а не по свайпу: под
+			# компасом `speed` отрицательная, и палец влево уводит голову вправо.
+			# Смотреть надо туда, куда летишь, а не туда, куда ведёшь.
+			var dx : float = d.relative.x * speed
+			if absf(dx) > FACE_TURN_DEADZONE:
+				_set_facing(dx < 0.0)
 			var s      := get_viewport_rect().size
 			var xmax    : float = s.x if _region_max_x < 0.0 else minf(_region_max_x, s.x)
 			position.x = clampf(position.x, 0.0, xmax)
@@ -2300,11 +2342,15 @@ func _snap_face_to(dir: Vector2) -> void:
 	var ang : float = wrapf(dir.angle() - PI, -PI, PI) if flip else dir.angle()
 	_sprite.rotation = ang
 	_sprite.flip_h   = flip
-	var spr := _sprite
+	var spr  := _sprite
+	# Возвращаться надо В ТЕКУЩЕЕ НАПРАВЛЕНИЕ ВЗГЛЯДА, а не в «не отражён»:
+	# Нормальдо мог лететь влево и в этот момент ударить вправо — сняв зеркало
+	# насовсем, мы развернули бы его лицом по ходу и оставили так.
+	var back := _facing_left
 	var tw := _sprite.create_tween()
 	if tw == null:
 		_sprite.rotation = 0.0
-		_sprite.flip_h   = false
+		_sprite.flip_h   = back
 		return
 	tw.tween_property(_sprite, "rotation", 0.0, FACE_SNAP_BACK)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
@@ -2312,7 +2358,7 @@ func _snap_face_to(dir: Vector2) -> void:
 	# голову обратно уже развёрнутой, и она проедет вверх ногами.
 	tw.tween_callback(func() -> void:
 		if is_instance_valid(spr):
-			spr.flip_h = false)
+			spr.flip_h = back)
 
 # Короткий выпад головы в сторону удара — то, что делает мили-спелл «ударом», а
 # не срабатыванием невидимой зоны.
