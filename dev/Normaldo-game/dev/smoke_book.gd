@@ -9,6 +9,8 @@ extends SceneTree
 #
 # См. /Концепция/Экран книги учителя.md
 
+const SPAWNER_SCRIPT := preload("res://scripts/spawner.gd")
+
 var _fails : int = 0
 
 func _check(ok: bool, what: String) -> void:
@@ -227,10 +229,14 @@ func _set_story(qm: Node, completed: int, claimed: int) -> void:
 	# задания: задание — награда за победу, а открытие режима — состояние. Здесь
 	# двигаем их вместе, потому что в игре они и двигаются вместе — задание
 	# «Кампания пройдена» засчитывается ровно там, где растёт `episodes_done`.
+	#
+	# Число эпизодов — у ТАБЛИЦЫ УРОВНЕЙ, а не тройкой: длина кампании менялась
+	# трижды, и с шестью эпизодами тройка перестала открывать бесконечный.
 	var save : Node = get_root().get_node_or_null("SaveData")
 	if save != null:
+		var all_eps : int = SPAWNER_SCRIPT.CAMPAIGN_LEVELS.size()
 		save.set("episodes_done",
-			3 if completed > int(qm.ENDLESS_UNLOCK_QUEST_IDX) else 0)
+			all_eps if completed > int(qm.ENDLESS_UNLOCK_QUEST_IDX) else 0)
 
 func _open(hud: Node, focus: int = -1) -> Node:
 	var scr : Node = load("res://scripts/achievements_screen.gd").new()

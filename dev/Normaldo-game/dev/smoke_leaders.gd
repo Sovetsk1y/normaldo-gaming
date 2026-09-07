@@ -7,6 +7,8 @@ extends SceneTree
 # ломается молча: подиум показывает не тех, список дублирует первую тройку, своя
 # позиция врёт. Здесь проверяется ровно это.
 
+const SPAWNER_SCRIPT := preload("res://scripts/spawner.gd")
+
 var _fails : int = 0
 
 func _check(ok: bool, what: String) -> void:
@@ -61,8 +63,14 @@ func _episodes_done(n: int) -> void:
 	if save != null:
 		save.set("episodes_done", n)
 
+# «Всё открыто» — это ВСЯ кампания, а не три эпизода. Длина берётся у таблицы:
+# с разбивкой на шесть тройка перестала открывать бесконечный, и три проверки
+# упали не на ошибке экрана, а на числе в этом помощнике.
 func _unlock() -> void:
-	_episodes_done(3)
+	# Длину кампании берём у ТАБЛИЦЫ УРОВНЕЙ, а не у QuestManager: скрипт
+	# SceneTree компилируется раньше, чем автозагрузки попадают в область
+	# видимости, и по имени менеджер отсюда не достать.
+	_episodes_done(SPAWNER_SCRIPT.CAMPAIGN_LEVELS.size())
 
 func _lock() -> void:
 	_episodes_done(0)
@@ -113,40 +121,71 @@ func _texts(node: Node, out: Array) -> Array:
 # там, куда ещё нельзя попасть, — значит видеть спойлер и не мочь на него
 # ответить. Раньше на этом стояла модалка на весь экран, и закрыт был лидерборд
 # ЦЕЛИКОМ, включая эпизод 1, который открыт всегда.
+#
+# ЛЕСТНИЦА ПРОВЕРЯЕТСЯ ЦЕЛИКОМ, а не в трёх точках. Раньше тут стояло три
+# отдельных замера и в каждом `for m in 4` — то есть режимы 0…3. Эпизоды 4 и 5
+# получили в enum номера 4 и 5 (ENDLESS вклинился между третьим и четвёртым), и
+# обе новые вкладки просто не попадали в проверку. А в игре они при этом
+# открывались на эпизод позже, чем надо: замок считался по номеру в enum, а не
+# по номеру эпизода. Тест молчал, потому что смотрел не туда.
 func _test_locks(hud: Node) -> void:
-	_lock()
-	var scr : Node = await _open(hud)
-	var open_at_zero : Array = []
-	for m in 4:
-		if bool(scr.call("_is_mode_unlocked", m)):
-			open_at_zero.append(m)
-	_check(open_at_zero == [0], "без пройденных эпизодов открыт только первый: %s" % [open_at_zero])
+	var eps : Array = LeaderboardModes.EPISODE_MODE
+	# Ожидание СТРОИТСЯ: эпизод N открыт при `episodes_done >= N−1`, бесконечный
+	# — после всей кампании. Ни одного номера руками.
+	for done in range(0, eps.size() + 1):
+		_episodes_done(done)
+		var scr : Node = await _open(hud)
+		var want : Array = []
+		for i in eps.size():
+			if done >= i:
+				want.append(int(eps[i]))
+		if done >= SPAWNER_SCRIPT.CAMPAIGN_LEVELS.size():
+			want.append(int(LeaderboardModes.Mode.ENDLESS))
+		want.sort()
+		var got : Array = []
+		for m in LeaderboardModes.MODES:
+			if bool(scr.call("_is_mode_unlocked", m)):
+				got.append(int(m))
+		got.sort()
+		_check(got == want, "пройдено %d: открыты %s (ждали %s)" % [done, got, want])
+		await _close(scr)
 
 	# Нажатие по закрытой вкладке не переключает, а объясняет.
-	scr.call("_on_tab", 2)
+	_lock()
+	var scr0 : Node = await _open(hud, LeaderboardModes.Mode.EP1)
+	scr0.call("_on_tab", LeaderboardModes.Mode.EP3)
 	await process_frame
-	_check(int(scr.get("_active_metric")) == 0, "закрытая вкладка не открывается по нажатию")
-	_check(is_instance_valid(scr.get("_toast_node")), "и вместо неё показана подсказка")
-	await _close(scr)
+	_check(int(scr0.get("_active_metric")) == LeaderboardModes.Mode.EP1,
+		"закрытая вкладка не открывается по нажатию")
+	_check(is_instance_valid(scr0.get("_toast_node")), "и вместо неё показана подсказка")
+	# Подсказка называет ПРЕДЫДУЩИЙ эпизод, а не свой: «сначала пройди эпизод 2»
+	# для третьей вкладки. С прежней формулой по номеру enum четвёртая вкладка
+	# советовала бы пройти четвёртый эпизод, чтобы открыть четвёртый.
+	_check(String(scr0.call("_mode_lock_hint", LeaderboardModes.Mode.EP4)).ends_with("3"),
+		"подсказка зовёт на предыдущий эпизод: %s"
+		% scr0.call("_mode_lock_hint", LeaderboardModes.Mode.EP4))
+	await _close(scr0)
 
-	_episodes_done(1)
-	var scr2 : Node = await _open(hud)
-	var open_at_one : Array = []
-	for m in 4:
-		if bool(scr2.call("_is_mode_unlocked", m)):
-			open_at_one.append(m)
-	_check(open_at_one == [0, 1], "пройденный эпизод открывает следующую вкладку: %s" % [open_at_one])
-	await _close(scr2)
-
+	# ВКЛАДКА ПО УМОЛЧАНИЮ — бесконечный, но он открыт только после всей
+	# кампании. Пока она не пройдена, экран обязан открыться на самой дальней
+	# доступной вкладке, а не на закрытой: иначе игрок с ходу упирается в
+	# таблицу режима, в который ему ещё нельзя.
+	for done in range(0, eps.size() + 1):
+		_episodes_done(done)
+		var scr : Node = await _open(hud, LeaderboardModes.DEFAULT_MODE)
+		var at : int = int(scr.get("_active_metric"))
+		_check(bool(scr.call("_is_mode_unlocked", at)),
+			# Подпись берём КОНСТАНТОЙ, а не `mode_label()`: этот файл —
+			# SceneTree-скрипт, он компилируется до того, как автозагрузки
+			# войдут в область видимости, и вызов метода у них тут не
+			# скомпилируется вовсе (константы и enum — резолвятся статически).
+			"пройдено %d: экран открылся на доступной вкладке (%s)"
+			% [done, LeaderboardModes.MODE_LABELS[at]])
+		if done >= SPAWNER_SCRIPT.CAMPAIGN_LEVELS.size():
+			_check(at == LeaderboardModes.DEFAULT_MODE,
+				"а пройдя кампанию — сразу на бесконечном")
+		await _close(scr)
 	_unlock()
-	var scr3 : Node = await _open(hud)
-	var open_all : Array = []
-	for m in 4:
-		if bool(scr3.call("_is_mode_unlocked", m)):
-			open_all.append(m)
-	_check(open_all == [0, 1, 2, 3], "пройденная кампания открывает всё, включая бесконечный: %s"
-		% [open_all])
-	await _close(scr3)
 
 # Первая тройка живёт на подиуме и НЕ дублируется в списке — иначе она занимает
 # место дважды на экране, где каждая строка на счету.
@@ -198,13 +237,24 @@ func _test_my_strip(hud: Node, mock: Node) -> void:
 
 func _test_tabs(hud: Node) -> void:
 	var scr : Node = await _open(hud, 0)
-	# Вкладок ровно четыре — три эпизода и бесконечный. «Горы пицц» среди них
-	# нет: она мерила усидчивость, а не игру.
+	# Вкладки — БЕСКОНЕЧНЫЙ ПЕРВЫМ, за ним эпизоды по порядку. Порядок здесь
+	# содержательный: бесконечный — главная таблица (недельный сброс, места,
+	# призы), эпизоды рядом и без призов. «Горы пицц» среди вкладок нет: она
+	# мерила усидчивость, а не игру.
+	#
+	# Ожидание строится ИЗ СЛОВАРЯ РЕЖИМОВ, а не из списка руками: подписи и
+	# порядок уже менялись, и вторая копия расходится с первой молча.
 	var caps : Array = []
 	for l in (scr.get("_tab_lbl") as Array):
 		caps.append(String((l as Label).text))
-	_check(caps == ["ЭПИЗОД 1", "ЭПИЗОД 2", "ЭПИЗОД 3", "БЕСКОНЕЧНЫЙ"],
-		"на полосе четыре вкладки по режимам: %s" % [caps])
+	# Словарь режимов — автозагрузка, и по имени отсюда её не достать (скрипт
+	# SceneTree компилируется раньше). Берём из дерева.
+	var lm : Node = get_root().get_node_or_null("LeaderboardModes")
+	var want : Array = []
+	for m in (lm.get("MODES") as Array):
+		want.append(String(lm.call("mode_label", int(m))))
+	_check(caps == want, "вкладки по режимам, бесконечный первым: %s" % [caps])
+	_check(caps[0] == "БЕСКОНЕЧНЫЙ", "и он же открыт по умолчанию")
 
 	_feed(scr, 0, 12, "А")
 	await process_frame

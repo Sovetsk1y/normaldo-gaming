@@ -12,12 +12,23 @@ setGlobalOptions({region: "europe-west1", maxInstances: 10});
 // ─── Tuning ──────────────────────────────────────────────────────────────────
 
 // ─── Режимы ──────────────────────────────────────────────────────────────────
-// У каждого режима СВОЯ таблица рекордов недели: три эпизода кампании и
+// У каждого режима СВОЯ таблица рекордов недели: пять эпизодов кампании и
 // бесконечный. Раньше таблиц было две — "best" и "total", — и обе про один
 // режим: лучший забег и сумма пицц за неделю. Сумма мерила усидчивость, а не
 // игру, и убрана; вместо неё разбиение по режимам, где сравнение честное —
 // у эпизода одна и та же дистанция для всех.
-const MODES = ["ep1", "ep2", "ep3", "endless"] as const;
+//
+// Порядок ЗАФИКСИРОВАН, и "ep4"/"ep5" дописаны В КОНЕЦ, а не после "ep3":
+// имена лежат ключами в документах игроков (`mode_best`, `mode_rank`) и путями
+// коллекций (`leaderboards/{week}/{mode}`), и переставить их — значит выдать
+// чужие рекорды за чужой режим. То же самое и в игре, в `leaderboard_modes.gd`.
+const MODES = ["ep1", "ep2", "ep3", "endless", "ep4", "ep5"] as const;
+
+// ПРИЗЫ ЗА МЕСТО ТОЛЬКО У БЕСКОНЕЧНОГО. В эпизодах таблица — «кто круче»:
+// дистанция там конечная, и приз за место превратил бы её в работу — надо
+// переигрывать один и тот же отрезок, пока не выбьешь строку выше. Пять таких
+// гонок разом это не пять поводов играть, а пять обязанностей.
+const PRIZE_MODES: readonly string[] = ["endless"];
 type Mode = typeof MODES[number];
 
 function requireMode(raw: unknown, fallback: Mode = "endless"): Mode {
@@ -619,35 +630,44 @@ export const weeklyReset = onSchedule({
       .orderBy("updated_at", "asc")
       .get();
 
-    let place = 0;
-    const batch = db.batch();
-    let ops = 0;
-    for (const doc of lb.docs) {
-      place += 1;
-      const uid = doc.get("user_id") as string;
-      const {dollars, tokens} = rewardForPlace(place);
-      // Keep the better prize when a player ranks in several modes.
-      const prev = prizeTargets.get(uid);
-      if (!prev || tokens > prev.tokens) prizeTargets.set(uid, {place, dollars, tokens});
-      const reward = {
-        week:    prevWeek,
-        metric,
-        place,
-        dollars,
-        tokens,
-        claimed: false,
-      };
-      batch.update(db.doc(`users/${uid}`), {
-        pending_rewards: admin.firestore.FieldValue.arrayUnion(reward),
-        updated_at:      admin.firestore.FieldValue.serverTimestamp(),
-      });
-      ops += 1;
-      if (ops >= 400) {
-        await batch.commit();
-        ops = 0;
+    // ПРИЗЫ — ТОЛЬКО У БЕСКОНЕЧНОГО, но снапшот в /history пишется ВСЕМ (ниже).
+    // Пропускать здесь весь виток нельзя: эпизоды остались бы и без наград, и
+    // без истории, то есть неделя для них исчезала бы бесследно.
+    if (PRIZE_MODES.includes(metric)) {
+      let place = 0;
+      let batch = db.batch();
+      let ops = 0;
+      for (const doc of lb.docs) {
+        place += 1;
+        const uid = doc.get("user_id") as string;
+        const {dollars, tokens} = rewardForPlace(place);
+        // Keep the better prize when a player ranks in several modes.
+        const prev = prizeTargets.get(uid);
+        if (!prev || tokens > prev.tokens) prizeTargets.set(uid, {place, dollars, tokens});
+        const reward = {
+          week:    prevWeek,
+          metric,
+          place,
+          dollars,
+          tokens,
+          claimed: false,
+        };
+        batch.update(db.doc(`users/${uid}`), {
+          pending_rewards: admin.firestore.FieldValue.arrayUnion(reward),
+          updated_at:      admin.firestore.FieldValue.serverTimestamp(),
+        });
+        ops += 1;
+        if (ops >= 400) {
+          await batch.commit();
+          // НОВЫЙ batch, а не тот же самый: закоммиченный WriteBatch на
+          // следующей записи бросает исключение, и раздача призов падала бы
+          // ровно на 401-м игроке — то есть только когда игроков станет много.
+          batch = db.batch();
+          ops = 0;
+        }
       }
+      if (ops > 0) await batch.commit();
     }
-    if (ops > 0) await batch.commit();
 
     // Archive top-100 snapshot for history view
     const top100 = lb.docs.slice(0, 100).map((doc, idx) => ({

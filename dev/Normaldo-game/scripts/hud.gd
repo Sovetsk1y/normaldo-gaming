@@ -41,6 +41,25 @@ const MENU_BADGE_TEX         := preload("res://assets/ui/menu/badge_dot.png")
 # Mode-selector button (single chip, sprite swaps between chapter1 ↔ endless on
 # tap). Glows are baked the same way as the main menu buttons.
 const MODE_BTN_CHAPTER1      := preload("res://assets/ui/menu/chapter1_mode_btn.png")
+# ── Таблички эпизодов ────────────────────────────────────────────────────────
+# По одной на эпизод, номер = индекс + 1. Собраны из авторских иконок
+# `dev/tools/bake_episode_chips.py`: плашка под подпись у всех одна и та же —
+# скопирована из первого чипа, а не нарисована заново, иначе шесть табличек в
+# одном кольце перестали бы быть одним семейством.
+const MODE_BTN_EPISODES : Array = [
+	preload("res://assets/ui/menu/chapter1_mode_btn.png"),
+	preload("res://assets/ui/menu/chapter2_mode_btn.png"),
+	preload("res://assets/ui/menu/chapter3_mode_btn.png"),
+	preload("res://assets/ui/menu/chapter4_mode_btn.png"),
+	preload("res://assets/ui/menu/chapter5_mode_btn.png"),
+]
+const MODE_BTN_EPISODES_GLOW : Array = [
+	preload("res://assets/ui/menu/chapter1_mode_btn_glow.png"),
+	preload("res://assets/ui/menu/chapter2_mode_btn_glow.png"),
+	preload("res://assets/ui/menu/chapter3_mode_btn_glow.png"),
+	preload("res://assets/ui/menu/chapter4_mode_btn_glow.png"),
+	preload("res://assets/ui/menu/chapter5_mode_btn_glow.png"),
+]
 const MODE_BTN_ENDLESS       := preload("res://assets/ui/menu/endless_mode_btn.png")
 const MODE_BTN_CHAPTER1_GLOW := preload("res://assets/ui/menu/chapter1_mode_btn_glow.png")
 const MODE_BTN_ENDLESS_GLOW  := preload("res://assets/ui/menu/endless_mode_btn_glow.png")
@@ -1424,7 +1443,7 @@ func _route_deep_link_if_ready() -> void:
 			_show_achievements(int(payload.get("story_idx", -1)))
 		"leaderboard":
 			# Remote G2 (overtaken) / G3 (weekly reset) taps land here.
-			_show_leaderboard(0)
+			_show_leaderboard()
 		_:
 			# Unknown payload — log once so it can be added to the route map
 			# without falling silently.
@@ -2310,11 +2329,16 @@ func _apply_mode_btn_visuals() -> void:
 		_mode_btn_caption.text     = "БЕСКОНЕЧНЫЙ"
 		_mode_btn_caption.add_theme_font_size_override("font_size", MODE_FONT_ENDLESS)
 	else:
-		# Своей картинки у эпизодов 2 и 3 пока нет — берём табличку первого и
-		# меняем подпись. Номер на чипе читается по подписи, а не по рисунку,
-		# так что это работает; отдельные таблички — вопрос к художнику.
-		_mode_btn_icon_atlas.atlas = MODE_BTN_CHAPTER1
-		_mode_btn_glow_atlas.atlas = MODE_BTN_CHAPTER1_GLOW
+		# У каждого эпизода СВОЯ табличка. Номер по-прежнему читается подписью —
+		# рисунок называет место, а не цифру, — но теперь чип отличается от чипа
+		# и без чтения: свалка, река, пляж, двор, клуб узнаются с одного взгляда.
+		#
+		# Индекс зажимаем: эпизодов может стать больше, чем нарисованных
+		# табличек, и это не повод падать — до появления своей будет табличка
+		# последней нарисованной.
+		var ei : int = clampi(_mode_btn_pos - 1, 0, MODE_BTN_EPISODES.size() - 1)
+		_mode_btn_icon_atlas.atlas = MODE_BTN_EPISODES[ei]
+		_mode_btn_glow_atlas.atlas = MODE_BTN_EPISODES_GLOW[ei]
 		_mode_btn_caption.text     = "ЭПИЗОД %d" % _mode_btn_pos
 		_mode_btn_caption.add_theme_font_size_override("font_size", MODE_FONT_CHAPTER1)
 
@@ -7444,7 +7468,10 @@ func _on_normaldo_died(total_pizzas: int, death_pos: Vector2) -> void:
 	# Результат уходит в таблицу СВОЕГО режима — эпизоды тоже, а не один
 	# бесконечный: у каждого режима своя таблица (см. LeaderboardModes.Mode).
 	# Отправка не блокирует интерфейс.
-	if not _boss_test_mode:
+	# У эпизодов 4…6 своей таблицы ещё нет, и слать их результат некуда: он
+	# лёг бы в таблицу ТРЕТЬЕГО и смешал бы рекорды разных дистанций
+	# (см. LeaderboardModes.mode_for_episode).
+	if not _boss_test_mode and LeaderboardModes.has_mode_for_episode(_run_episode):
 		_submit_score_async(LeaderboardModes.mode_for_episode(_run_episode),
 			total_pizzas, _elapsed_time)
 	_show_game_over(total_pizzas, level_rewards, xp_before, level_before)
@@ -9134,7 +9161,11 @@ func _show_awards(category: int = 0) -> void:
 	screen.setup(self, category)
 	add_child(screen)
 
-func _show_leaderboard(initial_metric: int = 0) -> void:
+# По умолчанию открывается БЕСКОНЕЧНЫЙ — главная таблица: недельный сброс, места
+# и призы за верхние строки. Эпизоды рядом, но там просто «кто круче».
+# Значение берётся у словаря режимов, а не пишется нулём: ноль — это «эпизод 1»,
+# и после перестановки вкладок он молча стал бы не тем, чем был.
+func _show_leaderboard(initial_metric: int = LeaderboardModes.DEFAULT_MODE) -> void:
 	var screen := LeaderboardScreen.new()
 	screen.setup(self, initial_metric)
 	add_child(screen)
@@ -9159,7 +9190,12 @@ func _build_go_rank_block(panel_x: float, panel_y: float, panel_w: float, pm: in
 	# Геометрию строки запоминаем: результат уходит на сервер вдогонку, и место
 	# оттуда приходит уже после того, как экран собран (см.
 	# `_submit_score_async`). Без этих чисел обновить строку было бы негде.
+	# Строки места НЕТ у эпизодов без своей таблицы: показывать «твоё место» там,
+	# куда результат не отправлялся, — это врать в том единственном месте, ради
+	# честности которого таблица и заведена.
 	var mode : int = LeaderboardModes.mode_for_episode(_run_episode)
+	if mode == LeaderboardModes.NO_MODE:
+		return
 	_go_rank_geom = { "x": rows_x, "y": rows_y + 10.0, "w": rows_w, "pm": pm, "mode": mode }
 	_build_go_rank_row_for_mode(mode)
 
@@ -9339,7 +9375,11 @@ func _on_death_exit_tapped() -> void:
 	_restart()
 
 func _on_death_rank_tapped() -> void:
-	_show_leaderboard(LeaderboardModes.mode_for_episode(_run_episode))
+	# Кнопки на экране смерти у таких эпизодов нет вовсе (см. выше), но путь
+	# сюда есть и из других мест — на всякий случай открываем первый эпизод, а
+	# не режим с номером −1.
+	var m : int = LeaderboardModes.mode_for_episode(_run_episode)
+	_show_leaderboard(m if m != LeaderboardModes.NO_MODE else LeaderboardModes.Mode.EP1)
 
 # ── Prize claim modal (Phase 1 mock) ─────────────────────────────────────────
 

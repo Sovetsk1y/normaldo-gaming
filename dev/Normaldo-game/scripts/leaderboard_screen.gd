@@ -98,13 +98,15 @@ var _server_window: Dictionary = {}
 var _origin_lbl   : Label      = null
 var _fetch_busy   : bool       = false
 
-func setup(hud: Node, initial_metric: int = 0) -> void:
+# Вкладка по умолчанию — БЕСКОНЕЧНЫЙ, а не ноль: ноль это «эпизод 1», и после
+# перестановки вкладок он молча стал бы не тем, чем был.
+func setup(hud: Node, initial_metric: int = LeaderboardModes.DEFAULT_MODE) -> void:
 	_hud = hud
 	_initial_metric = initial_metric
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_active_metric = _initial_metric
+	_active_metric = _open_on(_initial_metric)
 	_reset_seconds_left = LeaderboardModes.seconds_to_week_reset()
 	var vp := get_viewport().get_visible_rect().size
 	_build(vp)
@@ -239,11 +241,27 @@ func _build(vp: Vector2) -> void:
 	var lay := _layout(vp)
 	var tab_h : float = float(lay["tabs_h"])
 	var tab_y : float = float(lay["tabs_y"])
-	var tab_w : float = 196.0
-	var gap   : float = 10.0
-	var n     : int   = LeaderboardModes.MODES.size()
+	# ── Ширина вкладки СЧИТАЕТСЯ, а не назначается ───────────────────────────
+	# Раньше здесь стояло 196 — число, подобранное под ЧЕТЫРЕ вкладки. С шестью
+	# полоса вылезла за оба края экрана: «БЕСКОНЕЧНЫЙ» обрезался слева, «ЭПИЗОД 5»
+	# справа, и заметить это можно было только кадром — headless-тест считает
+	# подписи, а не пиксели.
+	#
+	# Теперь ширина делится по остатку: сколько режимов ни заведи, полоса
+	# останется в экране. 196 стало ПОТОЛКОМ — на четырёх вкладках всё выглядит
+	# ровно как раньше.
+	var gap    : float = 10.0
+	var margin : float = float(lay["margin"])
+	var help_w : float = 28.0 + 10.0   # пилюля «?» справа от полосы и отступ до неё
+	var n      : int   = LeaderboardModes.MODES.size()
+	var avail  : float = vp.x - margin * 2.0 - help_w
+	var tab_w  : float = minf(196.0, (avail - gap * float(n - 1)) / float(n))
 	var strip_w : float = tab_w * float(n) + gap * float(n - 1)
-	var tabs_x  : float = (vp.x - strip_w) * 0.5
+	var tabs_x  : float = (vp.x - strip_w - help_w) * 0.5
+
+	# Кегль тоже по ширине: «БЕСКОНЕЧНЫЙ» — самая длинная подпись, и на узкой
+	# вкладке она обрезается первой.
+	var tab_fs : int = 13 if tab_w >= 170.0 else (11 if tab_w >= 140.0 else 10)
 
 	_tab_bg.clear()
 	_tab_lbl.clear()
@@ -252,7 +270,7 @@ func _build(vp: Vector2) -> void:
 		var at := Vector2(tabs_x + (tab_w + gap) * float(i), tab_y)
 		var sz := Vector2(tab_w, tab_h)
 		_tab_bg.append(_tab_pill(at, sz))
-		_tab_lbl.append(_tab_label(LeaderboardModes.mode_label(mode), at, sz))
+		_tab_lbl.append(_tab_label(LeaderboardModes.mode_label(mode), at, sz, tab_fs))
 		# На закрытой вкладке рисуется замок. Без него закрытая вкладка выглядит
 		# рабочей и по нажатию молча ничего не делает — а тусклой её не считать:
 		# неактивная вкладка тоже тусклая.
@@ -314,10 +332,10 @@ func _tab_pill(pos: Vector2, size: Vector2) -> Panel:
 		Color(0.40, 0.36, 0.26, 0.95))
 	return p
 
-func _tab_label(text: String, pos: Vector2, size: Vector2) -> Label:
+func _tab_label(text: String, pos: Vector2, size: Vector2, font_size: int = 13) -> Label:
 	var l := Label.new()
 	l.add_theme_font_override("font", UI_FONT)
-	l.add_theme_font_size_override("font_size", 13)
+	l.add_theme_font_size_override("font_size", font_size)
 	_apply_text_fx(l)
 	l.text                 = text
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -457,8 +475,13 @@ func _build_podium_card(r: Dictionary, pos: Vector2, size: Vector2, place: int, 
 	_label(str(int(r.get("score", 0))), 17, Color(1.0, 0.88, 0.45),
 		pos + Vector2(34.0, sy - 2.0), Vector2(size.x - 44.0, 24.0))
 
-	_build_reward_block(_podium_root, pos + Vector2(10.0, size.y - 26.0),
-		size.x - 20.0, LeaderboardModes.reward_for_place(place), 18.0)
+	# ПРИЗ ТОЛЬКО У БЕСКОНЕЧНОГО. В эпизодах таблица — «кто круче», и приз за
+	# место превратил бы её в работу: чтобы взять, надо переигрывать один и тот
+	# же отрезок, пока не выбьешь строку выше. Пять таких гонок разом — это не
+	# пять поводов играть, а пять обязанностей.
+	if LeaderboardModes.has_prizes(_active_metric):
+		_build_reward_block(_podium_root, pos + Vector2(10.0, size.y - 26.0),
+			size.x - 20.0, LeaderboardModes.reward_for_place(place), 18.0)
 
 # Своя строка внизу экрана — видна всегда. Тап прокручивает список к себе
 # (бывшая плавающая кнопка «МОЯ ПОЗИЦИЯ», которая закрывала строки списка).
@@ -643,15 +666,43 @@ func _set_tab_style(pill: Panel, lbl: Label, active: bool) -> void:
 #
 # Эпизод 1 открыт всегда: с него игра и начинается. Эпизод N — после того как
 # пройден N−1. Бесконечный — после всей кампании.
+
+# На какой вкладке ОТКРЫВАТЬСЯ. Обычно на той, которую попросили: с экрана
+# смерти — режим только что сыгранного забега, из меню — бесконечный.
+#
+# Но бесконечный открывается только после всей кампании, а вкладка по умолчанию
+# у нас именно он. Без этой развилки игрок посреди кампании попадал бы на
+# ЗАКРЫТУЮ вкладку: экран честно уходил бы на сервер за таблицей режима, в
+# который ему ещё нельзя, и показывал бы пустоту — про чужие рекорды там, куда
+# не попасть. Поэтому если просимая вкладка под замком, открываемся на самой
+# дальней доступной: она и есть «где игрок сейчас».
+func _open_on(want: int) -> int:
+	if _is_mode_unlocked(want):
+		return want
+	var best : int = LeaderboardModes.Mode.EP1
+	for m in LeaderboardModes.MODES:
+		if _is_mode_unlocked(m):
+			best = int(m)
+	return best
+
+# Вкладка открыта тогда же, когда открыт её режим: эпизод N — после пройденного
+# N−1, бесконечный — после всей кампании.
+#
+# НОМЕР ЭПИЗОДА БЕРЁТСЯ У `mode_episode`, А НЕ У САМОГО `mode`. Раньше здесь
+# стояло `episodes_done >= mode`, и это работало ровно потому, что у первых трёх
+# эпизодов номер в enum совпадал с «номер эпизода минус один». У четвёртого и
+# пятого не совпадает — между третьим и четвёртым в enum вклинился ENDLESS, —
+# и формула стала требовать на эпизод больше: пройдя три, игрок видел четвёртую
+# вкладку всё ещё под замком.
 func _is_mode_unlocked(mode: int) -> bool:
 	if mode == LeaderboardModes.Mode.ENDLESS:
 		return QuestManager.is_endless_unlocked()
-	return SaveData.episodes_done >= mode
+	return SaveData.episodes_done >= LeaderboardModes.mode_episode(mode) - 1
 
 func _mode_lock_hint(mode: int) -> String:
 	if mode == LeaderboardModes.Mode.ENDLESS:
 		return "Пройди все эпизоды"
-	return "Сначала пройди эпизод %d" % mode
+	return "Сначала пройди эпизод %d" % (LeaderboardModes.mode_episode(mode) - 1)
 
 func _on_tab(mode: int) -> void:
 	if not _is_mode_unlocked(mode):
@@ -865,8 +916,9 @@ func _add_player_row(r: Dictionary, cy: float, alt: bool) -> void:
 		Vector2(score_x + 22.0, cy), Vector2(90.0, ROW_H), _content)
 	score_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
-	_build_reward_block(_content, Vector2(w * 0.70, cy + (ROW_H - 16.0) * 0.5),
-		w * 0.28, LeaderboardModes.reward_for_place(rank), 16.0)
+	if LeaderboardModes.has_prizes(_active_metric):
+		_build_reward_block(_content, Vector2(w * 0.70, cy + (ROW_H - 16.0) * 0.5),
+			w * 0.28, LeaderboardModes.reward_for_place(rank), 16.0)
 
 func _reward_str(reward: Dictionary) -> String:
 	var d := int(reward.get("dollars", 0))

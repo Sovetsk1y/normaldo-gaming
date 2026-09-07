@@ -10,7 +10,7 @@ extends SceneTree
 #
 # Отдельно проверяется САМО РЕШЕНИЕ навигации: чип обязан вставать на следующий
 # неотыгранный эпизод сам, а перебор — идти только по открытому. Ради этого
-# разбиение и делалось терпимым — см. /Концепция/Уровни/Кампания — три уровня.md
+# разбиение и делалось терпимым — см. /Концепция/Уровни/Кампания — пять эпизодов.md
 
 var _fails  : int = 0
 var _checks : int = 0
@@ -74,7 +74,14 @@ func _test_unlocks() -> void:
 	_check(not _qm.call("is_endless_unlocked"),
 		"бесконечный на середине кампании всё ещё закрыт")
 
-	_done(3)
+	# «ВСЯ КАМПАНИЯ» — это столько эпизодов, сколько в таблице, а не тройка.
+	# Длина менялась трижды (пять, три, шесть), и число, вписанное в тест,
+	# каждый раз означало «проверка молчит».
+	var all_eps : int = _qm.call("campaign_episodes")
+	_done(all_eps - 1)
+	_check(not _qm.call("is_endless_unlocked"),
+		"за эпизод до конца бесконечный ещё закрыт")
+	_done(all_eps)
 	_check(_qm.call("is_endless_unlocked"),
 		"пройденная кампания открывает бесконечный")
 
@@ -89,7 +96,7 @@ func _test_default() -> void:
 	_done(2)
 	_check(int(_hud.call("_default_mode_position")) == 3,
 		"после второго — на третьем")
-	_done(3)
+	_done(int(_qm.call("campaign_episodes")))
 	_check(int(_hud.call("_default_mode_position")) == 0,
 		"после всей кампании — на бесконечном")
 
@@ -102,16 +109,23 @@ func _test_ring() -> void:
 	_done(1)
 	_check((_hud.call("_mode_positions") as Array) == [1, 2],
 		"после первого эпизода — две: %s" % [_hud.call("_mode_positions")])
-	_done(3)
-	_check((_hud.call("_mode_positions") as Array) == [1, 2, 3, 0],
-		"после кампании — все четыре, бесконечный последним: %s"
+	var eps : int = _qm.call("campaign_episodes")
+	_done(eps)
+	var want : Array = []
+	for e in range(1, eps + 1):
+		want.append(e)
+	want.append(0)
+	_check((_hud.call("_mode_positions") as Array) == want,
+		"после кампании — все эпизоды и бесконечный последним: %s"
 			% [_hud.call("_mode_positions")])
 
 	# Перебор идёт ПО КРУГУ и возвращается в начало, а не упирается в край.
-	_hud.set("_mode_btn_pos", 3)
+	# С ПОСЛЕДНЕГО эпизода, а не с третьего: третий давно не последний, и число
+	# в тесте держало проверку на кампании, которой уже нет.
+	_hud.set("_mode_btn_pos", eps)
 	_hud.call("_on_mode_btn_pressed")
 	_check(int(_hud.get("_mode_btn_pos")) == 0,
-		"с третьего эпизода нажатие ведёт на бесконечный: %d" % int(_hud.get("_mode_btn_pos")))
+		"с последнего эпизода нажатие ведёт на бесконечный: %d" % int(_hud.get("_mode_btn_pos")))
 	_hud.call("_on_mode_btn_pressed")
 	_check(int(_hud.get("_mode_btn_pos")) == 1,
 		"а с бесконечного круг замыкается на первый: %d" % int(_hud.get("_mode_btn_pos")))

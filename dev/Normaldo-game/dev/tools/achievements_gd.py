@@ -14,6 +14,7 @@
 Разбор спеки берётся из соседнего achievements_xlsx.py: парсер один на оба
 выхода, иначе разойтись смогли бы уже сами инструменты.
 """
+import re
 import sys
 from pathlib import Path
 
@@ -39,6 +40,38 @@ CATS = [
 ]
 KEY_BY_RU = {ru: key for key, ru, _ in CATS}
 TIER_KEY = {"бронза": 1, "серебро": 2, "золото": 3, "платина": 4}
+
+GAME = ROOT / "dev" / "Normaldo-game" / "scripts"
+
+
+# ── Пороги, которые СЧИТАЮТСЯ по игре, а не пишутся числом ───────────────────
+# Два достижения меряют не результат игрока, а размер игры: «все эпизоды без
+# урона» и «в таблице всех режимов сразу». Их порог — это длина кампании и
+# число режимов, и обе величины уже объявлены в игре.
+#
+# Написать их числом значило бы завести третью копию: кампания была на пять
+# эпизодов, стала на три, снова на пять — и каждый раз достижение молча
+# оставалось со старым порогом, потому что число в скрипте сборки никем не
+# проверяется. Сборка читает объявления и падает, если не нашла их: пустой
+# результат тут опаснее неверного, он даёт goal = 0, который берётся сам собой.
+def _block(path, const):
+    """Тело константы-массива `const NAME ... = [ ... ]` из скрипта игры."""
+    src = (GAME / path).read_text(encoding="utf-8")
+    m = re.search(r"const %s[^=]*=\s*\[(.*?)^\]" % const, src, re.S | re.M) \
+        or re.search(r"const %s[^=]*=\s*\[([^\]]*)\]" % const, src)
+    if not m:
+        raise SystemExit("не нашёл %s в %s — порог считать не из чего" % (const, path))
+    return m.group(1)
+
+
+def episodes():
+    """Длина кампании — по строкам `CAMPAIGN_LEVELS` в spawner.gd."""
+    return len(re.findall(r'"boss"\s*:', _block("spawner.gd", "CAMPAIGN_LEVELS")))
+
+
+def modes():
+    """Число режимов таблицы лидеров — по ключам `MODE_KEYS`."""
+    return len(re.findall(r'"', _block("leaderboard_modes.gd", "MODE_KEYS"))) // 2
 
 # ── Счётчик и порог на каждое достижение ─────────────────────────────────────
 # В спеке «условие» написано словами — она для людей. Машине нужны имя счётчика
@@ -88,7 +121,7 @@ STATS = {
     "ep3":           ("episodes_done", 3),
     "campaign":      ("campaign_done", 1),
     "ep_nodmg_1":    ("nodmg_episodes", 1),
-    "ep_nodmg_all":  ("nodmg_episodes", 3),
+    "ep_nodmg_all":  ("nodmg_episodes", episodes()),
     "croc_nodmg":    ("boss_nodmg:croc", 1),
     "club_nodmg":    ("boss_nodmg:club", 1),
     "ninja_fast":    ("ninja_fast", 1),
@@ -144,7 +177,7 @@ STATS = {
     "top100":        ("best_rank_inv", 1),
     "top10":         ("best_rank_inv", 91),
     "top1":          ("best_rank_inv", 100),
-    "all_modes":     ("modes_ranked_week", 4),
+    "all_modes":     ("modes_ranked_week", modes()),
     # Скрытые
     "barrel_death":  ("death_by:bum_barrel", 1),
     "night_owl":     ("night_run", 1),

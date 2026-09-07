@@ -3,8 +3,12 @@ extends SceneTree
 # Снимок экрана лидеров.
 #   xvfb-run -a godot --path . --script res://dev/shot_leaders.gd -- <папка> [имя] [metric]
 #
-# metric: 0 — рекорд за забег, 1 — суммарно. Работает только с настоящим
-# рендером (x11/opengl3): в --headless viewport пустой.
+# metric — НОМЕР режима из `LeaderboardModes.Mode`, а не порядок вкладки:
+# 0…2 — эпизоды 1–3, 3 — бесконечный, 4…5 — эпизоды 4–5. Порядок нумерации
+# исторический (см. `leaderboard_modes.gd`), вкладки идут иначе.
+#
+# Работает только с настоящим рендером (x11/opengl3): в --headless viewport
+# пустой.
 
 func _initialize() -> void:
 	_bail_out()

@@ -164,10 +164,17 @@ func _ready() -> void:
 # Считаем по `SaveData.episodes_done`, а не по галочке сюжетного задания:
 # задание — награда за победу, а открытие режима — состояние прогресса, и
 # смешивать их значит терять режим вместе со сбросом заданий.
-const CAMPAIGN_EPISODES : int = 3
+# ЧИСЛО БЕРЁТСЯ У ТАБЛИЦЫ УРОВНЕЙ, а не пишется здесь. Длина кампании менялась
+# уже трижды — пять, три, шесть, — и каждый раз второй источник этого числа
+# расходился с первым молча: бесконечный открывался посреди кампании или не
+# открывался вовсе.
+const SPAWNER_SCRIPT := preload("res://scripts/spawner.gd")
+
+static func campaign_episodes() -> int:
+	return SPAWNER_SCRIPT.CAMPAIGN_LEVELS.size()
 
 func is_endless_unlocked() -> bool:
-	return SaveData.episodes_done >= CAMPAIGN_EPISODES
+	return SaveData.episodes_done >= campaign_episodes()
 
 func is_endless_cond(cond_key: String) -> bool:
 	return cond_key == "endless_today" \

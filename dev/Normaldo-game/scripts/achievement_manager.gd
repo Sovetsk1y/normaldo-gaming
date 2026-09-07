@@ -258,7 +258,7 @@ func _do_catch_up() -> void:
 	set_max("runs_total",      SaveData.total_runs())
 	set_max("codex_seen",      SaveData.seen_entries.size())
 	set_max("episodes_done",   SaveData.episodes_done)
-	if SaveData.episodes_done >= QuestManager.CAMPAIGN_EPISODES:
+	if SaveData.episodes_done >= QuestManager.campaign_episodes():
 		mark("campaign_done")
 
 	# Скины: куплено, максимальный уровень, сколько доведено до десятого.
