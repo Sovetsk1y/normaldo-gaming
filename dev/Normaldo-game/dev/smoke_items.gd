@@ -208,14 +208,20 @@ func _test_ninja_kinds() -> void:
 	game.queue_free()
 	await process_frame
 
-# Большой конус — единственный предмет потока, который надо ТАПАТЬ. Само по себе
-# число на нём этого не просит: оно читается как «сколько во мне жизней», а не
-# как «бей по мне пальцем». Просьба — картинка TAP! над числом, та же, что в
-# мини-играх с пиццей и с жиробоссом: «по этому надо тапать» — один приём игры,
-# и объяснять его тремя разными способами значит учить трижды.
+# КОНУС — ТРИ РАЗМЕРА И НИКАКИХ ТАПОВ.
 #
-# Проверяется и обратное: сжавшись до одного ряда, конус становится обычным
-# препятствием — и просить перестаёт.
+# Раньше конус был единственным предметом потока, который разбирали тапами:
+# число на нём, подсказка «тапай», сжатие на ряд при обнулении. Механика убрана
+# — она перебивала основное управление (палец ведёт голову) ради частного
+# случая в одном-единственном месте игры.
+#
+# Проверяется три вещи, и все три ломаются молча:
+#  • размер вообще СЛУШАЕТСЯ — иначе весь смысл предмета сводится к одному
+#    трёхрядному, как было раньше;
+#  • вместе с картинкой растёт КОЛЛИЗИЯ. Их считают в разных строках `_resize`,
+#    и разъехавшись они дают конус, который бьёт мимо себя;
+#  • на конусе не осталось ни числа, ни подсказки, ни ловли тапов: забытая
+#    ловля превратила бы высокий конус в мёртвую зону для дабл-тапа спелла.
 func _test_cone_tap() -> void:
 	var game : Node = load("res://scenes/game.tscn").instantiate()
 	get_root().add_child(game)
@@ -224,65 +230,63 @@ func _test_cone_tap() -> void:
 	sp.call("clear_items")
 	sp.set_process(false)
 	var vp : Vector2 = get_root().get_visible_rect().size
-	sp.call("_spawn_cone", vp.x, 0.0)
-	await process_frame
 
-	var cone : Node2D = null
-	for c in sp.get_children():
-		if c.is_in_group("cone"):
-			cone = c
-	_check(cone != null, "конус появился")
-	if cone == null:
-		game.queue_free()
-		return
-	# Подсказка — ОБЩИЙ КИРПИЧ с мини-играми (`tap_prompt.gd`): картинка TAP! и
-	# два тапающих пальца. Проверяется именно он, а не своя картинка: своя у
-	# конуса когда-то была, и просьба на нём читалась слабее, чем в мини-играх,
-	# где приём ровно тот же.
-	var tap : Node2D = cone.get("_prompt")
-	var lbl : Label  = cone.get("_lbl")
-	_check(is_instance_valid(tap) and tap.visible, "и просит тапать общей подсказкой")
-	var fingers := 0
-	for c in tap.get_children():
-		if c is Sprite2D and String((c as Sprite2D).texture.resource_path).contains("finger"):
-			fingers += 1
-	_check(fingers == 2, "и по бокам у неё два тапающих пальца: %d" % fingers)
-	_check(is_instance_valid(lbl) and lbl.visible and lbl.text != "",
-		"а число под ней говорит, сколько ещё раз: «%s»" % lbl.text)
-	# НАД числом, а не поверх него: цифра стоит в центре конуса.
-	_check(tap.position.y < lbl.position.y,
-		"подсказка выше числа: %.0f против %.0f" % [tap.position.y, lbl.position.y])
+	var heights : Array = []
+	var widths  : Array = []
+	for rows in [1, 2, 3]:
+		sp.call("clear_items")
+		await process_frame
+		sp.call("_spawn_cone", vp.x, 0.0, rows)
+		await process_frame
+		var c : Node2D = null
+		for n in sp.get_children():
+			if n.is_in_group("cone"):
+				c = n
+		if c == null:
+			_check(false, "конус в %d ряда появился" % rows)
+			game.queue_free()
+			return
+		_check(int(c.call("rows")) == rows, "конус слушается размера: просили %d" % rows)
+		var shape : Node = null
+		for n in c.get_children():
+			if n is CollisionShape2D:
+				shape = n
+		var sz : Vector2 = ((shape as CollisionShape2D).shape as RectangleShape2D).size
+		heights.append(sz.y)
+		widths.append(sz.x)
+		# Ни числа, ни подсказки, ни ловли тапов.
+		_check(c.get("_lbl") == null and c.get("_prompt") == null,
+			"на конусе нет ни числа, ни подсказки")
+		_check(not bool(c.get("input_pickable")), "и он не ловит тапы")
 
-	# ЧИСЛО НЕ РАСТЁТ ПРИ СЖАТИИ. Меньший конус не может быть крепче большего,
-	# из которого он получился, — а до правки новое число бралось заново
-	# случайным из 5…10, и трёхрядный за пять тапов сжимался в двухрядный за
-	# десять.
-	var before : int = int(cone.get("_num"))
-	for _i in before:
-		cone.call("_tap")
-	_check(int(cone.get("_rows")) == 2, "конус сжался на ряд: %d" % int(cone.get("_rows")))
-	_check(int(cone.get("_num")) < before,
-		"и просит МЕНЬШЕ тапов, чем большой: %d против %d" % [int(cone.get("_num")), before])
-
-	cone.set("_rows", 1)
-	cone.call("_resize")
-	_check(not tap.visible and not lbl.visible,
-		"сжатый до одного ряда конус просить перестаёт")
+	# Коллизия РАСТЁТ ВМЕСТЕ С РЯДАМИ и ровно пропорционально: высота ряда одна
+	# и та же, значит два ряда обязаны дать вдвое больше первого.
+	_check(heights[1] > heights[0] and heights[2] > heights[1],
+		"коллизия растёт с размером: %s" % [heights])
+	_check(is_equal_approx(float(heights[1]) / float(heights[0]), 2.0)
+		and is_equal_approx(float(heights[2]) / float(heights[0]), 3.0),
+		"и растёт ровно по рядам: %s" % [heights])
+	# Ширина конуса — от той же картинки, поэтому тоже пропорциональна: рисунок
+	# масштабируется целиком, а не растягивается по высоте.
+	_check(is_equal_approx(float(widths[2]) / float(widths[0]), 3.0),
+		"картинка масштабируется целиком, а не тянется: %s" % [widths])
 
 	# И СБИТЫЙ ПАДАЕТ, как любой другой предмет. Раньше `knock_down` у конуса не
 	# было вовсе, и `_kill_item` сносил его через `queue_free()`: трёхрядная
 	# махина просто исчезала из кадра.
-	#
-	# Проверяется ПОСЛЕДНИМ: падение уносит подсказку с собой, и после него
-	# спрашивать её видимость уже не у кого.
-	_check(cone.has_method("knock_down"), "конус умеет падать")
-	var y0 : float = cone.position.y
-	cone.call("knock_down")
-	for _i in 20:
-		await process_frame
-	var y1 : float = cone.position.y if is_instance_valid(cone) else y0
-	_check(is_instance_valid(cone) and y1 > y0,
-		"сбитый конус уходит вниз: %.0f → %.0f" % [y0, y1])
+	var cone : Node2D = null
+	for n in sp.get_children():
+		if n.is_in_group("cone"):
+			cone = n
+	_check(cone != null and cone.has_method("knock_down"), "конус умеет падать")
+	if cone != null:
+		var y0 : float = cone.position.y
+		cone.call("knock_down")
+		for _i in 20:
+			await process_frame
+		var y1 : float = cone.position.y if is_instance_valid(cone) else y0
+		_check(is_instance_valid(cone) and y1 > y0,
+			"сбитый конус уходит вниз: %.0f → %.0f" % [y0, y1])
 	game.queue_free()
 	await process_frame
 

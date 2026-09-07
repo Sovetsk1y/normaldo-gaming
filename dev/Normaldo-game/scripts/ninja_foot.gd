@@ -691,96 +691,24 @@ func _make_proj_trail() -> CPUParticles2D:
 
 # ── Visual helpers ────────────────────────────────────────────────────────────
 
-# Pre-fight monologue. A speech bubble pops above the boss with a taunt;
-# Normaldo's input is frozen while the bubble is up so the player just
-# reads it. Returns once the bubble has fully faded out.
+# Реплика босса перед боем. Вид облачка — ОБЩИЙ на всех боссов
+# (`boss_speech.gd`), своё у Ноги Ниндзя только текст и пара цветов.
+#
+# Раньше он рисовал СВОЁ: белый прямоугольник с красной полосой сверху и
+# повёрнутым хвостиком снизу. Крокодил и хозяин клуба к тому времени говорили
+# скруглённой панелью в своих цветах, и ниндзя рядом с ними читался не как «этот
+# босс говорит иначе», а как экран из другой игры — тем более что все трое
+# говорят в одном забеге, через эпизод друг от друга.
+const BOSS_SPEECH := preload("res://scripts/boss_speech.gd")
+const SPEECH : String = "Босс уничтожит всю пиццу в городе.\nНе пытайся его остановить, Нормальдо!"
+
 func _show_intro_speech() -> void:
 	if _normaldo != null and is_instance_valid(_normaldo) and _normaldo.has_method("disable_input"):
 		_normaldo.disable_input()
-
-	const SPEECH : String = "Босс уничтожит всю пиццу в городе.\nМожешь не пытаться его остановить, Нормальдо!"
-	const BUBBLE_W : float = 320.0
-	const BUBBLE_H : float = 96.0
-	const HOLD     : float = 3.4   # seconds the bubble stays on screen
-	# Margin between the bubble's right edge and the boss's left silhouette
-	# edge so the cloud never overlaps the ninja's head.
-	const BUBBLE_GAP : float = 28.0
-
-	var cl := CanvasLayer.new()
-	cl.layer = 95   # below the boss banner (which uses 99) but above gameplay
-	_game_root.add_child(cl)
-
-	var vp : Vector2 = get_viewport_rect().size
-	# Place the bubble fully to the LEFT of the boss silhouette — boss centre
-	# is at `position`, so its left edge is `position.x - BOSS_INTRO_W * 0.5`.
-	# We clamp inside the viewport so a narrow window still works.
-	var bx : float = clampf(position.x - BOSS_INTRO_W * 0.5 - BUBBLE_GAP - BUBBLE_W,
-		12.0, vp.x - BUBBLE_W - 12.0)
-	var by : float = clampf(position.y - BUBBLE_H * 0.5 - 90.0, 12.0, vp.y - BUBBLE_H - 12.0)
-
-	var root := Control.new()
-	root.size         = Vector2(BUBBLE_W, BUBBLE_H)
-	root.position     = Vector2(bx, by)
-	root.pivot_offset = root.size * 0.5
-	root.scale        = Vector2(0.6, 0.6)
-	root.modulate     = Color(1.0, 1.0, 1.0, 0.0)
-	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	cl.add_child(root)
-
-	var bg := ColorRect.new()
-	bg.color    = Color(0.96, 0.96, 0.98, 0.97)
-	bg.size     = Vector2(BUBBLE_W, BUBBLE_H)
-	bg.position = Vector2.ZERO
-	root.add_child(bg)
-
-	var stripe := ColorRect.new()
-	stripe.color    = Color(0.20, 0.05, 0.05, 0.85)
-	stripe.size     = Vector2(BUBBLE_W, 3.0)
-	stripe.position = Vector2.ZERO
-	root.add_child(stripe)
-
-	# Tail pointing toward the boss head (right side).
-	var tail := ColorRect.new()
-	tail.color    = bg.color
-	tail.size     = Vector2(22.0, 16.0)
-	tail.position = Vector2(BUBBLE_W - 36.0, BUBBLE_H - 6.0)
-	tail.rotation = -0.30
-	root.add_child(tail)
-
-	var msg := Label.new()
-	msg.add_theme_font_override("font", UI_FONT)
-	msg.add_theme_font_size_override("font_size", 13)
-	msg.add_theme_color_override("font_color", Color(0.10, 0.06, 0.10))
-	msg.text                 = SPEECH
-	msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	msg.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	msg.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
-	msg.size                 = Vector2(BUBBLE_W - 20.0, BUBBLE_H - 20.0)
-	msg.position             = Vector2(10.0, 10.0)
-	root.add_child(msg)
-
-	# Pop in.
-	var tw_in := create_tween().set_parallel(true)
-	tw_in.tween_property(root, "modulate:a", 1.0, 0.18)
-	tw_in.tween_property(root, "scale", Vector2.ONE, 0.26)\
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	await tw_in.finished
-
-	# Hold for read time.
-	await get_tree().create_timer(HOLD).timeout
-
-	# Pop out.
-	var tw_out := create_tween().set_parallel(true)
-	tw_out.tween_property(root, "modulate:a", 0.0, 0.22)
-	tw_out.tween_property(root, "scale", Vector2(0.6, 0.6), 0.22)\
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
-	await tw_out.finished
-	cl.queue_free()
-
-	# Hand control back to the player. Boss continues to its banner +
-	# attack phases right after this call returns.
-	if _normaldo != null and is_instance_valid(_normaldo) and _normaldo.has_method("enable_input"):
-		_normaldo.enable_input()
+	# Тёмно-багровый фон с алой обводкой — цвета клана Фут.
+	await BOSS_SPEECH.show(self, _game_root, SPEECH, BOSS_INTRO_W,
+		Color(0.13, 0.04, 0.05, 0.96), Color(0.95, 0.25, 0.25, 0.95),
+		Color(1.00, 0.86, 0.84), 3.4, 0.30)
 
 func _show_boss_banner() -> void:
 	var vp := get_viewport_rect()

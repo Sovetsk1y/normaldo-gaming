@@ -358,45 +358,17 @@ func _intro() -> void:
 # Реплика босса. У Ноги Ниндзя она про то, что он уничтожит пиццу; крокодилу
 # нужна СВОЯ — иначе два босса говорят одним голосом. Этот стреляет и охотится,
 # поэтому и говорит как охотник: не угрожает, а объясняет, кто тут кто.
+const BOSS_SPEECH := preload("res://scripts/boss_speech.gd")
 const SPEECH : String = "Стой смирно, черепашка.\nЯ никогда не мажу дважды."
 
 func _show_speech() -> void:
 	if is_instance_valid(_normaldo) and _normaldo.has_method("disable_input"):
 		_normaldo.disable_input()
-	var vp := get_viewport_rect().size
-	var cl := CanvasLayer.new()
-	cl.layer = 95
-	_game_root.add_child(cl)
-
-	var w : float = 330.0
-	var h : float = 84.0
-	var root := Control.new()
-	root.size         = Vector2(w, h)
-	root.position     = Vector2(vp.x - W_FIGHT - w - 20.0, vp.y * 0.34)
-	root.pivot_offset = Vector2(w, h * 0.5)
-	root.scale        = Vector2(0.2, 0.2)
-	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	cl.add_child(root)
-	UiKit.panel(root, Vector2.ZERO, Vector2(w, h), Color(0.07, 0.10, 0.06, 0.96),
-		12, Color(0.45, 0.90, 0.35, 0.95), 3)
-	var lbl := Label.new()
-	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 15)
-	lbl.text                 = SPEECH
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.modulate             = Color(0.86, 1.0, 0.80)
-	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	UiKit.place(root, lbl, Vector2(10.0, 0.0), Vector2(w - 20.0, h))
-
-	var tw := root.create_tween()
-	tw.tween_property(root, "scale", Vector2.ONE, 0.26)\
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	await get_tree().create_timer(3.0).timeout
-	if is_instance_valid(cl):
-		var out := root.create_tween()
-		out.tween_property(root, "modulate:a", 0.0, 0.22)
-		out.tween_callback(cl.queue_free)
+	# Вид облачка — общий на всех боссов (`boss_speech.gd`). Своё у крокодила
+	# только текст и пара цветов: болотный фон с зелёной обводкой.
+	await BOSS_SPEECH.show(self, _game_root, SPEECH, W_FIGHT,
+		Color(0.07, 0.10, 0.06, 0.96), Color(0.45, 0.90, 0.35, 0.95),
+		Color(0.86, 1.00, 0.80), 3.0, 0.34)
 
 func _show_banner() -> void:
 	var vp := get_viewport_rect().size

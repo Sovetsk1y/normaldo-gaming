@@ -90,7 +90,7 @@ const ENTRIES : Array = [
 	  "text": "Крупный и медленный. Видно издалека, объехать мешает размер." },
 	{ "id": "cone", "section": S_ENEMY, "title": "КОНУС",
 	  "icon": "res://assets/items/cone.png", "script": "cone",
-	  "text": "Дорожный конус. Стройка и клуб забиты ими под завязку." },
+	  "text": "Дорожный конус, высотой в один, два или три ряда. Трёхрядный перекрывает пол-экрана — объезжай, сбить его нечем." },
 	{ "id": "roadsign", "section": S_ENEMY, "title": "ЗНАК",
 	  "icon": "res://assets/items/road_sign.png", "script": "roadsign_bum",
 	  "text": "Дорожный знак поперёк лейна. Читается плоско — тем и коварен." },

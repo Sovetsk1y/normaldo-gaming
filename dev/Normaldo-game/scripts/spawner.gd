@@ -1298,10 +1298,38 @@ func _spawn_molotov_single(y: float, vp_w: float, speed: float) -> void:
 	m.position   = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
 	add_child(m)
 
-func _spawn_cone(vp_w: float, speed: float) -> void:
+# Конус — один из трёх размеров. Размер и есть вся его механика: трёхрядный
+# перекрывает больше половины экрана и заставляет искать проход, однорядный —
+# рядовая помеха. Раньше конус всегда вылетал трёхрядным и уменьшался тапами;
+# тапов больше нет (см. `cone.gd`), и разнообразие даёт спавн.
+#
+# Вероятности НЕ равные: три ряда — событие, а не фон. Ровная треть на каждый
+# размер сделала бы высокий конус привычным, и он перестал бы читаться как
+# «сейчас надо всерьёз перестроиться».
+const CONE_ROWS_WEIGHTS : Array = [
+	{ "rows": 1, "w": 44 },
+	{ "rows": 2, "w": 36 },
+	{ "rows": 3, "w": 20 },
+]
+
+func _pick_cone_rows() -> int:
+	var total := 0
+	for e in CONE_ROWS_WEIGHTS:
+		total += int(e["w"])
+	var r := randi() % maxi(1, total)
+	for e in CONE_ROWS_WEIGHTS:
+		r -= int(e["w"])
+		if r < 0:
+			return int(e["rows"])
+	return 1
+
+func _spawn_cone(vp_w: float, speed: float, rows: int = -1) -> void:
 	var node := Area2D.new()
 	node.set_script(CONE_SCRIPT)
 	node.set("speed", speed)
+	# Размер ставится ДО добавления в дерево: `_ready` конуса считает по нему и
+	# картинку, и коллизию, и поставить размер потом значило бы пересобрать обе.
+	node.call("set_rows", rows if rows > 0 else _pick_cone_rows())
 	node.position = Vector2(ItemFlow.spawn_x(vp_w, 130.0), get_viewport_rect().size.y * 0.5)
 	add_child(node)
 
@@ -1417,10 +1445,14 @@ func _setpiece_bum_barrel(speed: float, lanes: Array, vp_w: float) -> void:
 	# потом отыгрывает атаку: до собаки теперь около 2.2 секунды.
 	await get_tree().create_timer(2.8).timeout
 
-# Конус-сет-пис: центральный конус (3 ряда) + сверху/снизу немного ресурсов,
-# чтобы соблазнить пройти сбоку либо сбить конус тапами.
+# Конус-сет-пис: центральный конус В ПОЛНЫЕ ТРИ РЯДА + сверху и снизу немного
+# ресурсов, чтобы соблазнить пройти сбоку.
+#
+# Размер здесь ЗАДАН, а не выпал: в этом весь сет-пис. Отдай его случаю — и
+# «конусная» сцена раз в пять случаев оказалась бы одним маленьким конусом
+# посреди экрана, то есть ничем.
 func _setpiece_cone(speed: float, lanes: Array, vp_w: float) -> void:
-	_spawn_cone(vp_w, speed)
+	_spawn_cone(vp_w, speed, 3)
 	var gap := _col_gap(speed) * 1.2
 	for i in 3:
 		if _frozen: return

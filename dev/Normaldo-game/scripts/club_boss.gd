@@ -324,46 +324,17 @@ func _intro() -> void:
 
 # Реплика босса. У крокодила она про меткость, у этого — про то, что он никого
 # не бьёт сам: он тут хозяин, и у него для этого есть люди.
+const BOSS_SPEECH := preload("res://scripts/boss_speech.gd")
 const SPEECH : String = "Ты не в списке.\nСейчас подойдут мои люди."
 
 func _show_speech() -> void:
 	if is_instance_valid(_normaldo) and _normaldo.has_method("disable_input"):
 		_normaldo.disable_input()
-	var vp := get_viewport_rect().size
-	var cl := CanvasLayer.new()
-	cl.layer = 95
-	cl.add_to_group("club_fx")
-	_game_root.add_child(cl)
-
-	var w : float = 330.0
-	var h : float = 84.0
-	var root := Control.new()
-	root.size         = Vector2(w, h)
-	root.position     = Vector2(vp.x - W_FIGHT - w - 10.0, vp.y * 0.30)
-	root.pivot_offset = Vector2(w, h * 0.5)
-	root.scale        = Vector2(0.2, 0.2)
-	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	cl.add_child(root)
-	UiKit.panel(root, Vector2.ZERO, Vector2(w, h), Color(0.10, 0.05, 0.13, 0.96),
-		12, Color(0.85, 0.35, 0.95, 0.95), 3)
-	var lbl := Label.new()
-	lbl.add_theme_font_override("font", UI_FONT)
-	lbl.add_theme_font_size_override("font_size", 15)
-	lbl.text                 = SPEECH
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	lbl.modulate             = Color(1.0, 0.88, 1.0)
-	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	UiKit.place(root, lbl, Vector2(10.0, 0.0), Vector2(w - 20.0, h))
-
-	var tw := root.create_tween()
-	tw.tween_property(root, "scale", Vector2.ONE, 0.26)\
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	await get_tree().create_timer(2.6).timeout
-	if is_instance_valid(cl):
-		var out := root.create_tween()
-		out.tween_property(root, "modulate:a", 0.0, 0.22)
-		out.tween_callback(cl.queue_free)
+	# Общий вид облачка — `boss_speech.gd`. Своё у хозяина клуба только текст и
+	# пара цветов: тёмно-фиолетовый фон с неоновой обводкой.
+	await BOSS_SPEECH.show(self, _game_root, SPEECH, W_FIGHT,
+		Color(0.10, 0.05, 0.13, 0.96), Color(0.85, 0.35, 0.95, 0.95),
+		Color(1.00, 0.88, 1.00), 2.6, 0.30)
 
 func _show_banner() -> void:
 	var vp := get_viewport_rect().size

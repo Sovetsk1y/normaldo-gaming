@@ -1146,10 +1146,12 @@ func _input(event: InputEvent) -> void:
 			if _region_max_x >= 0.0 and t.position.x > _region_max_x:
 				_ignored_touches[t.index] = true
 				return
-			# Double-tap → fire the active ability toward the tap point.
-			if _touch_on_cone(t.position):
-				_ignored_touches[t.index] = true
-				return
+			# ЗАСЛОНКИ НА КОНУСЕ БОЛЬШЕ НЕТ. Она стояла тут, пока конус разбирали
+			# тапами: палец, попавший в конус, работал на конус, и Нормальдо этот
+			# тап игнорировал — иначе один и тот же жест значил бы два разных
+			# действия. Тапов у конуса не осталось (см. `cone.gd`), и заслонка
+			# превратилась бы в мёртвую зону на экране: дабл-тап спелла в сторону
+			# высокого конуса молча не срабатывал бы.
 			var now := Time.get_ticks_msec() / 1000.0
 			if now - _last_tap_t <= _DTAP_TIME and t.position.distance_to(_last_tap_pos) <= _DTAP_DIST:
 				_last_tap_t = -10.0
@@ -1650,14 +1652,6 @@ func award_loot_tally(mult: int) -> Vector2i:
 	for _i in extra_dollar:
 		_collect_dollar()
 	return Vector2i(extra_pizza, extra_dollar)
-
-# Тап пришёлся на тело конуса? (мир ≈ экран, без камеры) — тогда это тап по конусу,
-# а не движение/дабл-тап Нормальдо.
-func _touch_on_cone(pos: Vector2) -> bool:
-	for c in get_tree().get_nodes_in_group("cone"):
-		if is_instance_valid(c) and c.has_method("contains_point") and c.contains_point(pos):
-			return true
-	return false
 
 const COMPASS_MIRROR_SEC : float = 5.0
 const SHROOM_SEC : float = 8.0
