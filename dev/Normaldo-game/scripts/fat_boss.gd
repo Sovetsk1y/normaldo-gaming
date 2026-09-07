@@ -24,6 +24,7 @@ extends Node2D
 # them later and they'll fire at the right beat.
 
 const MUTAGEN_SCENE  := preload("res://scenes/mutagen.tscn")
+const HAPTICS        := preload("res://scripts/haptics.gd")
 const ITEM_SCENE     := preload("res://scenes/item.tscn")
 const HOMELESS_SCENE := preload("res://scenes/homeless.tscn")
 const DOG_SCENE      := preload("res://scenes/dog.tscn")
@@ -403,6 +404,9 @@ func _on_mutagen_caught() -> void:
 func _run_grow() -> void:
 	AchievementManager.on_minigame("fat_boss")
 	_state = State.GROW
+	# Забег остановился, экран занял мутаген — это событие того же веса, что
+	# выход босса, и объявляется оно так же.
+	HAPTICS.buzz(HAPTICS.BOSS)
 	if _normaldo.has_method("begin_fat_boss"):
 		_normaldo.begin_fat_boss()
 	_refresh_max_factor()
@@ -952,7 +956,17 @@ func _refresh_stage() -> void:
 		_set_stage(s)
 
 func _set_stage(s: int) -> void:
+	# ВИБРАЦИЯ — НА ПЕРЕХОДЕ СТУПЕНИ, А НЕ НА ТАПЕ. Мини-игра это фрэнзи: тапают
+	# по нескольку раз в секунду, и отклик на каждый тап превратился бы в
+	# непрерывный гул, в котором ничего не читается, — плюс телефон греется.
+	# Переход же сообщает ровно то, ради чего вибрация и нужна: «стало жарче».
+	#
+	# Только ВВЕРХ: падение ступени игрок и так видит по сдувающейся голове, а
+	# гудеть на потере — значит поздравлять с ней.
+	var up := s > _stage
 	_stage = s
+	if up:
+		HAPTICS.buzz(HAPTICS.HEAVY if s >= 2 else HAPTICS.HIT)
 	# Music hook: harder track per stage, softer on drop. When the designer wires
 	# escalation onto the music player, it drives from here — nothing else to do.
 	if is_instance_valid(_music) and _music.has_method("set_frenzy_stage"):

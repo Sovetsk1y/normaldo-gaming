@@ -68,7 +68,7 @@ const TOGGLE_H     : float = 24.0
 
 # Разделы. Порядок — по частоте: убавить звук заходят чаще всего.
 const SECTIONS : Array = [
-	{ "key": "sound",  "title": "ЗВУК" },
+	{ "key": "sound",  "title": "ЗВУК И ОТДАЧА" },
 	{ "key": "notif",  "title": "УВЕДОМЛЕНИЯ" },
 	{ "key": "profile","title": "ПРОФИЛЬ" },
 	{ "key": "account","title": "АККАУНТ" },
@@ -321,6 +321,29 @@ func _page_sound(w: float) -> float:
 		func(v: float): SaveData.set_sfx_volume(v))
 	y = _slider_row(w, y, "Громкость музыки", SaveData.music_volume,
 		func(v: float): SaveData.set_music_volume(v))
+
+	# ── Вибрация ─────────────────────────────────────────────────────────────
+	# Здесь, а не в отдельном разделе: раздел из одной строки — это лишний
+	# корешок, за который придётся заходить, чтобы щёлкнуть один тумблер.
+	# Вибрация к тому же делает ровно то же, что и звук, — сообщает об ударе, —
+	# и искать её игрок пойдёт туда же, где убавлял громкость.
+	#
+	# Переключатель, а не ползунок: вибромотор телефона умеет только «гудеть
+	# столько-то миллисекунд», и шкала на нём была бы шкалой ни для чего.
+	y += 6.0
+	y = _toggle_row(w, y, "Вибрация",
+		func(): return bool(SaveData.vibration_on),
+		func(): SaveData.set_vibration(not SaveData.vibration_on))
+
+	var hint := Label.new()
+	hint.add_theme_font_override("font", UI_FONT)
+	hint.add_theme_font_size_override("font_size", 9)
+	hint.text          = "Отдача на ударах боссов и в мини-играх."
+	hint.modulate      = Color(0.66, 0.68, 0.74)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD
+	hint.mouse_filter  = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_page_body, hint, Vector2(0.0, y + 2.0), Vector2(w, 26.0))
+	y += 26.0
 	return y
 
 # Полоса громкости С ЧИСЛОМ: длина полосы отвечает «примерно столько», а игрок
@@ -378,7 +401,9 @@ func _slider_row(w: float, y: float, title: String, value: float,
 # ── Раздел «Уведомления» ─────────────────────────────────────────────────────
 func _page_notif(w: float) -> float:
 	var y := 6.0
-	y = _toggle_row(w, y, "Все уведомления", "_master", true)
+	y = _toggle_row(w, y, "Все уведомления",
+		func(): return bool(_hud.call("_notif_cat_enabled", "_master")),
+		func(): _hud.call("_toggle_notif_category", "_master"))
 
 	var hint := Label.new()
 	hint.add_theme_font_override("font", UI_FONT)
@@ -405,7 +430,10 @@ func _page_notif(w: float) -> float:
 	# ним бессмысленно, а притворяться рабочими значит врать.
 	var live : bool = bool(SaveData.notif_enabled)
 	for e in CAT_ROWS:
-		y = _toggle_row(w, y, String((e as Array)[1]), String((e as Array)[0]), live)
+		var key : String = String((e as Array)[0])
+		y = _toggle_row(w, y, String((e as Array)[1]),
+			func(): return bool(_hud.call("_notif_cat_enabled", key)),
+			func(): _hud.call("_toggle_notif_category", key), live)
 
 	y += 6.0
 	var qcap := Label.new()
@@ -444,9 +472,16 @@ func _page_notif(w: float) -> float:
 
 # Переключатель: положение кружка, заливка И слово. Три признака на одно
 # состояние, цвет из них только один.
-func _toggle_row(w: float, y: float, label: String, key: String, live: bool) -> float:
+# Переключатель-строка. `is_on` и `flip` — КОЛБЭКИ, а не ключ настройки: строка
+# рисуется одинаково и для категорий уведомлений, и для вибрации, а вот откуда
+# берётся «включено» — у каждой своё. Раньше здесь стоял прибитый гвоздём вызов
+# `_hud._notif_cat_enabled(key)`, и добавить сюда что-то, кроме уведомлений,
+# можно было только скопировав всю строку целиком — то есть заведя вторую
+# реализацию одного и того же переключателя.
+func _toggle_row(w: float, y: float, label: String, is_on: Callable,
+		flip: Callable, live: bool = true) -> float:
 	const H : float = 28.0
-	var on : bool = bool(_hud.call("_notif_cat_enabled", key))
+	var on : bool = bool(is_on.call())
 	var dim : float = 1.0 if live else 0.45
 
 	var bg := Panel.new()
@@ -507,7 +542,7 @@ func _toggle_row(w: float, y: float, label: String, key: String, live: bool) -> 
 		btn.pressed.connect(func():
 			if _hud and _hud.has_method("_play_btn_sfx"):
 				_hud._play_btn_sfx()
-			_hud.call("_toggle_notif_category", key)
+			flip.call()
 			_build_page())
 		UiKit.place(_page_body, btn, Vector2(0.0, y), Vector2(w, H))
 	return y + H + 5.0

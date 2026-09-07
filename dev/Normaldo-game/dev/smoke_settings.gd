@@ -174,9 +174,56 @@ func _test_sound(hud: Node, save: Node) -> void:
 	await process_frame
 	_check(absf(float(save.music_volume)) < 0.01,
 		"музыка выключается в ноль: %.2f" % save.music_volume)
+
+	# ── Вибрация ─────────────────────────────────────────────────────────────
+	# Живёт на этой же странице: раздел из одного тумблера был бы лишним
+	# корешком. Проверяется не наличие строки, а РАБОТА переключателя — строку
+	# нарисовать легко, а вот довести её до сейва забывают.
+	save.set_vibration(true)
+	await _close(scr)
+	scr = await _open(hud, "sound")
+	var txt : Array = _texts(scr.get("_page_body"), [])
+	_check(_count(txt, "Вибрация") == 1, "строка вибрации на странице звука: %s" % [txt])
+
+	var vib_btn : Button = _row_button(scr, "Вибрация")
+	_check(vib_btn != null, "и по ней можно нажать")
+	if vib_btn != null:
+		vib_btn.pressed.emit()
+		await process_frame
+		_check(not bool(save.vibration_on),
+			"нажатие выключает вибрацию: %s" % [save.vibration_on])
+		_row_button(scr, "Вибрация").pressed.emit()
+		await process_frame
+		_check(bool(save.vibration_on), "и включает обратно")
+
 	await _close(scr)
 	save.set_sfx_volume(1.0)
 	save.set_music_volume(1.0)
+	save.set_vibration(true)
+
+# Кнопка строки-переключателя ищется ПО ГЕОМЕТРИИ: подписи у неё нет (текст
+# лежит отдельной Label), а кнопка накрывает строку целиком. Берём ту, чей
+# прямоугольник накрывает подпись.
+func _row_button(scr: Node, label: String) -> Button:
+	var body : Node = scr.get("_page_body")
+	var lbl  : Label = null
+	for l in _labels_of(body, []):
+		if String((l as Label).text) == label:
+			lbl = l
+	if lbl == null:
+		return null
+	for b in _buttons(body, []):
+		var r := Rect2((b as Control).position, (b as Control).size)
+		if r.has_point(lbl.position + Vector2(2.0, lbl.size.y * 0.5)):
+			return b
+	return null
+
+func _labels_of(node: Node, out: Array) -> Array:
+	if node is Label:
+		out.append(node)
+	for c in node.get_children():
+		_labels_of(c, out)
+	return out
 
 func _test_notif(hud: Node, save: Node) -> void:
 	save.notif_enabled = true

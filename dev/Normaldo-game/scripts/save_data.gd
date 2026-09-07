@@ -111,6 +111,19 @@ var record_skin : Dictionary = {}
 var sfx_volume   : float = 1.0
 var music_volume : float = 1.0
 
+# ─── Вибрация ────────────────────────────────────────────────────────────────
+# Не громкость, а выключатель: вибромотор телефона умеет ровно одно — гудеть
+# столько-то миллисекунд, — и ползунок на нём означал бы шкалу, разницы на
+# которой не чувствует никто. Хочешь тише — выключи.
+#
+# По умолчанию ВКЛЮЧЕНА: отклик боссов и мини-игр задуман частью удара, и
+# выключенный по умолчанию он был бы тем, чего игрок никогда не увидит. Тот, кому
+# он мешает, идёт в настройки — тот, кому нравится, не идёт никуда.
+#
+# Читает её `scripts/haptics.gd`, и только он: прямых `Input.vibrate_handheld()`
+# в игре нет ни одного, иначе выключатель знал бы не про все вызовы.
+var vibration_on : bool = true
+
 # ─── Push notifications ──────────────────────────────────────────────────────
 # Master switch + per-category toggles (A..H mirror Концепция/Пуш-уведомления).
 # `last_session_end_at` is stamped by NotifPlanner on focus-out so the
@@ -178,6 +191,12 @@ func set_sfx_volume(v: float) -> void:
 func set_music_volume(v: float) -> void:
 	music_volume = clampf(v, 0.0, 1.0)
 	apply_audio_volumes()
+	_save()
+
+func set_vibration(on: bool) -> void:
+	if vibration_on == on:
+		return
+	vibration_on = on
 	_save()
 
 # Returns the stored progress dict for a skin, creating defaults if absent.
@@ -484,6 +503,7 @@ func _save() -> void:
 		"record_skin":         record_skin,
 		"sfx_volume":          sfx_volume,
 		"music_volume":        music_volume,
+		"vibration_on":        vibration_on,
 		"notif_enabled":       notif_enabled,
 		"notif_categories":    notif_categories,
 		"notif_quiet_start":   notif_quiet_start,
@@ -561,6 +581,7 @@ func _load() -> void:
 	record_skin         = (d.get("record_skin", {}) as Dictionary).duplicate()
 	sfx_volume          = float(d.get("sfx_volume",        1.0))
 	music_volume        = float(d.get("music_volume",      1.0))
+	vibration_on        = bool(d.get("vibration_on",       true))
 	notif_enabled       = bool(d.get("notif_enabled",       true))
 	var raw_cats = d.get("notif_categories", null)
 	if raw_cats is Dictionary:

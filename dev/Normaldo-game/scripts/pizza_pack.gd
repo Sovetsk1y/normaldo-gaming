@@ -1,6 +1,7 @@
 extends Area2D
 
 const CLOSED_TEX  := preload("res://assets/items/pizza_pack_closed.png")
+const HAPTICS      := preload("res://scripts/haptics.gd")
 const SFX         := preload("res://assets/audio/super_pizza.mp3")
 const PIZZA_SCENE := preload("res://scenes/item.tscn")
 const PIZZA_TEX   := preload("res://assets/items/pizza.png")
@@ -106,7 +107,7 @@ func explode() -> void:
 		spawner.add_child(pizza)
 
 	_screen_shake()
-	Input.vibrate_handheld(250)
+	HAPTICS.buzz(HAPTICS.HEAVY)
 	_white_flash()
 
 	await get_tree().create_timer(EFFECT_DURATION).timeout

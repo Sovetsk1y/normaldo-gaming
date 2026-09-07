@@ -43,6 +43,8 @@ extends Node2D
 
 signal defeated
 
+const SCREEN_SHAKE := preload("res://scripts/screen_shake.gd")
+
 # ── Кадры ────────────────────────────────────────────────────────────────────
 # Все боевые позы нарезаны из ОДНОЙ рамки 1000×957 и ужаты одинаково, поэтому
 # при смене позы голова не прыгает. Морда без ружья (idle/squint) нарисована в
@@ -1140,16 +1142,12 @@ func _play_sfx(stream: AudioStream) -> void:
 	p.play()
 	p.finished.connect(p.queue_free)
 
+# Тело уехало в `scripts/screen_shake.gd` — оно совпадало у трёх боссов
+# побайтово, и там же к нему прирос отклик вибрацией. Обёртка осталась, чтобы не
+# переписывать полтора десятка вызовов и чтобы боссу не приходилось помнить, у
+# кого он трясёт корень.
 func _screen_shake(amp: float, count: int) -> void:
-	if not is_instance_valid(_game_root):
-		return
-	var tw := _game_root.create_tween()
-	var a := amp
-	for _i in count:
-		tw.tween_property(_game_root, "position",
-			Vector2(randf_range(-a, a), randf_range(-a * 0.65, a * 0.65)), 0.033)
-		a *= 0.80
-	tw.tween_property(_game_root, "position", Vector2.ZERO, 0.05)
+	SCREEN_SHAKE.play(_game_root, amp, count)
 
 func _screen_flash(col: Color) -> void:
 	if not is_instance_valid(_game_root):

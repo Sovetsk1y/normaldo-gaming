@@ -1,6 +1,7 @@
 extends Area2D
 
 const BOOMBOX1_TEX := preload("res://assets/items/boombox1.png")
+const HAPTICS      := preload("res://scripts/haptics.gd")
 const BOOMBOX2_TEX := preload("res://assets/items/boombox2.png")
 const NOTA1_TEX    := preload("res://assets/items/nota.png")
 const NOTA2_TEX    := preload("res://assets/items/nota2.png")
@@ -136,7 +137,7 @@ func explode() -> void:
 	tw.tween_callback(boom.queue_free)
 
 	_screen_shake()
-	Input.vibrate_handheld(350)
+	HAPTICS.buzz(HAPTICS.BOSS)
 
 	var tw2 := create_tween()
 	tw2.tween_property(self, "modulate:a", 0.0, 0.1)
