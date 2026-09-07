@@ -179,7 +179,7 @@ const CAMPAIGN_LEVELS : Array = [
 	  "story": "Выберись из канализации" },
 	{ "name": "РЕКА",        "boss": "croc",  "letter": 13.0, "phase": 1,
 	  "story": "Исследуй прибрежную зону" },
-	{ "name": "ПЛЯЖ",        "boss": "croc",  "letter": 12.0, "phase": 2, "boss_tmp": true,
+	{ "name": "ПЛЯЖ",        "boss": "bum_king", "letter": 12.0, "phase": 2,
 	  "story": "Найди дорогу к клубу" },
 	{ "name": "ДВОР",        "boss": "club",  "letter": 11.0, "phase": 3, "boss_tmp": true,
 	  "story": "Направляйся к клубу" },
