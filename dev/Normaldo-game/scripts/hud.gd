@@ -6077,11 +6077,15 @@ func _start_game() -> void:
 			if bg and bg.has_method("set_level"):
 				if need_curtain:
 					await get_tree().create_timer(LevelTransition.AFTER_INTRO_T).timeout
+					# Сюжетная строка берётся у спавнера ПОСЛЕ `set_start_level`:
+					# он уже знает, какой эпизод начинается, и второй источник
+					# этой строки завёлся бы ровно затем, чтобы разойтись.
 					await LevelTransition.play(self, "НЕМНОГО ПОЗДНЕЕ…",
 						func() -> void:
 							if is_instance_valid(bg):
 								bg.call("set_level", lvl)
-							_clear_apartment(lvl))
+							_clear_apartment(lvl),
+						String(spawner.call("level_story")))
 				else:
 					bg.call("set_level", lvl)
 					_clear_apartment(lvl)
@@ -7302,40 +7306,6 @@ func _show_shout(big: String, small: String, hold: float,
 # читались бы как один бесконечный, а игрок должен знать, сколько он прошёл.
 const LEVEL_CARD_T : float = 1.7
 
-# ── Доллары через экран на переходе между эпизодами ──────────────────────────
-# Сколько их и как долго. Поток идёт ВСЁ время карточки — от затемнения до
-# просветления, — иначе деньги кончаются раньше текста и переход снова
-# разваливается на «событие, потом пауза».
-const LC_BILLS      : int   = 34
-const LC_BILL_PX    : float = 34.0
-const LC_FLY_MIN    : float = 0.85   # быстрые пролетают экран за это время
-const LC_FLY_MAX    : float = 1.70
-
-# Купюры летят СЛЕВА НАПРАВО, против хода забега. В забеге всё летит навстречу
-# игроку справа; пустив деньги туда же, мы бы сказали «уровень продолжается», а
-# карточка говорит обратное — этот кончился.
-func _level_card_dollars(cl: CanvasLayer, vp: Vector2) -> void:
-	for i in LC_BILLS:
-		var b := _make_icon(DOLLAR_TEXTURE, LC_BILL_PX * randf_range(0.7, 1.35))
-		# НАД плёнкой затемнения, но ПОД текстом. Плёнка добавлена в слой первой
-		# и лежит на z = 0; купюра с отрицательным z уходила под неё и гасла
-		# вместе с фоном — на экране оставались тусклые пятна вместо денег.
-		b.z_index      = 1
-		b.modulate     = Color(1, 1, 1, randf_range(0.45, 1.0))
-		b.rotation     = randf_range(-0.5, 0.5)
-		b.process_mode = Node.PROCESS_MODE_ALWAYS
-		var y : float = randf_range(-40.0, vp.y + 40.0)
-		b.position     = Vector2(-80.0 - randf_range(0.0, vp.x), y)
-		cl.add_child(b)
-		var dur : float = randf_range(LC_FLY_MIN, LC_FLY_MAX)
-		var tw := b.create_tween().set_loops().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
-		tw.tween_property(b, "position:x", vp.x + 120.0, dur).from(b.position.x)
-		# Крутится на лету — плоская купюра, ползущая по прямой, читается как
-		# спрайт, забытый на экране.
-		var spin := b.create_tween().set_loops().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
-		spin.tween_property(b, "rotation", b.rotation + TAU * (1.0 if i % 2 == 0 else -1.0),
-			randf_range(1.4, 2.6))
-
 func _show_level_card(next_level: int) -> void:
 	var game_root := get_parent() as Node2D
 	var normaldo  := get_parent().get_node_or_null("Normaldo")
@@ -7395,11 +7365,6 @@ func _show_level_card(next_level: int) -> void:
 
 	var tw := dim.create_tween()
 	tw.tween_property(dim, "color:a", 0.85, 0.30)
-	# Доллары летят через ВЕСЬ экран, пока карточка держится. Раньше переход был
-	# просто затемнением: экран гас, менялся и загорался, и между эпизодами
-	# ничего не происходило — пауза без события. Деньги — то, ради чего забег и
-	# идёт, и они же связывают конец одного эпизода с началом следующего.
-	_level_card_dollars(cl, vp)
 	await tw.finished
 
 	# Подмена ПОД карточкой: и полоса фона, и уровень спавнера меняются, пока
@@ -7415,6 +7380,13 @@ func _show_level_card(next_level: int) -> void:
 		bg.call("set_level", next_level + 1)
 	_clear_apartment(next_level + 1)
 
+	# Доллары через экран — ТОТ ЖЕ дождь, что на занавесе между эпизодами
+	# (`LevelTransition.rain_dollars`). Свой, написанный здесь заново, разошёлся
+	# бы с ним плотностью и скоростью, и два перехода перестали бы выглядеть
+	# родственниками. Пускаем их ПОД закрытой карточкой и убираем перед тем, как
+	# она откроется.
+	var bills : Array = LevelTransition.rain_dollars(cl, vp, 1)
+
 	var tw2 := num.create_tween()
 	tw2.tween_property(num, "modulate:a", 1.0, 0.22)
 	tw2.parallel().tween_property(nm, "modulate:a", 1.0, 0.22)
@@ -7422,6 +7394,9 @@ func _show_level_card(next_level: int) -> void:
 	await get_tree().create_timer(LEVEL_CARD_T).timeout
 	if not is_instance_valid(cl):
 		return
+	for b in bills:
+		if is_instance_valid(b):
+			(b as Node).queue_free()
 	var out := dim.create_tween()
 	out.tween_property(dim, "color:a", 0.0, 0.30)
 	out.parallel().tween_property(num, "modulate:a", 0.0, 0.30)
