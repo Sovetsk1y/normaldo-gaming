@@ -21,7 +21,7 @@ const BUM_KING := preload("res://scripts/bum_king.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 30
+const EXPECTED_CHECKS : int = 40
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -64,7 +64,19 @@ func _initialize() -> void:
 
 	var vp : Vector2 = get_root().get_visible_rect().size
 	var crowd : Array = boss.get("_crowd")
-	_check(crowd.size() >= 20, "толпа сомкнулась: %d бомжей" % crowd.size())
+	# ТОЛПА ПЛОТНАЯ. Одно кольцо из двадцати шести читалось как хоровод с
+	# просветами: сквозь него было видно стену, и «уходить некуда» держалось
+	# только на словах.
+	_check(crowd.size() >= 70, "толпа плотная: %d бомжей" % crowd.size())
+	# И РАЗНОШЁРСТНАЯ: серые с рыжими вперемешку и примерно поровну. Толпа из
+	# одного цвета читается как копии одного человека.
+	var grey := 0
+	var ging := 0
+	for c in crowd:
+		if (c as Sprite2D).texture == boss.CROWD_TEX[1]: grey += 1
+		else: ging += 1
+	_check(mini(grey, ging) * 2 >= maxi(grey, ging),
+		"серых и рыжих поровну: %d / %d" % [grey, ging])
 	# ОВАЛОМ, а не дугой: арена обязана закрывать все стороны, иначе «уходить
 	# некуда» перестаёт быть правдой — и игрок первым делом пойдёт в дырку.
 	var left := false; var right := false; var up := false; var down := false
@@ -77,6 +89,17 @@ func _initialize() -> void:
 	_check(left and right and up and down,
 		"и закрывает арену со всех сторон: л%s п%s в%s н%s"
 			% [left, right, up, down])
+
+	# А ВНУТРЬ НЕ ЛЕЗЕТ. Плотная толпа первым делом встала поверх Нормальдо и его
+	# противника — кольца считаются от центра экрана, а бой идёт ровно там же, — и
+	# кадр читался не как «толпа вокруг», а как каша.
+	var inside : Array = []
+	var arena : Rect2 = boss.call("_arena_rect")
+	for c in crowd:
+		if arena.has_point((c as Node2D).position):
+			inside.append((c as Node2D).position)
+	_check(inside.is_empty(),
+		"и не лезет в сцену боя: внутри %d" % inside.size())
 
 	_check(bool(n.get("spells_blocked")),
 		"спелл заперт: единственный жест боя занят ударом")
@@ -94,12 +117,42 @@ func _initialize() -> void:
 	_check(n.position.distance_to(home) < 2.0,
 		"и пружина возвращает обратно: %.1f px" % n.position.distance_to(home))
 
+	# ── ИНТЕРФЕЙС ЗАБЕГА СПРЯТАН ────────────────────────────────────────────
+	# Жира в этом бою нет — у игрока свои три рейки, — а счётчики над ареной с
+	# отключённым потоком показывают неподвижные числа. Кнопка паузы остаётся:
+	# выйти из боя игрок обязан уметь в любую секунду.
+	print("── Чистый экран ──")
+	var hud : Node = game.get_node_or_null("HUD")
+	var hidden : Array = hud.get("_boss_hidden")
+	_check(not hidden.is_empty(), "интерфейс забега спрятан: узлов %d" % hidden.size())
+	var pause_btn : Button = hud.get("_pause_btn_hit")
+	_check(is_instance_valid(pause_btn) and pause_btn.visible,
+		"а кнопка паузы осталась")
+
 	# ── Волна 1: серый не бьёт ВООБЩЕ ───────────────────────────────────────
 	print("── Волна 1: серый ──")
 	# Ждём выхода волны: до неё идёт реплика босса.
 	var waited := await _await_wave(boss, "grey", 12.0)
 	_check(String(boss.get("current_wave")) == "grey",
 		"волна серого пошла через %.1f c" % waited)
+	# ПЕРВЫМ ВЫХОДИТ СЕРЫЙ. homeless2 — серый, homeless1 — рыжий; поменяй их
+	# местами, и обучение пойдёт задом наперёд, не сломав ничего видимого.
+	var foe : Sprite2D = boss.get("_foe_sprite")
+	_check(is_instance_valid(foe) and foe.texture == boss.CROWD_TEX[1],
+		"и это СЕРЫЙ бомж, а не рыжий")
+
+	# ОН ПОДХОДИТ, а не появляется на месте. Проверяется движение: выйдя из-за
+	# края и встав, он читался бы как «его поставили».
+	var fx0 : float = float(boss.get("_foe_x"))
+	await _wait(0.35)
+	_check(float(boss.get("_foe_x")) < fx0 - 20.0,
+		"и идёт на тебя: %.0f → %.0f" % [fx0, float(boss.get("_foe_x"))])
+	# Но НЕ ВПЛОТНУЮ: встаёт на дистанции удара. Подошедший вплотную закрыл бы
+	# собой и Нормальдо, и оба кулака.
+	await _wait(2.0)
+	_check(float(boss.get("_foe_x")) > float(boss.get("_hero_x")) + 120.0,
+		"и тормозит на дистанции удара: %.0f при герое %.0f"
+			% [float(boss.get("_foe_x")), float(boss.get("_hero_x"))])
 
 	# Серый — ЕДИНСТВЕННЫЙ, кто ничего не делает сам, и потому на нём и меряется
 	# разбор размена: любой другой противник в этот момент лупил бы по своему
@@ -195,12 +248,13 @@ func _initialize() -> void:
 		"первым не бьёт: получили %d за 2.2 c простоя"
 			% (int(boss.get("hits_taken")) - quiet))
 
-	# И ОТВЕЧАЕТ ПО ПОРЯДКУ: первый размен уходит в блок, второй попадает. Порядок
-	# тут и есть урок — сначала показать, что бывает блок, потом показать, что
-	# бывает больно. Перевернись он, и игрок выучил бы «рыжий бьёт», а блок
-	# остался бы случайностью, которую он однажды увидел.
+	# ПЕРВЫЙ РАЗМЕН — БЛОК, ВТОРОЙ УДАР ДОБИВАЕТ. Отвечает он ровно один раз:
+	# второй ответ был бы ударом по игроку от рядового из обучающей волны, а
+	# бьёт в этом бою только король.
+	boss.set("foe_hp", 2)
 	var b0 : int = int(boss.get("blocks"))
 	var t0 : int = int(boss.get("hits_taken"))
+	var d0 : int = int(boss.get("hits_dealt"))
 	boss.set("_p_cd", 0.0)
 	boss.call("punch")
 	await _wait(1.0)
@@ -209,8 +263,10 @@ func _initialize() -> void:
 	boss.set("_p_cd", 0.0)
 	boss.call("punch")
 	await _wait(1.4)
-	_check(int(boss.get("hits_taken")) == t0 + 1,
-		"а второй уже попадает: %d" % (int(boss.get("hits_taken")) - t0))
+	_check(int(boss.get("hits_dealt")) == d0 + 1,
+		"второй удар доходит: %d" % (int(boss.get("hits_dealt")) - d0))
+	_check(int(boss.get("hits_taken")) == t0,
+		"а сам он по игроку так и не попал: %d" % (int(boss.get("hits_taken")) - t0))
 
 	# ── Волна 3: босс ───────────────────────────────────────────────────────
 	print("── Волна 3: сам босс ──")
@@ -234,10 +290,22 @@ func _initialize() -> void:
 	# СЕГМЕНТАМИ: сегмент = удар. Заливка на пяти хитах превратила бы каждый в
 	# незаметный шаг на 20 %.
 	print("── Полосы ХП ──")
-	_check((boss.get("_boss_segs") as Array).size() == int(boss.KING_HP),
-		"полоса босса — %d сегментов" % (boss.get("_boss_segs") as Array).size())
-	_check(not (boss.get("_hero_segs") as Array).is_empty(),
-		"и своя полоса у игрока тоже есть")
+	_check((boss.get("_boss_segs") as Array).size() == 5,
+		"у босса пять реек: %d" % (boss.get("_boss_segs") as Array).size())
+	# ТРИ РЕЙКИ У ИГРОКА, И ОНИ СВОИ, а не его жир. Жир — валюта забега: войти в
+	# бой можно и со скинни, и с убером, то есть с одной жизнью или с четырьмя, а
+	# бой задуман одинаковым для всех.
+	_check((boss.get("_hero_segs") as Array).size() == 3,
+		"а у игрока три: %d" % (boss.get("_hero_segs") as Array).size())
+	boss.set("hero_hp", 3)
+	var hp0 : int = int(boss.get("hero_hp"))
+	boss.call("foe_punch")
+	await _wait(0.8)
+	_check(int(boss.get("hero_hp")) == hp0 - 1,
+		"одно попадание — одна рейка: %d → %d" % [hp0, int(boss.get("hero_hp"))])
+	var seg : Panel = (boss.get("_hero_segs") as Array)[2]
+	_check(is_instance_valid(seg) and seg.modulate.a < 0.5,
+		"и сбитая рейка гаснет: %.2f" % seg.modulate.a)
 
 	# ── Победа ──────────────────────────────────────────────────────────────
 	print("── Победа ──")

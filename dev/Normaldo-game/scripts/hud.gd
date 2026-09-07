@@ -167,6 +167,14 @@ var _timer_running    : bool  = false
 var _dollars_this_run : int   = 0
 
 var _left_container  : Node2D = null
+# Кнопка паузы (сама нажимаемая область) — единственное, что остаётся на экране,
+# когда интерфейс забега прячется на время боя с боссом.
+var _pause_btn_hit   : Button = null
+# Что мы спрятали ради боя. Список нужен, чтобы вернуть РОВНО ТО ЖЕ: половина
+# этих узлов и так бывает скрыта по своим причинам (гейдж мага, панель разового
+# спелла), и слепое `visible = true` на выходе показало бы то, чего быть не
+# должно.
+var _boss_hidden     : Array = []
 # Right container is gone — the fat panel lives in _left_container now.
 var _left_w          : float  = 0.0
 # Anchor (HUD-space) where the run-time skill cooldown badges sit: under the
@@ -1176,6 +1184,34 @@ func _build_skill_badges(normaldo: Node) -> void:
 # оставался один на один с боссом и без единой цифры о себе.
 #
 # Въезд стопки остался — он играется один раз, на старте забега.
+# ── Чистый экран на бою ──────────────────────────────────────────────────────
+# Интерфейс забега на боссах ОСТАЁТСЯ (см. соседний комментарий): игрок должен
+# видеть свой жир и уметь поставить паузу. Но у Старого пирата жира нет — у него
+# свои три рейки жизней, — а счётчики пиццы и долларов на арене, где поток
+# отключён, показывают неподвижные числа и только мешают.
+#
+# Поэтому боссы, которым нужен чистый кадр, зовут это сами. Кнопка паузы
+# остаётся всегда: выйти из боя игрок обязан уметь в любую секунду.
+func hide_run_hud_for_boss(on: bool) -> void:
+	if on:
+		if not _boss_hidden.is_empty():
+			return
+		if is_instance_valid(_left_container):
+			for c in _left_container.get_children():
+				if c == _pause_btn_visual or c == _pause_btn_hit:
+					continue
+				if c is CanvasItem and (c as CanvasItem).visible:
+					_boss_hidden.append(c)
+					(c as CanvasItem).visible = false
+		if is_instance_valid(_skill_badges_layer) and _skill_badges_layer.visible:
+			_boss_hidden.append(_skill_badges_layer)
+			_skill_badges_layer.visible = false
+		return
+	for n in _boss_hidden:
+		if is_instance_valid(n):
+			(n as CanvasItem).visible = true
+	_boss_hidden.clear()
+
 func _slide_in_hud() -> void:
 	UiKit.slide_to(_left_container, "position:x", 0.0, 0.45,
 		Tween.TRANS_BACK, Tween.EASE_OUT)
@@ -6283,6 +6319,7 @@ func _build_pause_btn(pos: Vector2, sz: Vector2) -> void:
 	btn.button_up.connect(_menu_btn_press_anim.bind(_pause_btn_visual, false))
 	btn.mouse_exited.connect(_menu_btn_press_anim.bind(_pause_btn_visual, false))
 	_left_container.add_child(btn)
+	_pause_btn_hit = btn
 
 # Auto-pause when the OS backgrounds the app (iOS home/lock, Android task
 # switcher). Both notifications fire on every platform we ship, but we only
@@ -6843,6 +6880,8 @@ func _on_bum_king_tapped() -> void:
 
 # Старый пират поднимается тем же путём, что и остальные трое.
 func summon_bum_king(test_mode: bool = false) -> void:
+	if _boss_on_screen():
+		return
 	var game_root := get_parent() as Node2D
 	var normaldo  := get_parent().get_node_or_null("Normaldo") as Node2D
 	var spawner   := get_parent().get_node_or_null("Spawner")
@@ -6859,6 +6898,8 @@ func summon_bum_king(test_mode: bool = false) -> void:
 
 # Хозяин клуба поднимается тем же путём, что крокодил и Нога Ниндзя.
 func summon_club_boss(test_mode: bool = false) -> void:
+	if _boss_on_screen():
+		return
 	var game_root := get_parent() as Node2D
 	var normaldo  := get_parent().get_node_or_null("Normaldo") as Node2D
 	var spawner   := get_parent().get_node_or_null("Spawner")
@@ -6877,6 +6918,8 @@ func summon_club_boss(test_mode: bool = false) -> void:
 # уезжает, босс получает Нормальдо, спавнер и корень сцены. В тестовом режиме
 # он по себе прибирает — возвращает поток, музыку и управление.
 func summon_leatherhead(test_mode: bool = false) -> void:
+	if _boss_on_screen():
+		return
 	var game_root := get_parent() as Node2D
 	var normaldo  := get_parent().get_node_or_null("Normaldo") as Node2D
 	var spawner   := get_parent().get_node_or_null("Spawner")
@@ -7131,7 +7174,31 @@ func _await_minigames_done() -> void:
 		await get_tree().process_frame
 		waited += get_process_delta_time()
 
+# ── ВТОРОГО БОССА НА АРЕНЕ НЕ БЫВАЕТ ─────────────────────────────────────────
+# Дев-кнопка зовётся сколько угодно раз, и второе нажатие поднимало ВТОРОГО
+# босса поверх первого. Дальше один из них добегал до конца, звал `queue_free`,
+# и его корутина просыпалась уже вне дерева: `get_tree()` возвращал null, и
+# `await get_tree().process_frame` падал с «Invalid get index on null instance».
+#
+# Чинить это только защитой внутри босса было бы полумерой: два боя на одной
+# арене — сама по себе бессмыслица, они дерутся с одним Нормальдо и оба правят
+# заморозку потока. Поэтому дверь закрыта здесь.
+func _boss_on_screen() -> bool:
+	var root := get_parent()
+	if root == null:
+		return false
+	for c in root.get_children():
+		if c.get_script() == null:
+			continue
+		var path : String = String(c.get_script().resource_path)
+		if path.ends_with("leatherhead.gd") or path.ends_with("club_boss.gd") \
+				or path.ends_with("bum_king.gd") or path.ends_with("ninja_foot.gd"):
+			return true
+	return false
+
 func _summon_boss(kind: String) -> void:
+	if _boss_on_screen():
+		return
 	if _minigame_busy():
 		await _await_minigames_done()
 	var game_root := get_parent() as Node2D

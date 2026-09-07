@@ -36,7 +36,12 @@ const REVEAL_T : float = 0.55    # сколько открывается
 # прыжка с дивана, и прыжок читается как оборванный.
 const AFTER_INTRO_T : float = 1.0
 
-const COL_CURTAIN : Color = Color(0.48, 0.33, 0.80)
+# ── ЦВЕТ ШТОРКИ ─────────────────────────────────────────────────────────────
+# Был фиолетовый — единственное фиолетовое пятно во всей игре, и посреди
+# кирпично-рыжей канализации оно читалось как экран из другого приложения.
+# Теперь почти чёрный: шторка ЗАКРЫВАЕТ подмену фона, а показывать в этот момент
+# надо не её, а деньги поверх неё.
+const COL_CURTAIN : Color = Color(0.05, 0.05, 0.07)
 const COL_TEXT    : Color = Color(1.00, 0.97, 0.88)
 const COL_STORY   : Color = Color(1.00, 0.90, 0.55)
 
@@ -57,10 +62,21 @@ const DOLLAR_TEX := preload("res://assets/items/dollar.png")
 # эпизодами (этот файл) и карточка уровня в бесконечном (`hud._show_level_card`).
 # Два дождя из денег, написанные по отдельности, разошлись бы плотностью и
 # скоростью, и переходы перестали бы выглядеть родственниками.
-const BILLS   : int   = 34
-const BILL_PX : float = 34.0
+# ДЕНЕГ МНОГО, И ОНИ ЛЕЖАТ ДРУГ НА ДРУГЕ. Тридцати четырёх мелких купюр на
+# тёмном поле хватало ровно на «что-то пролетело»; теперь экран занят деньгами
+# целиком — это и есть переход, а шторка под ними просто прячет подмену фона.
+#
+# Купюр столько, чтобы при их размере они перекрывались: 130 штук по ~70 px на
+# экране 960×430 дают примерно двойное покрытие, то есть сплошной ворох без
+# просветов.
+const BILLS   : int   = 130
+const BILL_PX : float = 70.0
 const FLY_MIN : float = 0.85
 const FLY_MAX : float = 1.70
+# Крутится не каждая: сто тридцать вращений — это сто тридцать лишних твинов, а
+# в плотной куче вращение отдельной бумажки всё равно не прочитать. Каждая
+# четвёртая держит движение живым, остальные летят под своим случайным углом.
+const SPIN_EVERY : int = 4
 
 # Возвращает созданные купюры: вызывающий обязан убрать их, когда экран начнёт
 # открываться. Оставленные на виду, они полсекунды летели бы уже поверх живого
@@ -75,20 +91,26 @@ static func rain_dollars(parent: Node, vp: Vector2, z: int = 1) -> Array:
 		var ts : Vector2 = DOLLAR_TEX.get_size()
 		b.scale          = Vector2.ONE * (px / maxf(ts.x, ts.y))
 		b.z_index        = z
-		b.modulate       = Color(1, 1, 1, randf_range(0.45, 1.0))
-		b.rotation       = randf_range(-0.5, 0.5)
+		# ПОЧТИ НЕПРОЗРАЧНЫЕ. Прежний разброс 0.45…1.0 в редкой россыпи читался как
+		# глубина, а в плотной куче — как дырки: сквозь бледную купюру видно
+		# лежащую под ней, и ворох рассыпается на слои.
+		b.modulate       = Color(1, 1, 1, randf_range(0.88, 1.0))
+		b.rotation       = randf_range(-PI, PI)
 		b.process_mode   = Node.PROCESS_MODE_ALWAYS
-		b.position       = Vector2(-80.0 - randf_range(0.0, vp.x),
-			randf_range(-40.0, vp.y + 40.0))
+		# Стартуют РАЗБРОСАННО по всей ширине слева от экрана: выйдя одной
+		# колонной, они прошли бы экран волной, и середина перехода осталась бы
+		# пустой. Разброс по вертикали — с запасом за края, чтобы верх и низ были
+		# заняты так же плотно, как середина.
+		b.position       = Vector2(-80.0 - randf_range(0.0, vp.x * 1.6),
+			randf_range(-70.0, vp.y + 70.0))
 		parent.add_child(b)
 		var tw := b.create_tween().set_loops().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
 		tw.tween_property(b, "position:x", vp.x + 120.0, randf_range(FLY_MIN, FLY_MAX))\
 			.from(b.position.x)
-		# Крутится на лету: плоская купюра, ползущая по прямой, читается как
-		# спрайт, забытый на экране.
-		var spin := b.create_tween().set_loops().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
-		spin.tween_property(b, "rotation",
-			b.rotation + TAU * (1.0 if i % 2 == 0 else -1.0), randf_range(1.4, 2.6))
+		if i % SPIN_EVERY == 0:
+			var spin := b.create_tween().set_loops().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+			spin.tween_property(b, "rotation",
+				b.rotation + TAU * (1.0 if i % 2 == 0 else -1.0), randf_range(1.4, 2.6))
 		made.append(b)
 	return made
 
