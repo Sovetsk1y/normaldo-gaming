@@ -797,6 +797,7 @@ func apply_slow_mo(factor: float = SLOW_MO_FACTOR, duration: float = SLOW_MO_DUR
 		_scale_live_speeds(factor)
 	world_speed_mult = factor
 	_set_background_mult(factor)
+	_set_world_gray(true)
 	if owns_pause:
 		pause_for_event()
 
@@ -809,8 +810,20 @@ func apply_slow_mo(factor: float = SLOW_MO_FACTOR, duration: float = SLOW_MO_DUR
 	_scale_live_speeds(1.0 / factor)
 	world_speed_mult = 1.0
 	_set_background_mult(1.0)
+	_set_world_gray(false)
 	if owns_pause:
 		resume_after_event()
+
+# Мир в чёрно-белом на время замедления. Ставится ЗДЕСЬ, а не у песочных часов и
+# венца мага по отдельности: `apply_slow_mo` — единственная воронка, через
+# которую проходит любое замедление, и заводить эффект на каждом источнике
+# значило бы забыть его на третьем.
+const WORLD_GRAY := preload("res://scripts/world_gray.gd")
+
+func _set_world_gray(on: bool) -> void:
+	var g : Node = WORLD_GRAY.ensure(get_parent())
+	if g != null and g.has_method("set_gray"):
+		g.call("set_gray", on)
 
 func _scale_live_speeds(k: float) -> void:
 	for child in get_children():
