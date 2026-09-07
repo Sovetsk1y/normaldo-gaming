@@ -112,12 +112,12 @@ func _process(delta: float) -> void:
 		return
 	match _state:
 		"fly":
-			position.x -= speed * delta
+			ItemFlow.advance(self, speed, delta)
 			_seek_t -= delta
 			if _seek_t <= 0.0:
 				_begin_turn()
 		"turn":
-			position.x -= speed * delta   # летит, пока наводится
+			ItemFlow.advance(self, speed, delta)   # летит, пока наводится
 			_turn_t -= delta
 			if _turn_t <= 0.0:
 				_begin_jump()

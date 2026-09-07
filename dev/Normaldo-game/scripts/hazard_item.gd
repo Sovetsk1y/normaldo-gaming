@@ -202,8 +202,8 @@ func _process(delta: float) -> void:
 			queue_free()
 		return
 
-	position.x -= speed * delta
-	if position.x < -220.0:
+	ItemFlow.advance(self, speed, delta)
+	if ItemFlow.gone(self, 220.0):
 		queue_free()
 		return
 

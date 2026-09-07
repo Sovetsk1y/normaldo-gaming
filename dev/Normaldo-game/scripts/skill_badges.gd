@@ -12,6 +12,7 @@ const UI_FONT  := preload("res://assets/fonts/RussoOne-Regular.ttf")
 const SMOKE_TEX := preload("res://assets/bosses/ninja_foot/smoke.png")
 const CASEY_TEX := preload("res://assets/items/casey_mask.png")
 const COMPASS_TEX := preload("res://assets/items/compass.png")
+const SHROOM_TEX  := preload("res://assets/items/mushroom.png")
 const HAT_TEX     := preload("res://assets/items/magic_hat.png")
 const COLA_TEX    := preload("res://assets/items/cola.png")
 # Венцы 10-го уровня. Часы — та же картинка, что у предмета «песочные часы», и
@@ -92,11 +93,15 @@ func setup(nrm: Node) -> void:
 			"mod": Color(1, 1, 1), "ring": RING_PASS, "dyn": true,
 			"title": "НЕУЯЗВИМОСТЬ", "desc": "Маска Кейси — неуязвимость к урону." })
 
-	# Компас-дебафф (реверс управления) — динамический кружок для ЛЮБОГО скина,
-	# появляется только пока действует реверс (ключ "compass" в normaldo._skill_cd).
+	# Компас-дебафф (зеркало мира) — динамический кружок для ЛЮБОГО скина,
+	# появляется только пока держится зеркало (ключ "compass" в normaldo._skill_cd).
 	specs.append({ "key": "compass", "tex": COMPASS_TEX, "sym": "",
-		"mod": Color(1, 1, 1), "ring": Color(0.75, 0.40, 1.00), "dyn": true,
-		"title": "РЕВЕРС", "desc": "Компас перевернул управление на 5 c." })
+		"mod": Color(1, 1, 1), "ring": Color(0.45, 0.80, 1.00), "dyn": true,
+		"title": "ЗЕРКАЛО", "desc": "Компас отразил мир: поток идёт слева." })
+	# Гриб — тот же вид кружка. Реверс управления теперь у него (ключ "shroom").
+	specs.append({ "key": "shroom", "tex": SHROOM_TEX, "sym": "",
+		"mod": Color(1, 1, 1), "ring": Color(0.95, 0.55, 0.25), "dyn": true,
+		"title": "ГРИБЫ", "desc": "Цвета наизнанку, руки наоборот, всё вокруг пицца." })
 
 	# Эффекты подобранных предметов — такие же динамические кружки: появляются
 	# только на время действия и для любого скина.

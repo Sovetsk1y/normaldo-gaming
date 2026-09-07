@@ -118,8 +118,8 @@ func _process(delta: float) -> void:
 			ItemAura.pulse(_glow, 0.5 + 0.5 * sin(_pulse_t), AURA_PX)
 			return
 		_orbit_host = null
-	position.x -= speed * delta
-	if position.x < -200.0:
+	ItemFlow.advance(self, speed, delta)
+	if ItemFlow.gone(self, 200.0):
 		queue_free()
 		return
 	_pulse_t += delta * 4.0

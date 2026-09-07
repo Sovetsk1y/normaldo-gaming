@@ -60,8 +60,8 @@ func _process(delta: float) -> void:
 			position = _normaldo.position + HEAD_OFFSET
 		return
 
-	position.x -= speed * delta
-	if position.x < -200.0:
+	ItemFlow.advance(self, speed, delta)
+	if ItemFlow.gone(self, 200.0):
 		queue_free()
 
 func open(normaldo: Node2D) -> void:

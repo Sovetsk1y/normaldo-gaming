@@ -120,8 +120,8 @@ func _build_light() -> void:
 
 func _process(delta: float) -> void:
 	# Just sails right→left like any item; frees itself once fully off-screen.
-	position.x -= speed * delta
-	if position.x < -200.0:
+	ItemFlow.advance(self, speed, delta)
+	if ItemFlow.gone(self, 200.0):
 		queue_free()
 		return
 

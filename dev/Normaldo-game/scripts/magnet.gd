@@ -55,8 +55,8 @@ func _process(delta: float) -> void:
 	_pulse_t += delta * 3.5
 	_sprite.scale = Vector2.ONE * 0.09 * (1.0 + sin(_pulse_t) * 0.12)
 	if _state == 0:
-		position.x -= speed * delta
-		if position.x < -200.0:
+		ItemFlow.advance(self, speed, delta)
+		if ItemFlow.gone(self, 200.0):
 			queue_free()
 
 func _make_spark_gradient() -> Gradient:

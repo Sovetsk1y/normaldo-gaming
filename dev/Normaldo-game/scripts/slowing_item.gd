@@ -21,7 +21,7 @@ func _ready() -> void:
 		_rot_speed = (0.6 + randf() * 0.3) * (1.0 if randf() > 0.5 else -1.0)
 
 func _process(delta: float) -> void:
-	position.x        -= speed * delta
+	ItemFlow.advance(self, speed, delta)
 	$Sprite2D.rotation += _rot_speed * delta
-	if position.x < -200.0:
+	if ItemFlow.gone(self, 200.0):
 		queue_free()

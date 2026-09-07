@@ -48,7 +48,7 @@ func setup(sprite: Sprite2D, target: Node2D, life: float, item_speed: float = 0.
 func _process(delta: float) -> void:
 	# Едем влево ВСЕГДА, в том числе пока растворяемся: облако, замершее на
 	# полсекунды фейда, выдаёт себя ничуть не меньше, чем висящее целиком.
-	position.x -= speed * delta
+	ItemFlow.advance(self, speed, delta)
 	if _dying:
 		return
 	if _target != null and not is_instance_valid(_target):

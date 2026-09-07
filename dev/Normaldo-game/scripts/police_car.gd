@@ -91,11 +91,11 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if _crashed:
 		return
-	position.x -= speed * delta
+	ItemFlow.advance(self, speed, delta)
 	if position.x <= get_viewport_rect().size.x * CRASH_X_FRAC:
 		_crash()
 		return
-	if position.x < -400.0:
+	if ItemFlow.gone(self, 400.0):
 		queue_free()
 
 # ── Пашет ─────────────────────────────────────────────────────────────────────

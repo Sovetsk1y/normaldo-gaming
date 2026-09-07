@@ -27,7 +27,7 @@ const BG := preload("res://scripts/background.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 20
+const EXPECTED_CHECKS : int = 24
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -208,12 +208,29 @@ func _test_scene() -> void:
 	var bg : Node2D = game.get_node_or_null("Background")
 	var vp : Vector2 = get_root().get_visible_rect().size
 
-	# Плёнка затемнения — ПОСЛЕДНИЙ ребёнок: так она накрывает фон и только его.
-	# Уехав выше по списку, она перестала бы накрывать часть кусков; уехав в
-	# сцену — накрыла бы Нормальдо и предметы, ради которых её и ставили.
+	# ── Порядок слоёв фона ───────────────────────────────────────────────────
+	# Два слоя лежат ПОВЕРХ картинки, и оба обязаны накрывать её целиком:
+	#   Dim  — плёнка затемнения под яркими полосами,
+	#   Trip — порча (инверсия цвета грибом, зеркало компасом).
+	#
+	# Порча идёт ПОСЛЕДНЕЙ, и это содержательно: она снимает уже нарисованный
+	# кадр, то есть обязана видеть и затемнение тоже. Встань она выше — гриб
+	# выворачивал бы неприкрытый фон, а плёнка ложилась бы поверх вывернутого.
+	#
+	# Ищем ПО ИМЕНИ, а не по месту в списке. Раньше здесь стояло «последний
+	# ребёнок — это плёнка», и первый же слой, вставший над ней, уронил тест на
+	# верных данных: последним оказалась порча, и проверка прозрачности померила
+	# не тот узел.
 	var kids : Array = bg.get_children()
-	var last : Node = kids[kids.size() - 1]
-	_check(last is ColorRect, "плёнка затемнения — последний узел фона (%s)" % last.get_class())
+	var last : Node = bg.get_node_or_null("Dim")
+	var trip : Node = bg.get_node_or_null("Trip")
+	_check(last is ColorRect, "плёнка затемнения на месте (%s)" % ("нет" if last == null else last.get_class()))
+	_check(trip is ColorRect, "слой порчи на месте (%s)" % ("нет" if trip == null else trip.get_class()))
+	if trip != null:
+		_check(trip == kids[kids.size() - 1], "порча — последний узел фона")
+		_check(last != null and last.get_index() < trip.get_index(),
+			"а плёнка затемнения под ней")
+		_check(not (trip as ColorRect).visible, "и по умолчанию погашена")
 	if last is ColorRect:
 		var c : Color = (last as ColorRect).color
 		_check(c.a > 0.05 and c.a < 0.5, "и затемняет умеренно: %.2f" % c.a)

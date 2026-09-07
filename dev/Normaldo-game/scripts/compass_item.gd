@@ -28,6 +28,6 @@ func _ready() -> void:
 	tw.tween_property(spr, "rotation", TAU, 3.0)
 
 func _process(delta: float) -> void:
-	position.x -= speed * delta
-	if position.x < -200.0:
+	ItemFlow.advance(self, speed, delta)
+	if ItemFlow.gone(self, 200.0):
 		queue_free()

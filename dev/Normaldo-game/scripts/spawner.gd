@@ -25,6 +25,7 @@ const BUM_BARREL_SCRIPT  := preload("res://scripts/bum_barrel.gd")
 const MOLOTOV_SCENE      := preload("res://scenes/molotov.tscn")
 # Новые предметы (script-only Area2D).
 const COMPASS_SCRIPT       := preload("res://scripts/compass_item.gd")
+const MUSHROOM_SCRIPT      := preload("res://scripts/mushroom_item.gd")
 const ROADSIGN_BUM_SCRIPT  := preload("res://scripts/roadsign_bum.gd")
 const CONE_SCRIPT          := preload("res://scripts/cone.gd")
 const THIEF_SCRIPT         := preload("res://scripts/thief.gd")
@@ -304,6 +305,66 @@ var _t1_trash         : bool = false
 const CAMPAIGN_INTRO_COUNT : int = 3
 var _campaign_intro_left   : int = CAMPAIGN_INTRO_COUNT
 
+# ── Порча потока ─────────────────────────────────────────────────────────────
+# ЗЕРКАЛО (компас): предметы летят слева направо. Всю работу делает общий знак
+# `ItemFlow.dir` — и новые вылеты, и те, что уже в воздухе, читают его каждый
+# кадр, поэтому разворачивать никого поимённо не надо.
+#
+# ПИЦЦА-ШТОРМ (гриб): всё, что не пицца, становится пиццей. Обещание из двух
+# половин — «всё на экране» и «всё, что вылетит дальше», — и закрывает их одна
+# и та же подмена, вызванная из двух мест: разово при подборе и НА КАЖДОГО
+# НОВОГО РЕБЁНКА.
+#
+# Не тиком в `_process`: спавнер процессится не всегда (`clear_items` его
+# глушит, мини-игры замораживают), и шторм молча переставал бы работать в
+# ровно тех местах, где это труднее всего заметить. Событие входа в дерево
+# приходит всегда.
+var _pizza_storm : bool = false
+
+func set_pizza_storm(on: bool) -> void:
+	if _pizza_storm == on:
+		return
+	_pizza_storm = on
+	if on:
+		if not child_entered_tree.is_connected(_on_storm_child):
+			child_entered_tree.connect(_on_storm_child)
+		_storm_convert()
+	elif child_entered_tree.is_connected(_on_storm_child):
+		child_entered_tree.disconnect(_on_storm_child)
+
+# ОТЛОЖЕННО, и обе причины серьёзные: узел только что вошёл в дерево, его
+# `_ready` ещё не отработал — а группы, по которым пицца отличается от прочего,
+# проставляются как раз там; и освобождать узел прямо в обработчике его же
+# добавления нельзя.
+func _on_storm_child(_n: Node) -> void:
+	call_deferred("_storm_convert")
+
+func pizza_storm() -> bool:
+	return _pizza_storm
+
+# Всё, что летит и не пицца, — заменить пиццей на том же месте и с той же
+# скоростью. Сет-писы тоже: гриб обещает, что пиццей станет ВСЁ.
+func _storm_convert() -> void:
+	for n in get_children():
+		if not (n is Node2D) or not is_instance_valid(n):
+			continue
+		# УЖЕ ПРИГОВОРЁННЫЙ — мимо. `queue_free()` не убирает узел из списка
+		# детей сразу, он доживает до конца кадра, и `is_instance_valid` на нём
+		# по-прежнему true. Без этой проверки подмена шла по кругу: замена
+		# рождала нового ребёнка, тот будил обработчик, обработчик снова
+		# натыкался на ещё не убранный оригинал — и кадр не заканчивался
+		# никогда.
+		if n.is_queued_for_deletion():
+			continue
+		if n.is_in_group("pizza") or n.get("speed") == null:
+			continue
+		var at    : Vector2 = (n as Node2D).position
+		var spd   : float   = float(n.get("speed"))
+		n.queue_free()
+		var pizza := _make_item(PIZZA_TEX, 0.09, spd, 0, true, true, true)
+		pizza.position = at
+		add_child(pizza)
+
 func _ready() -> void:
 	set_process(false)
 
@@ -574,6 +635,12 @@ func _hardcore_tighten() -> float:
 # начинает с первого. Планка сложности берётся у уровня: эпизод 3, начатый с
 # фазы 0, был бы легче эпизода 1, хотя стоит в конце кампании.
 func set_start_level(idx: int) -> void:
+	# НАЧАЛО ЗАБЕГА — и единственная точка, где оно точно наступило: `clear_items`
+	# первый уровень не проходит, а `ItemFlow.dir` статический и переживает
+	# пересборку сцены. Смерть посреди зеркала иначе досталась бы следующему
+	# забегу: предметы полетели бы справа налево с первой секунды.
+	ItemFlow.reset()
+	set_pizza_storm(false)
 	level         = clampi(idx, 0, CAMPAIGN_LEVELS.size() - 1)
 	_phase        = int(CAMPAIGN_LEVELS[level]["phase"])
 	_phase_floor  = _phase
@@ -870,8 +937,15 @@ func _spawn_random_item(dc: Dictionary, speed: float, lanes: Array, vp_w: float)
 # летели ВЕЗДЕ. От этого все уровни ощущались одним и тем же уровнем с
 # разной картинкой на заднике.
 #
-# Теперь везде летит только ОДНО — боксёрская перчатка: это не предмет места, а
-# ритм-событие, и на всех уровнях оно читается одинаково.
+# Теперь везде летят только ДВА. Боксёрская перчатка — не предмет места, а
+# ритм-событие, и на всех уровнях читается одинаково. ГРИБ — тем более не
+# предмет места: он ничего не говорит про локацию, он на восемь секунд ломает
+# саму игру, и привязка такого к канализации или к клубу была бы враньём.
+#
+# Вес у гриба ВТРОЕ МЕНЬШЕ перчатки. Восемь секунд он держит у игрока всё
+# сразу — зрение, руку и скорость, — и встречаться должен так же редко, как
+# запоминается: попавшись каждую минуту, он перестанет быть событием и станет
+# налогом.
 #
 # Ресурсы и бонусы (пицца, доллар, мешок, магнит, маска, шляпа, мэджик бокс,
 # кола, часы, магнитофон) идут отдельным розыгрышем и тоже есть везде — см.
@@ -880,6 +954,7 @@ func _spawn_random_item(dc: Dictionary, speed: float, lanes: Array, vp_w: float)
 # См. /Концепция/Уровни/Раскладка по уровням.md
 const HAZ_ALWAYS : Dictionary = {
 	"glove": 6,
+	"mushroom": 2,
 }
 
 # Ниндзя приходит в поток ТОЛЬКО СО ВТОРОГО уровня — после того, как игрок
@@ -937,7 +1012,26 @@ func _pick_level_hazard() -> String:
 			return String(k)
 	return "stone"
 
+# ── Кого НЕ ЗАПУСКАТЬ В ЗЕРКАЛЕ ──────────────────────────────────────────────
+# Не всё, что летит, просто летит. Эти трое привязаны к КОНКРЕТНОЙ СТОРОНЕ
+# экрана, и отражённые ведут себя не «наоборот», а сломанно:
+#
+#   glove       — влетает и паркуется у ПРАВОГО края, там заряжается и бьёт
+#                 влево. Из зеркала он поехал бы через весь экран к правому
+#                 краю и оттуда ударил бы назад.
+#   ninja       — так же паркуется в своей точке и отыгрывает такты.
+#   police_car  — врезается, пройдя долю экрана СЛЕВА направо. Выехав слева,
+#                 он выполняет это условие в первом же кадре и разбивается
+#                 прямо на точке вылета.
+#
+# Отразить хореографию — отдельная работа на каждого. Зеркало живёт пять секунд;
+# на это время они просто уступают место обычному потоку.
+const NO_MIRROR : Array = ["glove", "ninja", "police_car"]
+
 func _spawn_level_hazard(kind: String, y: float, vp_w: float, speed: float) -> void:
+	if ItemFlow.mirrored() and kind in NO_MIRROR:
+		_spawn_hazard(_pick_hazard(), y, vp_w, speed)
+		return
 	match kind:
 		"banana":       _spawn_slowing(y, vp_w, speed, true)
 		"trash":        _spawn_t1_negative(y, vp_w, speed, true)
@@ -948,6 +1042,7 @@ func _spawn_level_hazard(kind: String, y: float, vp_w: float, speed: float) -> v
 		"thief":        _spawn_scripted(THIEF_SCRIPT, y, vp_w, speed)
 		"roadsign":     _spawn_scripted(ROADSIGN_BUM_SCRIPT, y, vp_w, speed)
 		"compass":      _spawn_scripted(COMPASS_SCRIPT, y, vp_w, speed)
+		"mushroom":     _spawn_scripted(MUSHROOM_SCRIPT, y, vp_w, speed)
 		"black_ace":    _spawn_effect_item("black_ace", y, vp_w, speed)
 		"ninja":        _spawn_ninja(y, vp_w, speed)
 		"loser_ticket": _spawn_effect_item("loser_ticket", y, vp_w, speed)
@@ -979,7 +1074,7 @@ func _spawn_safe(y: float, vp_w: float, speed: float) -> void:
 	var node := Area2D.new()
 	node.set_script(SAFE_SCRIPT)
 	node.set("speed", speed)
-	node.position = Vector2(vp_w + 90.0, y)
+	node.position = Vector2(ItemFlow.spawn_x(vp_w, 90.0), y)
 	_mark_base_span(y)
 	add_child(node)
 
@@ -1002,7 +1097,7 @@ func _spawn_police_car(_y: float, vp_w: float, speed: float) -> void:
 	car.set("speed", speed)
 	car.set("lane", lane)
 	car.set("lanes_total", LANE_COUNT)
-	car.position = Vector2(vp_w + 260.0,
+	car.position = Vector2(ItemFlow.spawn_x(vp_w, 260.0),
 		(float(lanes[lane]) + float(lanes[lane + 1])) * 0.5)
 	add_child(car)
 
@@ -1033,7 +1128,7 @@ func _spawn_hazard(kind: String, y: float, vp_w: float, speed: float) -> void:
 	node.set_script(HAZARD_ITEM_SCRIPT)
 	node.set("kind", kind)
 	node.set("speed", speed)
-	node.position = Vector2(vp_w + 90.0, y)
+	node.position = Vector2(ItemFlow.spawn_x(vp_w, 90.0), y)
 	_mark_base_span(y)
 	add_child(node)
 
@@ -1050,7 +1145,7 @@ func _spawn_ninja(y: float, vp_w: float, speed: float) -> void:
 	# kind ставится ДО add_child: _ready() читает его, чтобы покрасить спрайт и
 	# записаться в свою группу.
 	node.set("kind", NINJA_KINDS[randi() % NINJA_KINDS.size()])
-	node.position = Vector2(vp_w + 80.0, y)
+	node.position = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
 	_mark_base_span(y)
 	add_child(node)
 
@@ -1060,7 +1155,7 @@ func _spawn_effect_item(kind: String, y: float, vp_w: float, speed: float) -> vo
 	node.set_script(EFFECT_ITEM_SCRIPT)
 	node.set("kind", kind)
 	node.set("speed", speed)
-	node.position = Vector2(vp_w + 80.0, y)
+	node.position = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
 	_mark_base_span(y)
 	add_child(node)
 
@@ -1068,7 +1163,7 @@ func _spawn_homeless(y: float, vp_w: float, speed: float, solo: bool = false) ->
 	var hm := HOMELESS_SCENE.instantiate()
 	if hm.get("speed") != null:
 		hm.speed = speed
-	hm.position = Vector2(vp_w + 80.0, y)
+	hm.position = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
 	_size_hazard(hm, y, speed, solo)
 	add_child(hm)
 
@@ -1100,7 +1195,7 @@ func _spawn_scripted(script: Script, y: float, vp_w: float, speed: float) -> voi
 	node.set_script(script)
 	if node.get("speed") != null:
 		node.speed = speed
-	node.position = Vector2(vp_w + 80.0, y)
+	node.position = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
 	_mark_base_span(y)
 	add_child(node)
 
@@ -1132,7 +1227,9 @@ func _spawn_girl(y: float, vp_w: float, speed: float) -> void:
 	g.set("slow_duration", GIRL_SLOW_T)
 	g.set("slow_sound", GIRL_SFX)
 	g.set("damage", 0)
-	g.position = Vector2(vp_w + 90.0, y)
+	# Она из ПОТОКА, а не из боя: пусть слушается общего направления.
+	g.set("stream", true)
+	g.position = Vector2(ItemFlow.spawn_x(vp_w, 90.0), y)
 	add_child(g)
 	# Сердечки вокруг зазывалы. Она НЕ БЬЁТ, а замедляет — то есть её надо
 	# объезжать, хотя выглядит она как обычная добыча в потоке. Значок «чарует»
@@ -1145,14 +1242,14 @@ func _spawn_molotov_single(y: float, vp_w: float, speed: float) -> void:
 	var m := MOLOTOV_SCENE.instantiate()
 	m.speed      = speed
 	m.fire_count = 4
-	m.position   = Vector2(vp_w + 80.0, y)
+	m.position   = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
 	add_child(m)
 
 func _spawn_cone(vp_w: float, speed: float) -> void:
 	var node := Area2D.new()
 	node.set_script(CONE_SCRIPT)
 	node.set("speed", speed)
-	node.position = Vector2(vp_w + 130.0, get_viewport_rect().size.y * 0.5)
+	node.position = Vector2(ItemFlow.spawn_x(vp_w, 130.0), get_viewport_rect().size.y * 0.5)
 	add_child(node)
 
 # Short resource river — the mandatory "breather" after a lethal set-piece.
@@ -1192,6 +1289,14 @@ func _pick_set_piece(pool: Array) -> String:
 	return pick
 
 func _run_set_piece(id: String, speed: float, lanes: Array, vp_w: float) -> void:
+	# В ЗЕРКАЛЕ СЕТ-ПИСОВ НЕТ. Бомж с бочкой и ниндзя — не предметы, а
+	# маленькие сцены: они тормозят в заданной точке, отыгрывают такты и уходят.
+	# Отразить хореографию — отдельная работа, а отразить всё вокруг и оставить
+	# их лететь по-старому выглядело бы поломкой. Зеркало живёт пять секунд;
+	# обычный поток на это время и подменяет сцену.
+	if ItemFlow.mirrored():
+		await _t1_center_line(speed, lanes, vp_w)
+		return
 	match id:
 		"sandwich":       await _t1_two_sandwiches(speed, lanes, vp_w, randf() < 0.5)
 		"zigzag":         await _t2_zigzag_wide(speed, lanes, vp_w)
@@ -1282,7 +1387,7 @@ func _spawn_homeless_clump(y: float, vp_w: float, speed: float) -> void:
 		var hm := HOMELESS_SCENE.instantiate()
 		if hm.get("speed") != null:
 			hm.speed = speed
-		hm.position = Vector2(vp_w + 80.0 + float(i) * 36.0, y + randf_range(-14.0, 14.0))
+		hm.position = Vector2(ItemFlow.spawn_x(vp_w, 80.0 + float(i) * 36.0), y + randf_range(-14.0, 14.0))
 		add_child(hm)
 
 # Столбы бомжей — стена бомжей с бегущим свободным лейном + приз-пицца.
@@ -1357,7 +1462,7 @@ func _wave_molotov_right(speed: float, lanes: Array, vp_w: float) -> void:
 	# В хвосте молотов жжёт дольше: огневая зона дольше держит линию закрытой.
 	m.fire_count         = 4 + (1 if _hardcore_tier >= 3 else 0)
 	m.target_x_min_ratio = PRE_BOSS_MOLOTOV_X_MIN_RATIO
-	m.position           = Vector2(vp_w + 80.0, lanes[lane])
+	m.position           = Vector2(ItemFlow.spawn_x(vp_w, 80.0), lanes[lane])
 	add_child(m)
 	await get_tree().create_timer(PRE_BOSS_MOLOTOV_INTERVAL).timeout
 
@@ -1439,7 +1544,7 @@ func _t1_double_line(speed: float, lanes: Array, vp_w: float) -> void:
 	var bl_y   = lanes[0 if randf() < 0.5 else 4] + _t1_osc_y()
 	var bl     := BOOMBOX_SCENE.instantiate()
 	if bl.get("speed") != null: bl.speed = speed
-	bl.position = Vector2(vp_w + 80.0, bl_y)
+	bl.position = Vector2(ItemFlow.spawn_x(vp_w, 80.0), bl_y)
 	add_child(bl)
 
 # Вар.2 — pizza on centre (2), negative on 1 and 3, outer lanes empty.
@@ -1889,14 +1994,14 @@ func _spawn_bonus_item(speed: float, vp_w: float, lanes: Array) -> void:
 func _spawn_snake(y: float, vp_w: float, speed: float, solo: bool = false) -> void:
 	var s      := SNAKE_SCENE.instantiate()
 	s.speed     = speed * 1.05
-	s.position  = Vector2(vp_w + 80.0, y)
+	s.position  = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
 	_size_hazard(s, y, speed, solo)
 	add_child(s)
 
 func _spawn_dog(y: float, vp_w: float, speed: float, solo: bool = false) -> void:
 	var d      := DOG_SCENE.instantiate()
 	d.speed     = speed
-	d.position  = Vector2(vp_w + 80.0, y)
+	d.position  = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
 	_size_hazard(d, y, speed, solo)
 	add_child(d)
 
@@ -1904,12 +2009,12 @@ func _spawn_molotov(y: float, vp_w: float, speed: float, fire_count: int = 4) ->
 	var m       := MOLOTOV_SCENE.instantiate()
 	m.speed      = speed
 	m.fire_count = fire_count + (1 if _hardcore_tier >= 3 else 0)
-	m.position   = Vector2(vp_w + 80.0, y)
+	m.position   = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
 	add_child(m)
 
 func _spawn_glove(y: float, vp_w: float) -> void:
 	var g      := BOXING_GLOVE_SCENE.instantiate()
-	g.position  = Vector2(vp_w + 80.0, y)
+	g.position  = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
 	g.charge_duration = _glove_charge_duration_for_phase()
 	add_child(g)
 
@@ -1932,7 +2037,7 @@ func _inst_lane(scene: PackedScene, speed: float, vp_w: float, lanes: Array, set
 	var node := scene.instantiate()
 	if set_speed and node.get("speed") != null:
 		node.speed = speed
-	node.position = Vector2(vp_w + 80.0, lanes[randi() % LANE_COUNT])
+	node.position = Vector2(ItemFlow.spawn_x(vp_w, 80.0), lanes[randi() % LANE_COUNT])
 	add_child(node)
 
 # Собрать предмет, НЕ добавляя в дерево — нужно и обычному спавну, и мэджик
@@ -1975,7 +2080,7 @@ func _spawn_item(y: float, vp_w: float, tex: Texture2D, scale: float,
 		speed: float, damage: int, eatable: bool = false, rotates: bool = true,
 		pulses: bool = false, skin_tag: String = "", solo: bool = false) -> Node:
 	var item := _make_item(tex, scale, speed, damage, eatable, rotates, pulses, skin_tag)
-	item.position = Vector2(vp_w + 80.0, y)
+	item.position = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
 	# Размер рандомим только ударяющим — ресурсы должны читаться «на съедобность»
 	# мгновенно, а для этого пицца обязана быть всегда одного размера.
 	if damage > 0:
@@ -2055,7 +2160,7 @@ func _spawn_dollar(y: float, vp_w: float, speed: float) -> void:
 	var sprite     := item.get_node("Sprite2D") as Sprite2D
 	sprite.texture  = DOLLAR_TEX
 	sprite.scale    = Vector2.ONE * 0.36
-	item.position   = Vector2(vp_w + 80.0, y)
+	item.position   = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
 	_mark_base_span(y)
 	add_child(item)
 
@@ -2063,7 +2168,7 @@ func _spawn_slowing(y: float, vp_w: float, speed: float, banana_only: bool = fal
 	var scene := BANANA_PEEL_SCENE if (banana_only or randf() < 0.5) else BEER_SCENE
 	var item  := scene.instantiate()
 	item.speed    = speed
-	item.position = Vector2(vp_w + 80.0, y)
+	item.position = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
 	add_child(item)
 
 # ── Pre-boss resource rain ───────────────────────────────────────────────────
@@ -2128,7 +2233,7 @@ func _spawn_pre_boss_resource_burst() -> void:
 			item.is_eatable = true
 			sprite.texture  = PIZZA_TEX
 			sprite.scale    = Vector2.ONE * PRE_BOSS_PIZZA_SCALE
-		item.position = Vector2(vp_w + x_off, y)
+		item.position = Vector2(ItemFlow.spawn_x(vp_w, x_off), y)
 		add_child(item)
 
 func dev_spawn_money_bag() -> void:
@@ -2162,6 +2267,11 @@ func clear_items() -> void:
 	set_process(false)
 	_frozen          = true
 	_pattern_running = false
+	# Направление потока и шторм — состояние ЗАБЕГА, и снимаются они здесь, а не
+	# только на переходе между уровнями: забег кончается и смертью тоже, а
+	# смерть посреди зеркала оставляла бы поток развёрнутым СЛЕДУЮЩЕМУ забегу.
+	ItemFlow.reset()
+	set_pizza_storm(false)
 	_reset_spans()
 	for child in get_children():
 		child.queue_free()

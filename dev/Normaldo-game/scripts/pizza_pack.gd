@@ -40,8 +40,8 @@ func _process(delta: float) -> void:
 		if _normaldo and is_instance_valid(_normaldo):
 			position = _normaldo.position + PACK_HEAD_OFFSET
 		return
-	position.x -= speed * delta
-	if position.x < -200.0:
+	ItemFlow.advance(self, speed, delta)
+	if ItemFlow.gone(self, 200.0):
 		queue_free()
 
 func explode() -> void:

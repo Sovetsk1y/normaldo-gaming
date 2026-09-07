@@ -168,8 +168,8 @@ func _process(delta: float) -> void:
 		if KnockFall.is_gone(self):
 			queue_free()
 		return
-	position.x -= speed * delta
-	if position.x < -260.0:
+	ItemFlow.advance(self, speed, delta)
+	if ItemFlow.gone(self, 260.0):
 		queue_free()
 		return
 	# Своего пульса у конуса больше нет: подсказка мигает и тапает пальцами сама

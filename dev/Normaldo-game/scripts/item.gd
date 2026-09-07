@@ -37,13 +37,13 @@ func _process(delta: float) -> void:
 		if position.y > get_viewport_rect().size.y + 200.0:
 			queue_free()
 		return
-	position.x -= speed * delta
+	ItemFlow.advance(self, speed, delta)
 	if rotates:
 		$Sprite2D.rotation += _rot_speed * delta
 	if pulses:
 		_pulse_t += delta * 3.5
 		$Sprite2D.scale = _base_scale * (1.0 + sin(_pulse_t) * 0.12)
-	if position.x < -200.0:
+	if ItemFlow.gone(self, 200.0):
 		queue_free()
 
 # Smacked by the giant ЖИРОБОСС head: drop dead under gravity with a slight

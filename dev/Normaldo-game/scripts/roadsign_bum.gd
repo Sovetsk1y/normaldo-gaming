@@ -129,14 +129,14 @@ func _process(delta: float) -> void:
 			queue_free()
 		return
 
-	position.x -= speed * delta
+	ItemFlow.advance(self, speed, delta)
 	_sign.rotation += SIGN_SPIN * delta   # кончик знака (Area2D) крутится вместе с ним
 	# Качается ТЕЛО, а не знак: знак и так крутится своей рукой, и добавь ему
 	# ещё покачивание — получилась бы дрожь, а не жизнь.
 	_sway_t += delta
 	HumanSway.apply(_body, _sway_t, _sway_ph)
 
-	if position.x < -220.0:
+	if ItemFlow.gone(self, 220.0):
 		queue_free()
 
 # Умирает от удара Нормальдо / скилла — падает + предсмертный крик.

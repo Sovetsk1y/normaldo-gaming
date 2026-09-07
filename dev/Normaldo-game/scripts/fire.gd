@@ -73,6 +73,6 @@ func _on_area_entered(area: Area2D) -> void:
 		area.queue_free()
 
 func _process(delta: float) -> void:
-	position.x -= speed * delta
-	if position.x < -200.0:
+	ItemFlow.advance(self, speed, delta)
+	if ItemFlow.gone(self, 200.0):
 		queue_free()

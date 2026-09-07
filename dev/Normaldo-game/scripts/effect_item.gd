@@ -102,7 +102,7 @@ func _process(delta: float) -> void:
 	if vel != Vector2.ZERO:
 		position += vel * delta
 	else:
-		position.x -= speed * delta
+		ItemFlow.advance(self, speed, delta)
 	var vp := get_viewport_rect().size
 	if position.x < -200.0 or position.x > vp.x + 260.0 \
 			or position.y < -200.0 or position.y > vp.y + 200.0:

@@ -106,8 +106,8 @@ func _process(delta: float) -> void:
 		if is_instance_valid(_carrier):
 			position = _carrier.position + HEAD_OFFSET
 		return
-	position.x -= speed * delta
-	if position.x < -220.0:
+	ItemFlow.advance(self, speed, delta)
+	if ItemFlow.gone(self, 220.0):
 		queue_free()
 
 # ── Вскрытие ──────────────────────────────────────────────────────────────────

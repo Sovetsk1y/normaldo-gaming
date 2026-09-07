@@ -53,12 +53,12 @@ func _process(delta: float) -> void:
 		if position.y > get_viewport_rect().size.y + 200.0:
 			queue_free()
 		return
-	position.x -= speed * delta
+	ItemFlow.advance(self, speed, delta)
 	# Покачивание — общий кирпич на всех людей потока (см. human_sway.gd): своё
 	# у каждого разъехалось бы по амплитуде, и одна порода читалась бы тремя.
 	_sway_t += delta
 	HumanSway.apply(_sprite, _sway_t, _sway_ph)
-	if position.x < -200.0:
+	if ItemFlow.gone(self, 200.0):
 		queue_free()
 
 # Broken (by the giant head or anything else that kills him): drop dead under

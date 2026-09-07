@@ -41,10 +41,10 @@ func _process(delta: float) -> void:
 			queue_free()
 		return
 	if not _hit:
-		position.x      -= speed * delta
+		ItemFlow.advance(self, speed, delta)
 		_wobble_t       += delta * 7.0
 		_sprite.rotation = sin(_wobble_t) * 0.10
-		if position.x < -200.0:
+		if ItemFlow.gone(self, 200.0):
 			queue_free()
 	else:
 		position   += _fly_vel * delta

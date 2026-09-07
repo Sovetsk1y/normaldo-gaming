@@ -259,6 +259,9 @@ func _ready() -> void:
 	add_child(_decor)
 
 	_build_dim()
+	# ПОСЛЕДНИМ ребёнком, и это не вкусовщина: слой забирает всё, что нарисовано
+	# до него, — значит фон целиком и ничего сверх.
+	_build_trip()
 
 	# Игра открывается в меню, а за меню стоит первый уровень: плитка.
 	# Куски встают ЗА двумя кусками арки, а не с нуля, — иначе первая же стена
@@ -695,6 +698,72 @@ func _take_next_slice() -> Texture2D:
 # Добавляется ПОСЛЕДНИМ ребёнком Background: так она рисуется поверх фона и
 # декора и под всем остальным — диван, телевизор, предметы и Нормальдо лежат в
 # сцене дальше и её не задевают.
+# ── Порча фона: инверсия цвета и зеркало ─────────────────────────────────────
+# Гриб выворачивает цвета, компас отражает картинку по горизонтали. Оба эффекта
+# ЭКРАННЫЕ: слой берёт уже нарисованный фон и переписывает его перед тем, как
+# сверху лягут предметы (см. shaders/bg_trip.gdshader).
+#
+# Не трансформацией узлов: Background ездит на тюинах при переходах между
+# экранами меню, и вторая рука, пишущая в его `position`, дралась бы с первой.
+# А инверсию цвета трансформацией не сделать вовсе.
+const TRIP_SHADER := preload("res://shaders/bg_trip.gdshader")
+
+var _trip_bbc  : BackBufferCopy = null
+var _trip_rect : ColorRect      = null
+var _trip_mat  : ShaderMaterial = null
+
+func _build_trip() -> void:
+	var vp := get_viewport_rect().size
+	# Копия кадра — то, из чего слой и берёт картинку. Без неё шейдеру нечего
+	# читать: `hint_screen_texture` отдаёт именно этот снимок.
+	_trip_bbc = BackBufferCopy.new()
+	_trip_bbc.name      = "TripCopy"
+	_trip_bbc.copy_mode = BackBufferCopy.COPY_MODE_VIEWPORT
+	_trip_bbc.visible   = false
+	add_child(_trip_bbc)
+
+	_trip_mat = ShaderMaterial.new()
+	_trip_mat.shader = TRIP_SHADER
+	_trip_mat.set_shader_parameter("invert", 0.0)
+	_trip_mat.set_shader_parameter("mirror", 0.0)
+
+	# Тот же запас в три экрана и сдвиг, что у плёнки: фон ездит целиком, и слой
+	# ровно в экран уехал бы вместе с ним, оставив у края неиспорченную полосу.
+	_trip_rect = ColorRect.new()
+	_trip_rect.name         = "Trip"
+	_trip_rect.material     = _trip_mat
+	_trip_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_trip_rect.size         = vp * 3.0
+	_trip_rect.position     = -vp
+	_trip_rect.visible      = false
+	add_child(_trip_rect)
+
+# Инверсия цвета — гриб.
+func set_inverted(on: bool) -> void:
+	_set_trip("invert", on)
+
+# Зеркало по горизонтали — компас. Зеркалит ТОЛЬКО картинку: предметы
+# разворачивает `ItemFlow`, они и правда летят в другую сторону.
+func set_mirrored(on: bool) -> void:
+	_set_trip("mirror", on)
+
+func trip_on(key: String) -> bool:
+	if _trip_mat == null:
+		return false
+	return float(_trip_mat.get_shader_parameter(key)) > 0.5
+
+func _set_trip(key: String, on: bool) -> void:
+	if _trip_mat == null:
+		return
+	_trip_mat.set_shader_parameter(key, 1.0 if on else 0.0)
+	# Слой поднимается, только когда работает хоть один эффект: копия кадра
+	# каждый кадр — не та цена, которую платят просто так.
+	var any := trip_on("invert") or trip_on("mirror")
+	if is_instance_valid(_trip_bbc):
+		_trip_bbc.visible = any
+	if is_instance_valid(_trip_rect):
+		_trip_rect.visible = any
+
 func _build_dim() -> void:
 	var vp := get_viewport_rect().size
 	_dim = ColorRect.new()

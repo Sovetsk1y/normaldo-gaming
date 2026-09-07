@@ -220,8 +220,10 @@ var _perk_timer     : float = TIME_SLOW_PERIOD
 var _world_slow_left : float = 0.0
 var _slow_total       : float = 0.0
 var _was_slowed       : bool  = false
-var _invert_remaining : float = 0.0   # компас: реверс управления на N секунд
-var _music_reversed   : bool  = false # играет ли реверс-трек во время компаса
+var _invert_remaining : float = 0.0   # гриб: реверс управления на N секунд
+var _music_reversed   : bool  = false # играет ли реверс-трек во время гриба
+var _mirror_remaining : float = 0.0   # компас: зеркало мира на N секунд
+var _shroom_remaining : float = 0.0   # гриб: отравление на N секунд
 const _MUSIC_FWD := preload("res://assets/audio/main_theme.mp3")
 const _MUSIC_REV := preload("res://assets/audio/main_theme_reversed.mp3")
 var _sway_t           : float = 0.0
@@ -1171,6 +1173,14 @@ func _physics_process(delta: float) -> void:
 			_status_off("invert")
 			if _music_reversed:
 				_set_music_reversed(false)
+	if _mirror_remaining > 0.0:
+		_mirror_remaining -= delta
+		if _mirror_remaining <= 0.0:
+			_end_mirror()
+	if _shroom_remaining > 0.0:
+		_shroom_remaining -= delta
+		if _shroom_remaining <= 0.0:
+			_end_shroom()
 	if not _status_flash_left.is_empty():
 		for n in _status_flash_left.keys():
 			var left : float = float(_status_flash_left[n]) - delta
@@ -1602,10 +1612,83 @@ func _touch_on_cone(pos: Vector2) -> bool:
 			return true
 	return false
 
-# Компас: реверс управления на `duration` секунд.
+const COMPASS_MIRROR_SEC : float = 5.0
+const SHROOM_SEC : float = 8.0
+
+# ── ГРИБ: ОТРАВЛЕНИЕ ─────────────────────────────────────────────────────────
+# Четыре порчи разом на восемь секунд: вывернутый цвет фона, перевёрнутое
+# управление, замедленный шаг, музыка задом наперёд — и весь поток превращён в
+# пиццу.
+#
+# Собрано ЗДЕСЬ, а не в самом грибе: три из пяти порч уже умеет Нормальдо
+# (реверс, замедление, музыка), фоном и потоком владеют другие узлы, и предмету
+# пришлось бы лезть в каждого. Предмет говорит «меня съели», а что это значит —
+# знает одно место.
+#
+# Замедление ставится через `apply_slow`, а не полем: шляпа мага гасит
+# замедляющее, и гриб обязан подчиняться тому же правилу. Иначе выходит, что
+# иммунитет работает от банана, но не от гриба, — а игрок видит один и тот же
+# щит.
+func apply_shroom(duration: float = SHROOM_SEC) -> void:
+	var fresh := _shroom_remaining <= 0.0
+	_shroom_remaining = maxf(_shroom_remaining, duration)
+	apply_invert(duration)          # управление + музыка задом наперёд
+	apply_slow(duration)            # шаг; шляпа мага гасит его целиком
+	if not fresh:
+		return
+	_show_floating_text("ГРИБЫ!", Color(1.0, 0.55, 0.20))
+	var host := get_parent()
+	var bg = host.get_node_or_null("Background") if host != null else null
+	if bg != null and bg.has_method("set_inverted"):
+		bg.call("set_inverted", true)
+	var sp = host.get_node_or_null("Spawner") if host != null else null
+	if sp != null and sp.has_method("set_pizza_storm"):
+		sp.call("set_pizza_storm", true)
+
+func _end_shroom() -> void:
+	var host := get_parent()
+	var bg = host.get_node_or_null("Background") if host != null else null
+	if bg != null and bg.has_method("set_inverted"):
+		bg.call("set_inverted", false)
+	var sp = host.get_node_or_null("Spawner") if host != null else null
+	if sp != null and sp.has_method("set_pizza_storm"):
+		sp.call("set_pizza_storm", false)
+
+# ── КОМПАС: ЗЕРКАЛО МИРА ─────────────────────────────────────────────────────
+# Раньше компас переворачивал УПРАВЛЕНИЕ и музыку. Теперь он переворачивает МИР:
+# фон отражается по горизонтали, а поток предметов идёт слева направо — и те,
+# что уже летят, разворачиваются вместе с новыми.
+#
+# Разница для игрока принципиальная. Реверс управления ломает руку: пальцы
+# делают не то, что просят, и переждать это можно только замерев. Зеркало руку
+# не трогает — оно ломает ЧТЕНИЕ КАДРА: угроза приходит не с той стороны, с
+# которой её ждут весь забег. Играть можно, но заново учишься смотреть.
+#
+# Реверс управления никуда не делся — он теперь у гриба (см. `apply_invert`),
+# где стоит рядом с ещё тремя порчами и читается как отравление, а не как
+# сломавшаяся игра.
+func apply_mirror(duration: float) -> void:
+	var fresh := _mirror_remaining <= 0.0
+	_mirror_remaining = maxf(_mirror_remaining, duration)
+	start_skill_cd("compass", _mirror_remaining)
+	if not fresh:
+		return
+	_show_floating_text("ЗЕРКАЛО!", Color(0.55, 0.85, 1.0))
+	ItemFlow.dir = ItemFlow.RIGHT
+	var bg = get_parent().get_node_or_null("Background")
+	if bg != null and bg.has_method("set_mirrored"):
+		bg.call("set_mirrored", true)
+
+func _end_mirror() -> void:
+	ItemFlow.reset()
+	var bg = get_parent().get_node_or_null("Background")
+	if bg != null and bg.has_method("set_mirrored"):
+		bg.call("set_mirrored", false)
+
+# Гриб: реверс управления на `duration` секунд.
 func apply_invert(duration: float) -> void:
 	_invert_remaining = maxf(_invert_remaining, duration)
-	start_skill_cd("compass", _invert_remaining)   # кружок-кулдаун в HUD
+	start_skill_cd("shroom", _invert_remaining)   # кружок-кулдаун в HUD
 	_show_floating_text("РЕВЕРС!", Color(0.85, 0.5, 1.0))
 	# Строка уезжает за полсекунды, а управление перевёрнуто три: всё время
 	# между этим игрок думал, что игра сломалась. Значок висит ровно столько,
@@ -4030,10 +4113,16 @@ func _on_area_entered(area: Area2D) -> void:
 	elif area.is_in_group("magnet") and _magnet_remaining <= 0.0:
 		_magnet_remaining = 3.0
 		area.activate(self)
+	elif area.is_in_group("mushroom"):
+		# Под невидимостью пролетает насквозь, как любой негативный предмет.
+		if _invincible:
+			return
+		apply_shroom()
+		area.queue_free()
 	elif area.is_in_group("compass"):
 		if _invincible:
 			return
-		apply_invert(5.0)
+		apply_mirror(COMPASS_MIRROR_SEC)
 		area.queue_free()
 	elif area.is_in_group("slowing"):
 		# Под невидимостью предмет пролетает насквозь: спелл обещает «пролетают
