@@ -277,6 +277,49 @@ export const submitScore = onCall(async (request) => {
   };
 });
 
+// ─── getProfile ──────────────────────────────────────────────────────────────
+// Профиль ЛЮБОГО игрока по его user_id: имя, аватар и рекорды недели по всем
+// режимам. Зовётся с экрана лидеров, когда тапают по чужой строке.
+//
+// ── Что отдаётся и почему именно это ────────────────────────────────────────
+// Строка таблицы знает про человека ровно три вещи — имя, аватар и результат в
+// ОДНОМ режиме. Профиль отвечает на «а кто это вообще», и ответ на это —
+// `mode_best`: где ещё он бегал и с каким результатом. Всё остальное в
+// документе пользователя либо приватно (хэш кода восстановления), либо не про
+// него (pending_rewards — это его деньги, не наше дело).
+//
+// Именно поэтому поля перечислены ПОИМЁННО, а не отдаётся документ целиком:
+// «отдать всё, кроме секретов» — это список, который забывают пополнить, когда
+// в документ добавляют новое поле.
+export const getProfile = onCall(async (request) => {
+  requireAuth(request.auth);
+  const userId = String(request.data?.user_id ?? "").slice(0, 128);
+  if (!userId) {
+    throw new HttpsError("invalid-argument", "user_id required");
+  }
+  const snap = await db.doc(`users/${userId}`).get();
+  if (!snap.exists) {
+    throw new HttpsError("not-found", "no such player");
+  }
+  const rawBest = (snap.get("mode_best") ?? {}) as Record<string, unknown>;
+  // Режимы фильтруются по списку: в документе может лежать что угодно, включая
+  // имена режимов, которых в игре больше нет.
+  const modeBest: Record<string, number> = {};
+  for (const m of MODES) {
+    const v = Number(rawBest[m] ?? 0);
+    if (v > 0) {
+      modeBest[m] = v;
+    }
+  }
+  return {
+    user_id:      userId,
+    display_name: snap.get("display_name") ?? "",
+    avatar_skin:  snap.get("avatar_skin") ?? "classic",
+    avatar_fat:   snap.get("avatar_fat") ?? 0,
+    mode_best:    modeBest,
+  };
+});
+
 // ─── getLeaderboard ──────────────────────────────────────────────────────────
 export const getLeaderboard = onCall(async (request) => {
   requireAuth(request.auth);

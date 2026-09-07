@@ -975,6 +975,22 @@ func _add_player_row(r: Dictionary, cy: float, alt: bool) -> void:
 		_build_reward_block(_content, Vector2(w * 0.70, cy + (ROW_H - 16.0) * 0.5),
 			w * 0.28, LeaderboardModes.reward_for_place(rank), 16.0)
 
+	# ПО СТРОКЕ МОЖНО ТАПНУТЬ. Таблица показывает про человека три вещи — имя,
+	# аватар и счёт в одном режиме, — и первое, что игрок делает, увидев чужой
+	# результат, это тычет в него: «а кто это». До этой правки не происходило
+	# ничего, и строка читалась как картинка, а не как человек.
+	#
+	# Кнопка добавляется ПОСЛЕДНЕЙ, поверх всей строки: подписи и иконки под ней
+	# игнорируют мышь (`MOUSE_FILTER_IGNORE`), так что перехватывать ей нечего.
+	var row_btn := Button.new()
+	row_btn.flat       = true
+	row_btn.focus_mode = Control.FOCUS_NONE
+	row_btn.size       = Vector2(w - 4.0, ROW_H - 3.0)
+	row_btn.position   = Vector2(2.0, cy + 1.0)
+	var row_copy : Dictionary = r.duplicate(true)
+	row_btn.pressed.connect(func(): _show_player_card(row_copy))
+	_content.add_child(row_btn)
+
 func _reward_str(reward: Dictionary) -> String:
 	var d := int(reward.get("dollars", 0))
 	var t := int(reward.get("tokens",  0))
@@ -1188,6 +1204,156 @@ func _show_metric_tooltip(_metric: int) -> void:
 	body_lbl.position             = Vector2(panel_x + 12.0, panel_y + 34.0)
 	body_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	_toast_node.add_child(body_lbl)
+
+# ── Карточка игрока ──────────────────────────────────────────────────────────
+# Открывается тапом по строке таблицы — своей или чужой.
+#
+# ── Почему она наполняется в два приёма ─────────────────────────────────────
+# Строка уже знает имя, аватар, место и счёт в ТЕКУЩЕМ режиме — этого хватает,
+# чтобы карточка встала мгновенно и полной. Остальное (рекорды недели по всем
+# режимам) знает только сервер, и спрашивается оно уже с открытой карточкой.
+#
+# Порядок именно такой, потому что сеть может не ответить вовсе — её здесь то
+# нет, то она медленная. Карточка, которая ЖДЁТ ответа, чтобы показать хоть
+# что-то, при обрыве показывает крутилку навсегда; карточка, которая сначала
+# показывает известное, при обрыве просто остаётся с ним.
+#
+# СВОЙ профиль сюда не ведёт: он лежит в разделе настроек (см.
+# /Концепция/Экран настроек.md) и знает про тебя куда больше, чем сервер знает
+# про чужого, — прожитое, забеги, достижения. Своя строка открывает ту же
+# карточку, что и чужая: врать «вот и всё, что о тебе известно» она не должна,
+# поэтому в ней стоит кнопка на полный профиль.
+const CARD_W : float = 380.0
+const CARD_H : float = 214.0
+
+var _card_node : Node2D = null
+
+func _show_player_card(r: Dictionary) -> void:
+	if is_instance_valid(_card_node):
+		_card_node.queue_free()
+	var vp := get_viewport().get_visible_rect().size
+	_card_node = Node2D.new()
+	_card_node.process_mode = Node.PROCESS_MODE_ALWAYS
+	_card_node.z_index      = 20
+	add_child(_card_node)
+
+	# Тап мимо карточки закрывает её. Отдельной кнопки «закрыть» нет намеренно:
+	# карточка ничего не спрашивает и ничего не меняет — из неё просто уходят.
+	var dim := Button.new()
+	dim.flat       = true
+	dim.focus_mode = Control.FOCUS_NONE
+	dim.size       = vp
+	dim.pressed.connect(func():
+		if is_instance_valid(_card_node):
+			_card_node.queue_free())
+	_card_node.add_child(dim)
+
+	var x : float = (vp.x - CARD_W) * 0.5
+	var y : float = (vp.y - CARD_H) * 0.5
+	var bg := ColorRect.new()
+	bg.color    = Color(0.07, 0.06, 0.04, 0.98)
+	bg.size     = Vector2(CARD_W, CARD_H)
+	bg.position = Vector2(x, y)
+	_card_node.add_child(bg)
+	var stripe := ColorRect.new()
+	stripe.color    = CLR_GOLD
+	stripe.size     = Vector2(CARD_W, 2.0)
+	stripe.position = Vector2(x, y)
+	_card_node.add_child(stripe)
+
+	# Аватар — это НЕ картинка профиля, а свидетельство: скин и жир, которыми
+	# взят рекорд. Поэтому он и стоит крупно первым.
+	const AV : float = 56.0
+	_add_avatar(_card_node, String(r.get("avatar_skin", "classic")),
+		int(r.get("avatar_fat", 0)), Vector2(x + 14.0, y + 16.0), AV)
+
+	var is_me : bool = bool(r.get("is_player", false))
+	var pname : String = str(r.get("name", r.get("display_name", "")))
+	var nm := _label(pname if pname != "" else "—", 17,
+		Color(0.75, 1.0, 0.65) if is_me else Color(1.0, 0.96, 0.88),
+		Vector2(x + 14.0 + AV + 12.0, y + 14.0), Vector2(CARD_W - AV - 40.0, 26.0),
+		_card_node)
+	nm.clip_text = true
+
+	_label("%d место · %s" % [int(r.get("rank", 0)),
+			LeaderboardModes.mode_label(_active_metric)],
+		12, Color(0.86, 0.86, 0.78),
+		Vector2(x + 14.0 + AV + 12.0, y + 40.0), Vector2(CARD_W - AV - 40.0, 20.0),
+		_card_node)
+	_label("%d пицц" % int(r.get("score", 0)), 14, CLR_GOLD,
+		Vector2(x + 14.0 + AV + 12.0, y + 60.0), Vector2(CARD_W - AV - 40.0, 20.0),
+		_card_node)
+
+	_label("РЕКОРДЫ НЕДЕЛИ", 11, Color(0.55, 0.85, 1.00, 0.95),
+		Vector2(x + 14.0, y + 90.0), Vector2(CARD_W - 28.0, 18.0), _card_node)
+
+	# Место под список — заполняется, когда (и если) ответит сервер.
+	_card_body = Control.new()
+	_card_body.position     = Vector2(x + 14.0, y + 110.0)
+	_card_body.size         = Vector2(CARD_W - 28.0, 70.0)
+	_card_body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_card_node.add_child(_card_body)
+	_card_hint = _label("Спрашиваем сервер…", 11, Color(0.70, 0.70, 0.66),
+		Vector2(0.0, 0.0), Vector2(CARD_W - 28.0, 18.0), _card_body)
+
+	if is_me:
+		var btn := Button.new()
+		btn.flat       = true
+		btn.focus_mode = Control.FOCUS_NONE
+		btn.size       = Vector2(CARD_W - 28.0, 26.0)
+		btn.position   = Vector2(x + 14.0, y + CARD_H - 34.0)
+		btn.pressed.connect(func():
+			if is_instance_valid(_card_node):
+				_card_node.queue_free()
+			if _hud != null and is_instance_valid(_hud) and _hud.has_method("_show_my_profile"):
+				_hud.call("_show_my_profile"))
+		_card_node.add_child(btn)
+		var cap := _label("ВЕСЬ МОЙ ПРОФИЛЬ", 12, Color(0.80, 1.0, 0.70),
+			Vector2(x + 14.0, y + CARD_H - 34.0), Vector2(CARD_W - 28.0, 26.0),
+			_card_node)
+		cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cap.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+
+	_fill_card_from_server(String(r.get("user_id", "")))
+
+var _card_body : Control = null
+var _card_hint : Label   = null
+
+func _fill_card_from_server(user_id: String) -> void:
+	if user_id.is_empty():
+		_card_say("Сервер не назвал этого игрока")
+		return
+	var resp : Dictionary = await LeaderboardClient.fetch_profile(user_id)
+	# Карточку могли закрыть, пока шёл запрос. Это не ошибка и не редкость: сеть
+	# отвечает секунды, а закрывают её за одну.
+	if not is_instance_valid(_card_body):
+		return
+	if not bool(resp.get("ok", false)):
+		_card_say("Остальное пока не спросить")
+		return
+	var best : Dictionary = resp.get("data", {}).get("mode_best", {})
+	if best.is_empty():
+		_card_say("В других режимах на этой неделе не бегал")
+		return
+	if is_instance_valid(_card_hint):
+		_card_hint.queue_free()
+	# По строке на режим, в том же порядке, что вкладки: список, отсортированный
+	# иначе, чем полоса вкладок над ним, читается как другой набор режимов.
+	var row_y := 0.0
+	for m in LeaderboardModes.MODES:
+		var key : String = LeaderboardModes.mode_key(int(m))
+		if not best.has(key):
+			continue
+		_label(LeaderboardModes.mode_label(int(m)), 11, Color(0.86, 0.86, 0.78),
+			Vector2(0.0, row_y), Vector2(160.0, 16.0), _card_body)
+		var v := _label("%d" % int(best[key]), 11, CLR_GOLD,
+			Vector2(160.0, row_y), Vector2(80.0, 16.0), _card_body)
+		v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		row_y += 17.0
+
+func _card_say(text: String) -> void:
+	if is_instance_valid(_card_hint):
+		_card_hint.text = text
 
 func _on_dev_prize_test() -> void:
 	if _hud and _hud.has_method("_show_prize_claim_modal"):

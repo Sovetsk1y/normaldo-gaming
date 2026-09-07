@@ -177,6 +177,15 @@ func fetch_leaderboard(mode: int, limit: int = 100) -> Dictionary:
 		"limit":  limit,
 	})
 
+# Профиль ЛЮБОГО игрока по его user_id — им пользуется карточка, которая
+# открывается тапом по строке таблицы. Сервер отдаёт имя, аватар и рекорды
+# недели по всем режимам; всё остальное в его документе либо приватно, либо не
+# наше дело (см. getProfile в firebase/functions/src/index.ts).
+func fetch_profile(user_id: String) -> Dictionary:
+	if not is_ready():
+		await _await_ready()
+	return await _call_function("getProfile", { "user_id": user_id })
+
 func fetch_window(mode: int, radius: int = 5) -> Dictionary:
 	if not is_ready():
 		await _await_ready()

@@ -42,6 +42,8 @@ func _initialize() -> void:
 	await _test_tabs(hud)
 	print("── Прыжок к своей строке ──")
 	await _test_jump_to_me(hud, mock)
+	print("── Карточка игрока ──")
+	await _test_player_card(hud, mock)
 	print("── Раскладка ──")
 	await _test_layout(hud)
 	print("── Закрытие ──")
@@ -348,6 +350,69 @@ func _test_layout(hud: Node) -> void:
 	_check(is_instance_valid(scroll) and is_equal_approx(scroll.size.y, list.size.y),
 		"область прокрутки совпадает с панелью списка")
 	await _close(scr)
+
+# ── Карточка игрока ──────────────────────────────────────────────────────────
+# Тап по строке открывает карточку. Проверяется не то, что она нарисовалась, а
+# то, что в ней ТОТ ЖЕ ЧЕЛОВЕК, по которому тапнули: карточка, собранная из
+# полей другой строки, выглядит совершенно рабочей.
+#
+# И то, что сеть ей не нужна, чтобы встать. Здесь её нет вовсе (сервер за
+# allowlist), то есть тест меряет ровно тот случай, ради которого карточка и
+# наполняется в два приёма.
+func _test_player_card(hud: Node, mock: Node) -> void:
+	var scr : Node = await _open(hud, 0)
+	_feed(scr, 0, 12)
+	await process_frame
+	var rows : Array = (scr.get("_server_rows") as Dictionary)[0]
+	# Берём НЕ первого: карточка, которая всегда показывает первого, прошла бы
+	# проверку «в ней тот же человек», будь тот первым.
+	var want : Dictionary = rows[9]
+
+	scr.call("_show_player_card", want)
+	await process_frame
+	var card : Node = scr.get("_card_node")
+	_check(is_instance_valid(card), "карточка открылась")
+	if not is_instance_valid(card):
+		await _close(scr)
+		return
+
+	var txt : Array = _texts(card, [])
+	_check(_has(txt, String(want.get("display_name", want.get("name", "")))),
+		"и в ней имя того, по кому тапнули: %s" % [txt])
+	_check(_has(txt, str(int(want.get("score", 0)))),
+		"и его счёт")
+	_check(_has(txt, "%d место" % int(want.get("rank", 0))),
+		"и его место")
+
+	# Строки списка НАЖИМАЮТСЯ. Без этого карточка есть, а дороги к ней нет.
+	var content : Node = scr.get("_content")
+	var btns := 0
+	for c in content.get_children():
+		if c is Button:
+			btns += 1
+	_check(btns > 0, "по строкам списка можно тапнуть: кнопок %d" % btns)
+
+	# Сеть не отвечает — карточка обязана СКАЗАТЬ об этом, а не крутить вечно.
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 4000:
+		await process_frame
+		var h : Label = scr.get("_card_hint")
+		if is_instance_valid(h) and not ("Спрашиваем" in String(h.text)):
+			break
+	var hint : Label = scr.get("_card_hint")
+	_check(hint == null or not is_instance_valid(hint) \
+			or not ("Спрашиваем" in String(hint.text)),
+		"без сети карточка не висит на «спрашиваем»: %s"
+			% [String(hint.text) if is_instance_valid(hint) else "—"])
+	await _close(scr)
+
+func _has(arr: Array, needle: String) -> bool:
+	if needle.is_empty():
+		return false
+	for t in arr:
+		if needle in String(t):
+			return true
+	return false
 
 func _test_close(hud: Node) -> void:
 	var scr : Node = await _open(hud)

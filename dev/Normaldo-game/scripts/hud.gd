@@ -2005,6 +2005,21 @@ func _build_menu_player_block(vp: Vector2) -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_PASS
 	_menu_overlay.add_child(root)
 
+	# ВЕСЬ БЛОК ОТКРЫВАЕТ ПРОФИЛЬ. Ник, доллары и жетоны — это и есть «кто я и
+	# что у меня есть», и тапнуть по ним, чтобы увидеть подробности, — первое,
+	# что игрок пробует. До этого блок не нажимался вовсе, а статистика лежала за
+	# шестерёнкой настроек, куда за ней никто не пойдёт.
+	#
+	# Кнопка добавляется ПЕРВОЙ, то есть ложится ПОД остальным: карандаш стоит
+	# поверх неё и остаётся карандашом. Порядок здесь — не стиль, а поведение.
+	var profile_btn := Button.new()
+	profile_btn.flat       = true
+	profile_btn.focus_mode = Control.FOCUS_NONE
+	profile_btn.size       = root.size
+	profile_btn.pressed.connect(_play_btn_sfx)
+	profile_btn.pressed.connect(_show_my_profile)
+	root.add_child(profile_btn)
+
 	# Nick + pencil row. Nick is LEFT-aligned with the dollar icon below it
 	# (both start at the same x inside the block); pencil follows the nick at a
 	# fixed 24 px gap so it tracks variable-length names.
@@ -10428,11 +10443,18 @@ func _modal_panel_y_h(vp_h: float, desired_h: float) -> Vector2:
 const _SETTINGS_SCREEN_SCRIPT := preload("res://scripts/settings_screen.gd")
 var _settings_screen : Node = null
 
-func _show_settings_modal() -> void:
+# Свой профиль — РАЗДЕЛ НАСТРОЕК, а не второй экран с теми же числами. Всё, что
+# в него просят положить — имя, прожитое, рекорды недели, достижения, — уже
+# собрано там (см. /Концепция/Экран настроек.md). Второй экран с тем же
+# содержимым разъехался бы с первым в первую же правку.
+func _show_my_profile() -> void:
+	_show_settings_modal("profile")
+
+func _show_settings_modal(section: String = "sound") -> void:
 	if is_instance_valid(_settings_screen):
 		return
 	var scr : Node = _SETTINGS_SCREEN_SCRIPT.new()
-	scr.call("setup", self)
+	scr.call("setup", self, section)
 	# Своим слоем ПОВЕРХ паузы: с неё сюда и приходят.
 	_settings_layer = _modal_layer(SETTINGS_LAYER)
 	_settings_layer.add_child(scr)
