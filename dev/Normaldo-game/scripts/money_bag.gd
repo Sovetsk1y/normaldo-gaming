@@ -1,244 +1,221 @@
 extends Area2D
 
 # ── Мешок с деньгами ──────────────────────────────────────────────────────────
-# Самый редкий ресурс потока (1.5 % ресурсных спавнов) и единственный, который
-# платит не собой, а СОБЫТИЕМ: пойманный мешок перелетает Нормальдо на голову и
-# выстреливает долларами ВПЕРЁД, за правый край экрана. Там они встают знаком
-# валюты — $, ₽, ¥ или € — и через секунду знак заезжает обратно в кадр.
+# Самый редкий ресурс потока и единственный, за который надо РАБОТАТЬ. Летит
+# небольшим, с числом «1» на боку и просьбой «ТАП!» над головой. Каждый тап
+# прибавляет к числу единицу и чуть-чуть раздувает мешок. Поймал — получил
+# столько долларов, сколько успел натапать.
 #
-# Раньше он просто рассыпал восемь долларов по случайным высотам. Это читалось
-# как «мешок лопнул», а не как награда: россыпь неотличима от обычного потока
-# долларов, только гуще. Знак — читаемая форма, за ним видно, что это твоя
-# добыча, и собирать его интереснее: доллары стоят по всем пяти лейнам, и
-# сколько ты из знака вынесешь — вопрос того, как поведёшь голову.
+# ── Почему так, а не «поймал и получил» ──────────────────────────────────────
+# Ресурс, который просто подбирают, ничего не решает: игрок и так летит по
+# экрану, и мешок оказывается на пути или не оказывается. Тапы превращают его в
+# СДЕЛКУ: мешок едет мимо, и каждая секунда, потраченная на стук по нему, — это
+# секунда, не потраченная на уворот. Сколько выжать и когда остановиться, решает
+# игрок.
 #
-# Сколько платит. В знаке пятнадцать-семнадцать долларов, но забрать все нельзя:
-# знак проезжает мимо один раз, и больше семи-восьми штук из него не вынуть даже
-# идеальным ходом. Прежние восемь гарантированных превратились в те же восемь,
-# но заработанных.
+# Здесь была другая механика: пойманный мешок перелетал на голову и выстреливал
+# долларами, которые вставали за экраном знаком валюты — $, ₽, ¥, € — и потом
+# заезжали обратно. Она убрана целиком вместе с растрами знаков. Знак был
+# красивым, но всё, что игрок в нём делал, — ловил доллары, как ловит их и так;
+# решение он принимал ноль раз. Новый мешок спрашивает раньше и по делу.
+#
+# ── ЧЕМ БОЛЬШЕ, ТЕМ ОПАСНЕЕ ДЛЯ ОСТАЛЬНЫХ ───────────────────────────────────
+# Раздутый мешок перестаёт быть хрупким: он не разбивается о предметы, а
+# разбивает их сам. Это не бонус, а следствие — тапая, игрок делает из мешка
+# таран и сам решает, насколько тяжёлый. Мешок обычного размера (никто не тапал)
+# по-прежнему горит от молотова и огня, как любой ресурс.
 #
 # См. /Концепция/Эффекты и бонусы.md, /Концепция/Уровни/Раскладка по уровням.md
 
 const BAG_TEX    := preload("res://assets/items/money_bag.png")
-const DOLLAR_TEX := preload("res://assets/items/dollar.png")
 const DOLLAR_SFX := preload("res://assets/audio/dollars.mp3")
-const ITEM_SCENE := preload("res://scenes/item.tscn")
+const UI_FONT    := preload("res://assets/fonts/RussoOne-Regular.ttf")
+# Подсказка «тапай» — ОБЩИЙ КИРПИЧ с мини-играми (`tap_prompt.gd`): картинка
+# TAP! и два тапающих пальца. «По этому надо тапать» — один приём игры, и
+# показывать его двумя разными способами значит учить дважды.
+const TAP_PROMPT := preload("res://scripts/tap_prompt.gd")
+const TAP_W      : float = 96.0
 
-const DOLLAR_SCALE := 0.36
+# Стартовый размер — НЕБОЛЬШОЙ. Мешок больше не «самый крупный ресурс в потоке»:
+# крупным он теперь становится, и разница между «летит мимо» и «раздули» обязана
+# читаться. 52 — примерно как банан, то есть рядовой предмет.
+const BAG_PX : float = 52.0
+# Сколько прибавляет один тап и докуда мешок может вырасти. Потолок нужен: лейн
+# 86 px, и мешок, переросший его, начинает есть соседние линии и закрывать
+# половину экрана собой.
+const GROW_PER_TAP : float = 0.085
+const GROW_MAX     : float = 2.30
 
-# Мешок — САМЫЙ КРУПНЫЙ ресурс в потоке, и это его единственная реклама. Он
-# стоит на линии один и обещает знак денег во весь экран; чтобы за ним имело
-# смысл лететь через полэкрана, его надо УВИДЕТЬ раньше, чем он поравняется с
-# головой.
-#
-# Раньше здесь стоял голый scale 0.36 по кадру 90×83 — то есть 32 пикселя
-# рисунка, меньше банана (52) и вдвое меньше предмета-эффекта (58). Джекпот
-# выглядел мелочью. Теперь размер считает ItemSizing по РИСУНКУ, как у всех
-# остальных предметов.
-#
-# 74, а не 84: с пульсом ±12 % мешок доходил до 94 пикселей при лейне в 86 и
-# начинал лезть в соседние линии — на экране это уже не «крупный ресурс», а
-# предмет не своего масштаба. Сейчас потолок пульса 83, и он остаётся в лейне.
-const BAG_PX : float = 74.0
+# С какого размера мешок становится тараном. Ровно «больше стандартного»: один
+# тап уже делает его тяжелее обычного предмета, и это честно — игрок за него
+# заплатил вниманием.
+const RAM_FROM : float = 1.0 + GROW_PER_TAP * 0.5
 
-# ── Знаки валют ───────────────────────────────────────────────────────────────
-# Сетка 5×7 — та же, что у букв NORMALDO (`spawner.LETTER_GLYPHS`), и по той же
-# причине: это минимальный растр, в котором знак ещё читается. Словарь общий
-# намеренно — знак из долларов и буква из долларов обязаны быть одной породы,
-# иначе на экране заводятся два разных «шрифта».
-#
-# Клеток в знаках 15–17 — разброс держится в две штуки НАМЕРЕННО: выплата мешка
-# почти не зависит от того, какой знак выпал, и «повезло» относится к встрече с
-# мешком, а не к жеребьёвке внутри него. Ровно поровну не выходит: знак рисуется
-# в пять клеток шириной, и втискивать в один растр и S доллара, и две палки иены
-# с одинаковым числом точек — значит портить рисунок ради арифметики.
-#
-# Рисунки ЛЁГКИЕ: у доллара и рубля вокруг обводки оставлен воздух. Первая
-# версия шла жирными строками по четыре-пять клеток, и знак из долларов,
-# сложенный из долларов же, превращался в зелёное пятно — читалась одна иена,
-# потому что она из прямых.
-const GLYPHS : Dictionary = {
-	"dollar": ["..X..", ".XXX.", "X.X..", ".XXX.", "..X.X", ".XXX.", "..X.."],
-	"ruble":  ["XXX..", "X..X.", "X..X.", "XXX..", "X....", "XXX..", "X...."],
-	"yen":    ["X...X", ".X.X.", "..X..", "XXXXX", "..X..", "XXXXX", "..X.."],
-	"euro":   ["..XXX", ".X...", "XXXX.", "X....", "XXXX.", ".X...", "..XXX"],
-}
-const GLYPH_ROWS : int = 7
-const GLYPH_COLS : int = 5
-# Какую долю высоты экрана занимает знак. Чуть меньше букв NORMALDO (0.86) —
-# намеренно: буква ЗАМОРАЖИВАЕТ поток и означает «уровень стал короче на одну»,
-# а знак приходит посреди потока и означает только деньги. Путать эти два
-# события нельзя, и первое, чем они различаются, — рост.
-#
-# Ниже не опустить, не уменьшив сами доллары: клетка выходит 50 px при рисунке
-# доллара в 36, и это ровно тот зазор, при котором знак ещё читается формой.
-# Первая версия стояла на 0.66 — клетки 40 px, доллары касались друг друга, и
-# знак из долларов, сложенный из долларов же, превращался в зелёное пятно.
-const GLYPH_H_FRAC : float = 0.82
-# Отступ первого столбца от правого края. Знак обязан встать ЦЕЛИКОМ за кадром:
-# собранный на глазах у игрока, он читался бы как «доллары появились из
-# воздуха», а не как «мешок выстрелил ими вперёд».
-const GLYPH_MARGIN : float = 120.0
+@export var speed : float = 250.0
 
-# Полёт доллара из мешка в свою клетку.
-const SHOT_STEP : float = 0.022   # с, между соседними выстрелами
-const SHOT_FLY  : float = 0.34    # с, сам полёт последнего из них
+var _taps      : int   = 1     # число на боку и будущая выплата
+var _grow      : float = 1.0   # множитель размера
+var _bag_scale : float = 1.0
+var _pulse_t   : float = 0.0
+var _spent     : bool  = false # поймали или сожгли — второй раз не считается
 
-# Перелёт мешка на голову — тот же такт, что у мэджик бокса.
-const HEAD_OFFSET : Vector2 = Vector2(0.0, -62.0)
-const HOP_T       : float   = 0.18
-
-@export var speed: float = 250.0
-
-var _burst_done : bool  = false
-var _pulse_t    : float = 0.0
-# Базовый масштаб, вокруг которого дышит пульс. Держим числом, а не пересчётом
-# каждый кадр: пульс умножает именно его.
-var _bag_scale  : float = 1.0
-var _carrier    : Node2D = null   # голова, на которой сидит мешок, пока стреляет
+var _lbl    : Label  = null
+var _prompt : Node2D = null
 
 @onready var _sprite: Sprite2D = $Sprite2D
 
 func _ready() -> void:
-	_sprite.texture  = BAG_TEX
-	_bag_scale       = ItemSizing.content_scale(BAG_TEX, BAG_PX)
-	_sprite.scale    = Vector2.ONE * _bag_scale
-	collision_layer  = 2
-	collision_mask   = 0
+	_sprite.texture = BAG_TEX
+	_bag_scale      = ItemSizing.content_scale(BAG_TEX, BAG_PX)
+	collision_layer = 2
+	# МАСКА НЕ НУЛЕВАЯ, в отличие от прочих предметов: раздутый мешок обязан САМ
+	# видеть, во что врезался, иначе таранить ему нечего — предметы друг друга не
+	# замечают, их замечает только Нормальдо.
+	collision_mask  = 2
 	add_to_group("money_bag")
-	var circle       := CircleShape2D.new()
-	# Зона подбора едет за рисунком: у мешка это ресурс, и промахнуться мимо
-	# нарисованного из-за того, что круг остался от прежнего размера, — худший
-	# вид несправедливости.
-	circle.radius     = BAG_PX * 0.46
-	$CollisionShape2D.shape = circle
+	# Ловим тапы: в этом вся механика.
+	input_pickable  = true
+	input_event.connect(_on_input)
+	area_entered.connect(_on_area)
+
+	$CollisionShape2D.shape = CircleShape2D.new()
+
+	# Число на боку. Оно и есть выплата, поэтому стоит на самом мешке, а не над
+	# ним: цифра в стороне читалась бы как счётчик чего-то другого.
+	_lbl = Label.new()
+	_lbl.add_theme_font_override("font", UI_FONT)
+	_lbl.add_theme_font_size_override("font_size", 20)
+	_lbl.add_theme_color_override("font_color", Color(1.00, 0.97, 0.72))
+	_lbl.add_theme_color_override("font_outline_color", Color(0.06, 0.05, 0.02))
+	_lbl.add_theme_constant_override("outline_size", 6)
+	_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	add_child(_lbl)
+
+	_prompt = Node2D.new()
+	_prompt.set_script(TAP_PROMPT)
+	add_child(_prompt)
+	_prompt.call("setup", TAP_W)
+
+	_resize()
+
+# Размер, коллизия, число и место подсказки — ОДНОЙ функцией. Их четверо, они
+# завязаны на один множитель, и разъехавшись дают мешок, который бьётся мимо
+# себя: рисунок вырос, круг подбора остался прежним.
+func _resize() -> void:
+	var k : float = _bag_scale * _grow
+	_sprite.scale = Vector2.ONE * k
+	var px : float = BAG_PX * _grow
+	($CollisionShape2D.shape as CircleShape2D).radius = px * 0.46
+	_lbl.text     = str(_taps)
+	_lbl.size     = Vector2(70.0, 30.0)
+	_lbl.position = Vector2(-35.0, -15.0)
+	if is_instance_valid(_prompt):
+		# Над мешком и с запасом на собственную высоту подсказки: пальцы торчат
+		# выше картинки, и без запаса нижний палец лез бы на сам мешок.
+		_prompt.position = Vector2(0.0, -px * 0.55 - float(_prompt.call("half_height")) * 0.45)
 
 func _process(delta: float) -> void:
-	if _burst_done:
-		# Пока стреляет — сидит на голове и едет вместе с ней.
-		if is_instance_valid(_carrier):
-			position = _carrier.position + HEAD_OFFSET
-		return
 	ItemFlow.advance(self, speed, delta)
 	if ItemFlow.gone(self, 200.0):
 		queue_free()
 		return
+	# Пульс — реклама: мешок стоит на линии один и должен быть замечен раньше,
+	# чем поравняется с головой.
 	_pulse_t      += delta * 3.5
-	_sprite.scale  = Vector2.ONE * _bag_scale * (1.0 + sin(_pulse_t) * 0.12)
+	_sprite.scale  = Vector2.ONE * _bag_scale * _grow * (1.0 + sin(_pulse_t) * 0.10)
 
-# `catcher` — тот, кто поймал. Мешок может лопнуть и БЕЗ него: его жжёт молотов
-# и сносит огонь (`fire.gd` зовёт burst() без аргументов). Тогда перелёта на
-# голову нет, и знак выстреливается с того места, где мешок сгорел.
-func burst(mult: int = 1, catcher: Node2D = null) -> void:
-	if _burst_done:
+func _on_input(_vp: Node, ev: InputEvent, _shape_idx: int) -> void:
+	var pressed := (ev is InputEventScreenTouch and (ev as InputEventScreenTouch).pressed) \
+		or (ev is InputEventMouseButton and (ev as InputEventMouseButton).pressed \
+			and (ev as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT)
+	if pressed:
+		tap()
+
+# Публичный: им же пользуется тест.
+func tap() -> void:
+	if _spent or _grow >= GROW_MAX:
 		return
-	_burst_done     = true
+	_taps += 1
+	_grow  = minf(GROW_MAX, _grow + GROW_PER_TAP)
+	_resize()
+	# Отклик на тап — короткий подскок числа. Без него прибавка читается только
+	# по цифре, а цифра мелкая и на ходу её не поймать.
+	var tw := _lbl.create_tween()
+	tw.tween_property(_lbl, "scale", Vector2(1.35, 1.35), 0.07)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_lbl, "scale", Vector2.ONE, 0.12).set_trans(Tween.TRANS_SINE)
+
+# Сколько мешок сейчас стоит.
+func payout() -> int:
+	return _taps
+
+# Раздут ли он настолько, чтобы таранить.
+func is_ram() -> bool:
+	return _grow >= RAM_FROM
+
+# ── Таран ────────────────────────────────────────────────────────────────────
+# Раздутый мешок ломает то, во что врезался, и летит дальше. Ресурсы он НЕ
+# трогает: снести пиццу по дороге к счётчику — это отнять у игрока то, за что он
+# и тапал.
+const RAM_BREAKS : Array = ["obstacle", "slowing", "fire"]
+
+func _on_area(other: Area2D) -> void:
+	if _spent or not is_ram() or not is_instance_valid(other):
+		return
+	var hit := false
+	for g in RAM_BREAKS:
+		if other.is_in_group(g):
+			hit = true
+	if not hit:
+		return
+	if other.has_method("knock_down"):
+		other.call("knock_down")
+	elif other.has_method("on_hit"):
+		other.call("on_hit")
+	else:
+		other.queue_free()
+
+# ── Поимка ───────────────────────────────────────────────────────────────────
+# `mult` — пиратские ×2. `catcher` может быть null: мешок ловит не только
+# Нормальдо, его ещё жжёт огонь и молотов (`fire.gd` зовёт `burst()` без
+# аргументов). Сгоревший мешок не платит — потому раздутый и не горит.
+func burst(mult: int = 1, catcher: Node2D = null) -> int:
+	if _spent:
+		return 0
+	# РАЗДУТЫЙ НЕ СГОРАЕТ. Огонь зовёт эту же функцию без ловца; для обычного
+	# мешка это «сгорел и пропал», а для раздутого — ничего: он таран, и горящий
+	# предмет он ломает сам (см. `_on_area`).
+	if catcher == null and is_ram():
+		return 0
+	_spent          = true
 	collision_layer = 0
+	input_pickable  = false
+	if is_instance_valid(_prompt):
+		_prompt.call("dismiss", 0.12)
 
-	var audio := AudioStreamPlayer.new()
-	audio.stream = DOLLAR_SFX
-	get_parent().add_child(audio)
-	audio.play()
-	audio.finished.connect(audio.queue_free)
-
+	var paid : int = 0
 	if is_instance_valid(catcher):
-		_carrier = catcher
-		var hop := create_tween()
-		hop.tween_property(self, "position", catcher.position + HEAD_OFFSET, HOP_T)\
-			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-		await hop.finished
-		if not is_inside_tree():
-			return
+		paid = _taps * maxi(1, mult)
+		var audio := AudioStreamPlayer.new()
+		audio.stream = DOLLAR_SFX
+		get_parent().add_child(audio)
+		audio.play()
+		audio.finished.connect(audio.queue_free)
 
-	# Множитель (пиратские ×2) выкладывает ВТОРОЙ знак — другой и правее
-	# первого, а не вдвое больше долларов в том же. Удвоенная выплата обязана
-	# быть видна как удвоенная, иначе пассивка работает молча.
-	var names : Array = GLYPHS.keys()
-	names.shuffle()
-	for copy in maxi(1, mult):
-		if not is_inside_tree():
-			return
-		await _shoot_glyph(String(names[copy % names.size()]), copy)
-
-	if not is_inside_tree():
-		return
 	var tw := create_tween()
 	tw.tween_property(self, "scale", Vector2.ZERO, 0.22)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
 	tw.tween_callback(queue_free)
+	return paid
 
-# Выстреливает один знак. Доллары уходят ВЕЕРОМ — по одному, с шагом SHOT_STEP,
-# — но приземляются РАЗОМ. Иначе знак приезжает перекошенным: первые доллары уже
-# поехали влево с потоком, пока последние ещё летят вправо.
-#
-# Разом — это ОДИН тюин на весь залп, а не семнадцать своих с подобранными
-# длительностями. Своих было семнадцать, и каждый заводился по таймеру: и
-# таймер, и тюин квантуются кадром, ошибки складывались, и знак иногда приезжал
-# со съехавшим столбцом. У одного тюина часы одни на всех, и «разом» перестаёт
-# быть расчётом — становится свойством.
-func _shoot_glyph(glyph_name: String, copy_idx: int) -> void:
-	var parent := get_parent()
-	if parent == null:
-		return
-	var vp    := get_viewport_rect().size
-	var glyph : Array = GLYPHS.get(glyph_name, GLYPHS["dollar"])
-	var cell  : float = vp.y * GLYPH_H_FRAC / float(GLYPH_ROWS)
-	var top   : float = (vp.y - cell * float(GLYPH_ROWS)) * 0.5 + cell * 0.5
-	# Второй знак встаёт за первым с пробелом в полторы клетки: без пробела два
-	# знака слипаются в один нечитаемый ком.
-	var left  : float = vp.x + GLYPH_MARGIN \
-		+ float(copy_idx) * cell * (float(GLYPH_COLS) + 1.5)
-
-	var cells : Array = []
-	for row in GLYPH_ROWS:
-		var line : String = glyph[row]
-		for col in GLYPH_COLS:
-			if col < line.length() and line[col] == "X":
-				cells.append(Vector2(left + float(col) * cell,
-					top + float(row) * cell))
-	# Порядок вылета случайный: по строкам знак «печатался» бы сверху вниз, и
-	# выстрел читался бы как построчная выкладка, а не как залп.
-	cells.shuffle()
-
-	# Вылетают с шагом SHOT_STEP, а летят каждый СВОЮ длительность — так, чтобы
-	# приземлиться в один и тот же миг `total`.
-	var total : float = SHOT_FLY + float(maxi(0, cells.size() - 1)) * SHOT_STEP
-	var flying : Array = []
-	var tw := create_tween()
-	tw.set_parallel(true)
-	for i in cells.size():
-		var dollar := _make_dollar()
-		parent.add_child(dollar)
-		# Гасим ПОСЛЕ добавления в дерево: вход в дерево включает обработку
-		# заново, и выключенный заранее доллар оживал бы прямо в стволе мешка.
-		dollar.set_process(false)
-		dollar.collision_layer = 0
-		flying.append(dollar)
-		tw.tween_property(dollar, "position", cells[i], total - float(i) * SHOT_STEP)\
-			.set_delay(float(i) * SHOT_STEP)\
-			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	await tw.finished
-
-	# Оживают тоже разом — в один кадр: доллар, поехавший на пару кадров раньше
-	# соседа, увозит с собой свой столбец.
-	for d in flying:
-		if is_instance_valid(d):
-			d.collision_layer = 2
-			d.set_process(true)
-
-func _make_dollar() -> Node2D:
-	var dollar        := ITEM_SCENE.instantiate()
-	dollar.speed       = speed
-	dollar.is_eatable  = false
-	dollar.damage      = 0
-	dollar.rotates     = true
-	dollar.pulses      = true
-	dollar.item_group  = "dollar"
-	var spr: Sprite2D  = dollar.get_node("Sprite2D")
-	spr.texture        = DOLLAR_TEX
-	spr.scale          = Vector2.ONE * DOLLAR_SCALE
-	dollar.position    = position
-	# Гасить обработку и хитбокс здесь нельзя — вход в дерево их вернёт; это
-	# делает вызывающий, сразу после add_child. Смысл: доллар, пойманный на пути
-	# ЗА экран, обесценил бы весь такт (поймал мешок — сразу и деньги).
-	return dollar
+# Попадает ли точка в тело мешка — Нормальдо спрашивает, чтобы не считать тап по
+# мешку за дабл-тап спелла. Тот же приём, что был у конуса, пока по нему тапали:
+# один жест не должен значить двух разных действий.
+func contains_point(p: Vector2) -> bool:
+	var shape : Shape2D = $CollisionShape2D.shape
+	if shape == null:
+		return false
+	var r : float = (shape as CircleShape2D).radius + 14.0
+	return (p - global_position).length() <= r

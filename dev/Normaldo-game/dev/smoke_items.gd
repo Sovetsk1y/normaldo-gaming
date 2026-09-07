@@ -290,11 +290,17 @@ func _test_cone_tap() -> void:
 	game.queue_free()
 	await process_frame
 
-# Мешок — единственный ресурс, который платит СОБЫТИЕМ, и ломается это событие
-# молча: доллары всё равно появятся, просто россыпью. Поэтому проверяется не
-# «выплата пришла», а ФОРМА: знак стоит за экраном, целиком, и все клетки —
-# ровно по сетке 5×7. Перекошенный знак — это разъехавшееся время полёта, и
-# заметить его в игре можно только глазом на одном конкретном мешке.
+# ── МЕШОК ДЕНЕГ: ТАП РАСТИТ МЕШОК И ВЫПЛАТУ ──────────────────────────────────
+# Мешок летит небольшим, с числом «1» на боку. Каждый тап прибавляет к числу
+# единицу и раздувает мешок; поймал — получил столько долларов, сколько натапал.
+#
+# Проверяются четыре вещи, и все четыре ломаются молча:
+#  • число и размер идут ВМЕСТЕ. Разъедутся — мешок будет платить не за то, что
+#    видно, а такое расхождение глазами не поймать;
+#  • вместе с рисунком растёт КОЛЛИЗИЯ. Отстанет — мешок начнёт ловиться мимо
+#    себя, и это худший вид несправедливости у ресурса;
+#  • поимка платит РОВНО столько, сколько на боку, и второй раз не платит;
+#  • раздутый мешок НЕ СГОРАЕТ. Он таран, и горящий предмет ломает сам.
 func _test_money_bag_glyph() -> void:
 	var game : Node = load("res://scenes/game.tscn").instantiate()
 	get_root().add_child(game)
@@ -303,20 +309,6 @@ func _test_money_bag_glyph() -> void:
 	var nd : Node = game.get_node_or_null("Normaldo")
 	sp.call("clear_items")
 	sp.set_process(false)
-
-	# Знаки почти одного веса: редкий предмет не должен платить случайную сумму —
-	# «повезло» относится к встрече с ним, а не к жеребьёвке внутри. Ровно
-	# поровну не выходит (пять клеток ширины на S доллара и на палки иены), но
-	# разброс держится в две штуки.
-	var bag_script = load("res://scripts/money_bag.gd")
-	var sizes : Array = []
-	for name in (bag_script.GLYPHS as Dictionary).keys():
-		var n := 0
-		for line in (bag_script.GLYPHS[name] as Array):
-			n += String(line).count("X")
-		sizes.append(n)
-	_check(int(sizes.max()) - int(sizes.min()) <= 2,
-		"знаки почти одного веса: %s" % [sizes])
 
 	sp.call("dev_spawn_money_bag")
 	await process_frame
@@ -329,63 +321,69 @@ func _test_money_bag_glyph() -> void:
 		game.queue_free()
 		return
 
-	var cells : int = int(sizes.min())
-	bag.call("burst", 1, nd)
-	# Ждём, пока встанут все: залп идёт по одному, и мерить раньше — мерить
-	# половину знака.
-	var t0 := Time.get_ticks_msec()
-	var got : Array = []
-	while Time.get_ticks_msec() - t0 < 8000:
-		await process_frame
-		got = _dollars(sp)
-		# Ждём именно ПРИЗЕМЛЕНИЯ: доллар оживает (`set_process(true)`) в
-		# колбэке тюина полёта. Считать по количеству нельзя — все семнадцать
-		# существуют уже в момент залпа, но половина ещё летит вправо, и
-		# померенный тогда знак «перекошен» по вине теста, а не кода.
-		if got.size() >= cells and _all_landed(got):
-			break
-	_check(sizes.has(got.size()),
-		"выложен целый знак: %d долларов, знаки бывают %s" % [got.size(), sizes])
-	if got.size() < cells:
+	var shape : CollisionShape2D = null
+	for c in bag.get_children():
+		if c is CollisionShape2D:
+			shape = c
+	_check(shape != null, "и у него есть зона подбора")
+	if shape == null:
 		game.queue_free()
 		return
 
-	var vp : Vector2 = get_root().get_visible_rect().size
-	var min_x : float = INF
-	for d in got:
-		min_x = minf(min_x, (d as Node2D).position.x)
-	_check(min_x > vp.x,
-		"знак собран ЗА правым краем: левее всех %.0f при экране %.0f" % [min_x, vp.x])
+	_check(int(bag.call("payout")) == 1, "нетронутый стоит один доллар")
+	_check(not bool(bag.call("is_ram")), "и тараном ещё не является")
+	var r0 : float = (shape.shape as CircleShape2D).radius
 
-	# Форма: клетки обязаны лечь ровно по сетке 5×7 — не больше пяти столбцов и
-	# не больше семи строк, и в каждой строке хотя бы один доллар.
-	var cell : float = vp.y * float(bag_script.GLYPH_H_FRAC) / float(bag_script.GLYPH_ROWS)
-	var cols : Dictionary = {}
-	var rows : Dictionary = {}
-	for d in got:
-		cols[int(round(((d as Node2D).position.x - min_x) / cell))] = true
-		rows[int(round((d as Node2D).position.y / cell))] = true
-	_check(cols.size() <= bag_script.GLYPH_COLS and rows.size() <= bag_script.GLYPH_ROWS,
-		"столбцов %d, строк %d — сетка 5×7 выдержана" % [cols.size(), rows.size()])
-	_check(rows.size() >= 5, "знак занимает высоту, а не одну полосу: строк %d" % rows.size())
+	# Пять тапов: число +5, размер и коллизия выросли вместе с ним.
+	for _i in 5:
+		bag.call("tap")
+	await process_frame
+	_check(int(bag.call("payout")) == 6, "пять тапов → шесть долларов: %d" % int(bag.call("payout")))
+	var r1 : float = (shape.shape as CircleShape2D).radius
+	_check(r1 > r0, "зона подбора выросла вместе с мешком: %.1f → %.1f" % [r0, r1])
+	_check(bool(bag.call("is_ram")), "раздутый стал тараном")
+	# Число на боку — то же самое, что выплата. Иначе мешок платит не за то, что
+	# показывает, и спорить с ним игроку нечем.
+	var shown : Array = []
+	for c in bag.get_children():
+		if c is Label:
+			shown.append(String((c as Label).text))
+	_check(shown.has("6"), "и на боку написано то же число: %s" % [shown])
 
-	# И знак ЕДЕТ — целиком и одинаково: доллар, застрявший с выключенным
-	# _process, остался бы висеть за экраном навсегда.
-	var before : Array = []
-	for d in got:
-		before.append((d as Node2D).position.x)
-	# Ждём НАСТОЯЩИЕ 250 мс: предметы едут на real-time delta, а кадров в
-	# headless набегает столько, что «четверть секунды кадрами» — это доли
-	# миллисекунды и нулевое смещение.
-	var t1 := Time.get_ticks_msec()
-	while Time.get_ticks_msec() - t1 < 250:
-		get_root().get_tree().paused = false
-		await process_frame
-	var moved := 0
-	for i in got.size():
-		if is_instance_valid(got[i]) and (got[i] as Node2D).position.x < before[i] - 1.0:
-			moved += 1
-	_check(moved == got.size(), "поехали влево все %d из %d" % [moved, got.size()])
+	# ПОТОЛОК: мешок не растёт бесконечно. Лейн 86 px, и переросший его мешок
+	# начинает есть соседние линии.
+	for _i in 200:
+		bag.call("tap")
+	await process_frame
+	var r_max : float = (shape.shape as CircleShape2D).radius
+	for _i in 50:
+		bag.call("tap")
+	await process_frame
+	_check(is_equal_approx((shape.shape as CircleShape2D).radius, r_max),
+		"дорастив до потолка, дальше не растёт")
+
+	# РАЗДУТЫЙ НЕ СГОРАЕТ: огонь зовёт `burst()` без ловца.
+	_check(int(bag.call("burst", 1, null)) == 0, "раздутый мешок огню не поддался")
+	_check(is_instance_valid(bag) and not bool(bag.get("_spent")),
+		"и остался в кадре")
+
+	# ПОИМКА платит ровно столько, сколько на боку, и один раз.
+	var due : int = int(bag.call("payout"))
+	var paid : int = int(bag.call("burst", 1, nd))
+	_check(paid == due, "поимка заплатила по числу: %d при %d" % [paid, due])
+	_check(int(bag.call("burst", 1, nd)) == 0, "а второй раз не платит")
+
+	# ОБЫЧНЫЙ мешок огню поддаётся — он ресурс, а не таран.
+	sp.call("clear_items")
+	sp.call("dev_spawn_money_bag")
+	await process_frame
+	var plain : Node2D = null
+	for c in sp.get_children():
+		if c.is_in_group("money_bag"):
+			plain = c
+	_check(plain != null and int(plain.call("burst", 1, null)) == 0,
+		"нетронутый мешок сгорает без выплаты")
+	_check(plain != null and bool(plain.get("_spent")), "и после огня уже потрачен")
 
 	game.queue_free()
 	await process_frame

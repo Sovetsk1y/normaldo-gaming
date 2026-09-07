@@ -1146,12 +1146,16 @@ func _input(event: InputEvent) -> void:
 			if _region_max_x >= 0.0 and t.position.x > _region_max_x:
 				_ignored_touches[t.index] = true
 				return
-			# ЗАСЛОНКИ НА КОНУСЕ БОЛЬШЕ НЕТ. Она стояла тут, пока конус разбирали
-			# тапами: палец, попавший в конус, работал на конус, и Нормальдо этот
-			# тап игнорировал — иначе один и тот же жест значил бы два разных
-			# действия. Тапов у конуса не осталось (см. `cone.gd`), и заслонка
-			# превратилась бы в мёртвую зону на экране: дабл-тап спелла в сторону
-			# высокого конуса молча не срабатывал бы.
+			# ТАП ПО МЕШКУ ДЕНЕГ РАБОТАЕТ НА МЕШОК. Он растит его и будущую
+			# выплату (`money_bag.gd`), и тот же палец не должен вдобавок
+			# считаться половиной дабл-тапа: один жест — одно действие.
+			#
+			# Такая же заслонка когда-то стояла на конусе, пока по нему тапали.
+			# С конуса она снята вместе с тапами: заслонка без своей механики —
+			# это мёртвая зона на экране, где спелл молча не срабатывает.
+			if _touch_on_tappable(t.position):
+				_ignored_touches[t.index] = true
+				return
 			var now := Time.get_ticks_msec() / 1000.0
 			if now - _last_tap_t <= _DTAP_TIME and t.position.distance_to(_last_tap_pos) <= _DTAP_DIST:
 				_last_tap_t = -10.0
@@ -1652,6 +1656,19 @@ func award_loot_tally(mult: int) -> Vector2i:
 	for _i in extra_dollar:
 		_collect_dollar()
 	return Vector2i(extra_pizza, extra_dollar)
+
+# Попал ли тап в предмет, который сам ловит тапы. Сейчас такой один — мешок
+# денег; список групп, а не проверка по одной, потому что второй такой предмет
+# заведётся раньше, чем про эту функцию вспомнят.
+const TAPPABLE_GROUPS : Array = ["money_bag"]
+
+func _touch_on_tappable(pos: Vector2) -> bool:
+	for g in TAPPABLE_GROUPS:
+		for n in get_tree().get_nodes_in_group(g):
+			if is_instance_valid(n) and n.has_method("contains_point") \
+					and n.call("contains_point", pos):
+				return true
+	return false
 
 const COMPASS_MIRROR_SEC : float = 5.0
 const SHROOM_SEC : float = 8.0
@@ -4154,7 +4171,13 @@ func _on_area_entered(area: Area2D) -> void:
 		if mult > 1:
 			_vfx_particles(SkinSkills.TRANSFORM)
 			_show_floating_text("×2 МЕШОК!", Color(1.0, 0.75, 0.15))
-		area.burst(mult, self)
+		# Мешок платит СТОЛЬКО, СКОЛЬКО ЕГО НАТАПАЛИ, и возвращает это число сам:
+		# считать его здесь значило бы завести вторую копию правила выплаты.
+		var paid : int = int(area.burst(mult, self))
+		for _i in paid:
+			_collect_dollar()
+		if paid > 0:
+			_show_floating_text("+%d $" % paid, Color(0.60, 1.00, 0.55))
 	elif area.is_in_group("magnet") and _magnet_remaining <= 0.0:
 		_magnet_remaining = 3.0
 		area.activate(self)
