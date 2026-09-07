@@ -53,6 +53,22 @@
         { "fieldPath": "score", "order": "DESCENDING" },
         { "fieldPath": "updated_at", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "ep4",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "score", "order": "DESCENDING" },
+        { "fieldPath": "updated_at", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ep5",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "score", "order": "DESCENDING" },
+        { "fieldPath": "updated_at", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -6,8 +6,8 @@
     "node": "20"
   },
   "scripts": {
-    "build": "tsc",
-    "lint": "tsc --noEmit",
+    "build": "node check-indexes.mjs && tsc",
+    "lint": "node check-indexes.mjs && tsc --noEmit",
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions"
   },
