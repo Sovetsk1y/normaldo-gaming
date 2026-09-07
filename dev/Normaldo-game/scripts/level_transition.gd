@@ -67,9 +67,9 @@ const DOLLAR_TEX := preload("res://assets/items/dollar.png")
 # целиком — это и есть переход, а шторка под ними просто прячет подмену фона.
 #
 # Купюр столько, чтобы при их размере они перекрывались: 130 штук по ~70 px на
-# экране 960×430 дают примерно двойное покрытие, то есть сплошной ворох без
-# просветов.
-const BILLS   : int   = 130
+# экране 960×430 дают примерно двойное покрытие. На первом кадре 130 всё ещё
+# оставляли просветы в правом нижнем углу — отсюда 175.
+const BILLS   : int   = 175
 const BILL_PX : float = 70.0
 const FLY_MIN : float = 0.85
 const FLY_MAX : float = 1.70
@@ -152,6 +152,11 @@ func _run(caption: String, on_covered: Callable, story: String = "") -> void:
 	var lbl := Label.new()
 	lbl.add_theme_font_override("font", UI_FONT)
 	lbl.add_theme_font_size_override("font_size", 30)
+	# ОБВОДКА ОБЯЗАТЕЛЬНА. Пока под надписью была ровная заливка, текст читался и
+	# без неё; на сплошном ворохе зелёных купюр белые буквы тонут в первом же
+	# знаке доллара, попавшем под них.
+	lbl.add_theme_color_override("font_outline_color", Color(0.03, 0.03, 0.05))
+	lbl.add_theme_constant_override("outline_size", 12)
 	lbl.text                 = caption
 	lbl.modulate             = Color(COL_TEXT.r, COL_TEXT.g, COL_TEXT.b, 0.0)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -169,7 +174,9 @@ func _run(caption: String, on_covered: Callable, story: String = "") -> void:
 		# ровно под неё — от центра вниз на высоту строки с запасом.
 		story_lbl = Label.new()
 		story_lbl.add_theme_font_override("font", UI_FONT)
-		story_lbl.add_theme_font_size_override("font_size", 17)
+		story_lbl.add_theme_font_size_override("font_size", 21)
+		story_lbl.add_theme_color_override("font_outline_color", Color(0.03, 0.03, 0.05))
+		story_lbl.add_theme_constant_override("outline_size", 10)
 		story_lbl.text                 = story
 		story_lbl.modulate             = Color(COL_STORY.r, COL_STORY.g, COL_STORY.b, 0.0)
 		story_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
