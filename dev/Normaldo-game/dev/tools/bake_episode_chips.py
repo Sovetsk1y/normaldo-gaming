@@ -62,16 +62,41 @@ def fit(img: Image.Image, box: tuple) -> Image.Image:
 
     ПО ЦЕНТРУ СНИЗУ, а не по центру окна: у чипа первого эпизода труба стоит на
     плашке, и рисунок, повисший в воздухе над ней, читался бы как съехавший.
+
+    Возвращается кадр РАЗМЕРОМ С ЧИП, а не с окно: окно теперь не во всю ширину
+    (см. `art_window`), и класть его результат в угол было бы неверно.
     """
-    bw, bh = box[2] - box[0], box[3] - box[1]
+    bx, by, bw, bh = box[0], box[1], box[2] - box[0], box[3] - box[1]
     src = img.crop(img.getbbox()) if img.getbbox() else img
     k = min(bw / src.width, bh / src.height)
     w, h = max(1, int(src.width * k)), max(1, int(src.height * k))
-    # LANCZOS, а не NEAREST: это рисунок, а не осепараллельная плашка, и
-    # ступеньки ему ни к чему (та же логика, что в bake_mode_btn.py).
-    out = Image.new("RGBA", (bw, bh), (0, 0, 0, 0))
-    out.paste(src.resize((w, h), Image.LANCZOS), ((bw - w) // 2, bh - h))
-    return out
+    # NEAREST, а не LANCZOS. Рисунки авторские и пиксельные: сглаживание мылит
+    # обводку, и на чипе это видно рядом с плашкой, которая скопирована точь-в-
+    # точь и потому осталась резкой. Первый чип художник отдал уже увеличенным
+    # NEAREST-ом — остальные должны быть той же плотности, иначе одно кольцо
+    # чипов собрано из резкого и мыльного.
+    return src.resize((w, h), Image.NEAREST), (bx + (bw - w) // 2, by + bh - h)
+
+
+def art_window(base: Image.Image, plate_y: int) -> tuple:
+    """Окно рисунка — ЗАМЕР по чипу первого эпизода, а не «всё над плашкой».
+
+    Раньше окном было ровно `(0, 0, ширина, верх плашки)`, и рисунок распирало
+    на всю его ширину. У первого чипа, нарисованного автором целиком, труба
+    занимает меньше половины ширины и стоит с полями — а коряги, пальмы и
+    колонка упирались в края кадра и в плашку. Снаружи это выглядело обрезкой:
+    на экране чип ещё и масштабируется, и прижатый к краю рисунок читается как
+    срезанный.
+
+    Поэтому окно берётся у САМОГО первого чипа: сколько места автор отвёл под
+    трубу, столько же достаётся и остальным. Число тут одно и то же — то, что
+    нарисовано, а не выбранное на глаз.
+    """
+    art = base.crop((0, 0, base.width, plate_y))
+    box = art.getbbox()
+    if box is None:
+        raise SystemExit("на чипе первого эпизода нет рисунка — окно замерить не с чего")
+    return box
 
 
 def glow_for(chip: Image.Image) -> Image.Image:
@@ -83,6 +108,19 @@ def glow_for(chip: Image.Image) -> Image.Image:
     return g
 
 
+def tab_icon(chip: Image.Image, plate_y: int) -> Image.Image:
+    """Иконка для вкладки лидеров: рисунок чипа БЕЗ плашки, обрезанный по себе.
+
+    На вкладках плашке под подпись места нет — подпись там своя. А сам рисунок
+    нужен тот же самый, что на чипе: игрок узнаёт эпизод по нему, и второй
+    комплект картинок разошёлся бы с первым при любой перерисовке. Поэтому
+    иконка НЕ рисуется, а вырезается из готового чипа.
+    """
+    art = chip.crop((0, 0, chip.width, plate_y))
+    box = art.getbbox()
+    return art.crop(box) if box else art
+
+
 def main():
     if len(sys.argv) < 2:
         raise SystemExit("укажите папку с иконками: bake_episode_chips.py <папка>")
@@ -91,9 +129,7 @@ def main():
     k = base.width // UNIT
     px, py, pw, ph = [v * k for v in PLATE]
     plate = base.crop((px, py, px + pw, py + ph))
-    # Окно рисунка — всё, что НАД плашкой. Границу берём у плашки, а не числом:
-    # перепечатают чип в другой плотности — окно поедет за ней само.
-    window = (0, 0, base.width, py)
+    window = art_window(base, py)
 
     for ep, name in sorted(ICONS.items()):
         f = src_dir / name
@@ -101,12 +137,26 @@ def main():
             print("нет файла, пропускаю: %s" % f)
             continue
         chip = Image.new("RGBA", base.size, (0, 0, 0, 0))
-        chip.paste(fit(Image.open(f).convert("RGBA"), window), (0, 0))
+        art, at = fit(Image.open(f).convert("RGBA"), window)
+        chip.alpha_composite(art, at)
         chip.alpha_composite(plate, (px, py))
         out = DIR / ("chapter%d_mode_btn.png" % ep)
         chip.save(out)
         glow_for(chip).save(DIR / ("chapter%d_mode_btn_glow.png" % ep))
         print("эпизод %d → %s (+свечение)" % (ep, out.name))
+
+    # Иконки для вкладок таблицы лидеров — со ВСЕХ чипов, включая первый и
+    # бесконечный, которых сборка чипов не касается: они нарисованы автором
+    # целиком, но вкладке нужен тот же рисунок без плашки.
+    for name, tag in [("chapter%d_mode_btn" % i, "chapter%d" % i) for i in range(1, 6)] \
+            + [("endless_mode_btn", "endless")]:
+        src = DIR / (name + ".png")
+        if not src.exists():
+            print("нет чипа, пропускаю иконку: %s" % src.name)
+            continue
+        icon = tab_icon(Image.open(src).convert("RGBA"), py)
+        icon.save(DIR / (tag + "_tab_icon.png"))
+        print("иконка вкладки %s → %dx%d" % (tag, icon.width, icon.height))
 
 
 if __name__ == "__main__":

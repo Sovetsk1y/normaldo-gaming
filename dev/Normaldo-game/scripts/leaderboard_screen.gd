@@ -71,6 +71,22 @@ var _content      : Control   = null
 # была терпима при двух вкладках и превращается в восемь при четырёх.
 var _tab_bg   : Array = []
 var _tab_lbl  : Array = []
+var _tab_icons: Array = []
+
+# ── Значки режимов на вкладках ───────────────────────────────────────────────
+# Те же рисунки, что на чипах выбора режима в главном меню, только без плашки
+# под подпись: её вырезает `dev/tools/bake_episode_chips.py`, он же собирает и
+# сами чипы. Второй комплект картинок тут заводить нельзя — перерисуют эпизод,
+# и вкладка останется со старым.
+const TAB_ICON_PX : float = 26.0
+const TAB_ICONS : Dictionary = {
+	LeaderboardModes.Mode.EP1:     preload("res://assets/ui/menu/chapter1_tab_icon.png"),
+	LeaderboardModes.Mode.EP2:     preload("res://assets/ui/menu/chapter2_tab_icon.png"),
+	LeaderboardModes.Mode.EP3:     preload("res://assets/ui/menu/chapter3_tab_icon.png"),
+	LeaderboardModes.Mode.EP4:     preload("res://assets/ui/menu/chapter4_tab_icon.png"),
+	LeaderboardModes.Mode.EP5:     preload("res://assets/ui/menu/chapter5_tab_icon.png"),
+	LeaderboardModes.Mode.ENDLESS: preload("res://assets/ui/menu/endless_tab_icon.png"),
+}
 var _my_pos_btn   : Node2D    = null
 var _podium_root  : Control   = null
 # Что именно отрисовано сейчас: подиум и список по номерам мест. Пригождается и
@@ -265,17 +281,28 @@ func _build(vp: Vector2) -> void:
 
 	_tab_bg.clear()
 	_tab_lbl.clear()
+	_tab_icons.clear()
 	for i in n:
 		var mode : int = int(LeaderboardModes.MODES[i])
 		var at := Vector2(tabs_x + (tab_w + gap) * float(i), tab_y)
 		var sz := Vector2(tab_w, tab_h)
 		_tab_bg.append(_tab_pill(at, sz))
-		_tab_lbl.append(_tab_label(LeaderboardModes.mode_label(mode), at, sz, tab_fs))
-		# На закрытой вкладке рисуется замок. Без него закрытая вкладка выглядит
-		# рабочей и по нажатию молча ничего не делает — а тусклой её не считать:
-		# неактивная вкладка тоже тусклая.
-		if not _is_mode_unlocked(mode):
-			_draw_padlock(_slide_root, at + Vector2(9.0, (tab_h - 14.0) * 0.5), 12.0)
+		_tab_lbl.append(_tab_label(LeaderboardModes.mode_label(mode), at, sz, tab_fs,
+			TAB_ICON_PX + 6.0))
+		# ЗНАЧОК РЕЖИМА НА КАЖДОЙ ВКЛАДКЕ, а не замок на закрытых. Замок отвечал
+		# на вопрос «можно ли сюда», но не отвечал на «а что это» — при шести
+		# вкладках подряд подписи «ЭПИЗОД 1…5» различаются одной цифрой, и полоса
+		# читалась как список, а не как места, по которым игрок уже ходил. Тот же
+		# рисунок стоит на чипе выбора режима в меню, так что вкладка и кнопка
+		# запуска узнаются одним и тем же образом.
+		#
+		# Закрытость показывает ТУСКЛОСТЬ значка (см. `_set_tab_style`): у
+		# открытой вкладки он в полный цвет, у закрытой — приглушён почти до
+		# силуэта. Замок для этого не нужен: подсказка по нажатию всё равно
+		# говорит словами, чего не хватает.
+		var icon := _tab_icon(mode, at, sz)
+		if icon != null:
+			_tab_icons.append(icon)
 		_tab_button(at, sz, _on_tab.bind(mode))
 	_build_help_pill(Vector2(tabs_x + strip_w + 10.0, tab_y + (tab_h - 18.0) * 0.5),
 		Color(1.00, 0.85, 0.35), 0)
@@ -332,7 +359,26 @@ func _tab_pill(pos: Vector2, size: Vector2) -> Panel:
 		Color(0.40, 0.36, 0.26, 0.95))
 	return p
 
-func _tab_label(text: String, pos: Vector2, size: Vector2, font_size: int = 13) -> Label:
+# Значок режима слева на вкладке. Вписывается ПО СОДЕРЖИМОМУ в квадрат
+# TAB_ICON_PX: у иконок разные пропорции (труба высокая, копмашина плоская), и
+# общий множитель сделал бы одни вдвое крупнее других.
+func _tab_icon(mode: int, at: Vector2, sz: Vector2) -> TextureRect:
+	var tex : Texture2D = TAB_ICONS.get(mode)
+	if tex == null:
+		return null
+	var t := TextureRect.new()
+	t.texture              = tex
+	t.expand_mode          = TextureRect.EXPAND_IGNORE_SIZE
+	t.stretch_mode         = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	t.texture_filter       = CanvasItem.TEXTURE_FILTER_NEAREST
+	t.size                 = Vector2(TAB_ICON_PX, TAB_ICON_PX)
+	t.position             = at + Vector2(7.0, (sz.y - TAB_ICON_PX) * 0.5)
+	t.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	_slide_root.add_child(t)
+	return t
+
+func _tab_label(text: String, pos: Vector2, size: Vector2, font_size: int = 13,
+		left_pad: float = 0.0) -> Label:
 	var l := Label.new()
 	l.add_theme_font_override("font", UI_FONT)
 	l.add_theme_font_size_override("font_size", font_size)
@@ -340,8 +386,10 @@ func _tab_label(text: String, pos: Vector2, size: Vector2, font_size: int = 13) 
 	l.text                 = text
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	l.size                 = size
-	l.position             = pos
+	# Подпись центрируется в том, что ОСТАЛОСЬ от вкладки после значка. Иначе
+	# она встаёт по центру всей пилюли и наезжает на значок слева.
+	l.size                 = Vector2(size.x - left_pad, size.y)
+	l.position             = pos + Vector2(left_pad, 0.0)
 	l.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	_slide_root.add_child(l)
 	return l
@@ -641,6 +689,13 @@ func _refresh_tab_visual() -> void:
 	for i in _tab_bg.size():
 		var mode : int = int(LeaderboardModes.MODES[i])
 		_set_tab_style(_tab_bg[i], _tab_lbl[i], mode == _active_metric)
+		# Значок ЗАКРЫТОЙ вкладки приглушён почти до силуэта — это и есть замок
+		# теперь. Активность на него не влияет: он про «открыто ли», а форма
+		# пилюли — про «где я сейчас», и мешать два сообщения в один элемент
+		# значит не сказать ни одного.
+		if i < _tab_icons.size() and is_instance_valid(_tab_icons[i]):
+			(_tab_icons[i] as TextureRect).modulate = \
+				Color(1, 1, 1, 1.0) if _is_mode_unlocked(mode) else Color(0.35, 0.33, 0.30, 0.75)
 
 func _set_tab_style(pill: Panel, lbl: Label, active: bool) -> void:
 	if not is_instance_valid(pill) or not is_instance_valid(lbl):

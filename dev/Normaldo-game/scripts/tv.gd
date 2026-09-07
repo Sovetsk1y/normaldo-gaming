@@ -5,10 +5,24 @@ extends Sprite2D
 # (broken/static — kept for later use). Currently only PLAY loops.
 #
 # Also drives the "channel-surfing" loop used while we're on the main menu:
-# plays a random tv*.mp3 clip, and 3 seconds before it ends asks Normaldo to
-# play his remote-control animation. The audio swaps to the next random clip
-# at the exact moment Normaldo emits menu_remote_button_pressed, so the click
-# and the channel change line up perfectly.
+# ведёт отсчёт до смены канала и за три секунды до неё просит Нормальдо взяться
+# за пульт. Канал переключается ровно в тот момент, когда он жмёт кнопку
+# (`menu_remote_button_pressed`), — щелчок и смена совпадают.
+#
+# ── ТЕЛЕВИЗОР МОЛЧИТ ─────────────────────────────────────────────────────────
+# Болтовня каналов (tv1…tv7.mp3) с главной убрана: на меню играет музыка, и
+# поверх неё второй звуковой слой не складывался — два источника спорили друг с
+# другом, а музыка при этом была тише, чем сама по себе.
+#
+# Убрана именно ОЗВУЧКА, а не сцена: телевизор так же светится, так же
+# переключает каналы, Нормальдо так же тянется за пультом. Раньше ритм этого
+# всего задавала ДЛИНА КЛИПА — снять звук и не заменить часы значило бы
+# заморозить картинку на одном канале навсегда и заодно убить достижение
+# «Пульт нашёлся». Поэтому отсчёт теперь свой, `CHANNEL_TIME`.
+#
+# Файлы tv*.mp3 оставлены в assets: они ещё пригодятся, если телевизор
+# когда-нибудь заговорит там, где музыки нет.
+const CHANNEL_TIME : float = 22.0   # сколько «идёт» канал до смены
 
 const SHEET_PLAY  := preload("res://assets/background_items/tv/tv_play_sheet.png")
 const SHEET_CRASH := preload("res://assets/background_items/tv/tv_crash_sheet.png")
@@ -32,9 +46,8 @@ const SCALE_FACTOR : float = 2.0
 # (Синхронизировано с background.gd SCROLL_SPEED = 68 — иначе ТВ отрывается от пола.)
 const SCROLL_SPEED : float = 68.0
 
-# How many seconds before the current track ends to cue Normaldo to start his
-# remote animation. The animation takes ~ this long so the press jerk lands
-# right around the same time the track would've naturally faded out.
+# За сколько секунд до смены канала звать Нормальдо за пультом. Анимация длится
+# примерно столько же, так что рывок с нажатием приходится ровно на смену.
 const REMOTE_LEAD_TIME : float = 3.0
 
 var _frame_index     : int     = 0
@@ -44,12 +57,10 @@ var _crashed         : bool    = false
 var _locked_position : Vector2 = Vector2.ZERO
 var _bg              : Node    = null
 
-# Channel-surfing playback
-var _tv_audio       : AudioStreamPlayer = null
+# Channel-surfing
 var _crash_audio    : AudioStreamPlayer = null
-var _tv_tracks      : Array       = []
-var _current_track  : int         = -1
-var _remote_cued    : bool        = false   # true once we've asked Normaldo to start the anim for this clip
+var _channel_left   : float       = CHANNEL_TIME   # до смены канала
+var _remote_cued    : bool        = false   # уже позвали Нормальдо за пультом
 var _normaldo       : Node        = null
 
 func _ready() -> void:
@@ -69,12 +80,6 @@ func _ready() -> void:
 	global_position  = _locked_position
 	_bg = get_parent().get_node_or_null("Background")
 
-	_load_tv_tracks()
-	_tv_audio = AudioStreamPlayer.new()
-	_tv_audio.bus = "Master"
-	_tv_audio.volume_db = -6.0   # background TV chatter, not the main attraction
-	add_child(_tv_audio)
-
 	# Pre-warm the crash SFX player — adding the player + assigning the stream
 	# at impact time costs a frame or two before play() actually fires, which
 	# the player perceives as audio lag behind the visual smash. Keeping it
@@ -90,14 +95,8 @@ func _ready() -> void:
 	# step with the on-screen button click. Connection happens after one frame
 	# so both nodes are guaranteed to be ready (TV and Normaldo are siblings).
 	call_deferred("_hook_remote_signal")
-
-	# Always boot with tv1.mp3 — the rest cycle randomly after the first
-	# channel change.
-	if not _tv_tracks.is_empty():
-		_current_track = 0
-		_tv_audio.stream = _tv_tracks[0]
-		_tv_audio.play()
-		_remote_cued = false
+	_channel_left = CHANNEL_TIME
+	_remote_cued  = false
 
 func _set_frame(idx: int) -> void:
 	_frame_index = idx
@@ -134,29 +133,20 @@ func _process(delta: float) -> void:
 	if _crashed:
 		return
 
-	# Cue Normaldo's remote animation 3 seconds before the current clip ends.
-	if _tv_audio != null and _tv_audio.playing and not _remote_cued and _tv_audio.stream != null:
-		var total : float = _tv_audio.stream.get_length()
-		if total > 0.0:
-			var remaining : float = total - _tv_audio.get_playback_position()
-			if remaining <= REMOTE_LEAD_TIME:
-				_remote_cued = true
-				if _normaldo and _normaldo.has_method("play_tv_remote_anim"):
-					_normaldo.play_tv_remote_anim()
-	# Safety: if a track ended naturally without anyone pressing the button
-	# (e.g. Normaldo wasn't in menu-idle), roll straight to the next clip so
-	# the TV never falls silent.
-	if _tv_audio != null and not _tv_audio.playing and not _tv_tracks.is_empty():
+	# Часы канала. Раньше их роль играла длина клипа — см. шапку.
+	_channel_left -= delta
+	# За три секунды до смены зовём Нормальдо взяться за пульт.
+	if not _remote_cued and _channel_left <= REMOTE_LEAD_TIME:
+		_remote_cued = true
+		if _normaldo and _normaldo.has_method("play_tv_remote_anim"):
+			_normaldo.play_tv_remote_anim()
+	# Подстраховка: если кнопку так никто и не нажал (Нормальдо был занят не
+	# сидением на диване), канал всё равно переключается — телевизор не должен
+	# залипать на одном кадре.
+	if _channel_left <= 0.0:
 		_play_next_track()
 
 # ── Channel surfing ──────────────────────────────────────────────────────────
-
-func _load_tv_tracks() -> void:
-	_tv_tracks.clear()
-	for i in range(1, 8):
-		var p : String = "res://assets/audio/tv/tv%d.mp3" % i
-		if ResourceLoader.exists(p):
-			_tv_tracks.append(load(p))
 
 func _hook_remote_signal() -> void:
 	_normaldo = get_parent().get_node_or_null("Normaldo")
@@ -165,17 +155,11 @@ func _hook_remote_signal() -> void:
 		if not _normaldo.menu_remote_button_pressed.is_connected(_on_remote_pressed):
 			_normaldo.menu_remote_button_pressed.connect(_on_remote_pressed)
 
+# Переключить канал. Звука у канала больше нет (см. шапку), так что вся смена —
+# это перезапуск часов; картинку крутит общий кадровый цикл.
 func _play_next_track() -> void:
-	if _tv_tracks.is_empty():
-		return
-	var idx : int = randi() % _tv_tracks.size()
-	# Avoid playing the same clip twice in a row when we have a choice.
-	if idx == _current_track and _tv_tracks.size() > 1:
-		idx = (idx + 1) % _tv_tracks.size()
-	_current_track = idx
-	_tv_audio.stream = _tv_tracks[idx]
-	_tv_audio.play()
-	_remote_cued = false
+	_channel_left = CHANNEL_TIME
+	_remote_cued  = false
 
 # Called the instant Normaldo's remote-button jerk hits its lowest point.
 func _on_remote_pressed() -> void:
@@ -187,26 +171,21 @@ func _on_remote_pressed() -> void:
 func start_game() -> void:
 	pass
 
-# Уйти со сцены сразу — см. `couch.leave_scene`. Звук глушим руками: телевизор
-# болтает своим каналом, и оборванный на полуслове он слышен как сбой, а не как
-# смена сцены.
+# Уйти со сцены — см. `couch.leave_scene`.
+#
+# Раньше узел жил ещё четверть секунды после ухода: телевизор болтал своим
+# каналом, и оборванный на полуслове звук слышался как сбой, поэтому его
+# доводили затуханием. Канал молчит — доводить нечего, уходим сразу.
 func leave_scene() -> void:
-	# ВИДНО его перестаёт быть сразу — за занавесом, где смена и должна
-	# случиться. А звук доводится затуханием: телевизор болтает своим каналом, и
-	# оборванный на полуслове он слышен как сбой. Узел живёт эти доли секунды
-	# только ради звука, на экране его уже нет.
 	visible = false
 	set_process(false)
-	if _tv_audio and _tv_audio.playing:
-		var tw := create_tween()
-		tw.tween_property(_tv_audio, "volume_db", -40.0, 0.25)
-		tw.tween_callback(queue_free)
-		return
 	queue_free()
 
-# Slams the TV: kills the channel-surfing audio, swaps the sprite sheet to
-# the smashed/static frames, plays the crash SFX, and kicks off the
-# ping-pong frame loop (0 → last → 0 → last → …).
+# Slams the TV: swaps the sprite sheet to the smashed/static frames, plays the
+# crash SFX, and kicks off the ping-pong frame loop (0 → last → 0 → last → …).
+#
+# Звон разбитого экрана ОСТАЁТСЯ, хотя каналы замолчали: это не фон, а отклик на
+# действие игрока — он сам швырнул пульт.
 func trigger_crash() -> void:
 	if _crashed:
 		return
@@ -216,8 +195,6 @@ func trigger_crash() -> void:
 	# sprite-sheet swap first introduces a perceptible visual-leads-audio gap.
 	if _crash_audio:
 		_crash_audio.play()
-	if _tv_audio:
-		_tv_audio.stop()
 	texture     = SHEET_CRASH
 	_frame_index = 0
 	_frame_step  = 1

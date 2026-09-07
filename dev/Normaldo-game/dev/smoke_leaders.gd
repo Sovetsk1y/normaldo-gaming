@@ -256,6 +256,28 @@ func _test_tabs(hud: Node) -> void:
 	_check(caps == want, "вкладки по режимам, бесконечный первым: %s" % [caps])
 	_check(caps[0] == "БЕСКОНЕЧНЫЙ", "и он же открыт по умолчанию")
 
+	# ЗНАЧОК ЕСТЬ У КАЖДОГО РЕЖИМА. Раньше на вкладке рисовался замок, и рисовался
+	# он только у закрытых — то есть отсутствие картинки ничего не значило.
+	# Теперь значок несёт опознание режима, и режим без значка — это вкладка,
+	# которую не отличить от соседней. Заведут шестой эпизод и забудут испечь
+	# иконку — тест скажет; глазами это ловится только на самой дальней вкладке.
+	var icons : Array = scr.get("_tab_icons") as Array
+	_check(icons.size() == (lm.get("MODES") as Array).size(),
+		"значок у каждой вкладки: %d из %d" % [icons.size(), (lm.get("MODES") as Array).size()])
+	var no_tex : Array = []
+	for ic in icons:
+		if (ic as TextureRect).texture == null:
+			no_tex.append(ic)
+	_check(no_tex.is_empty(), "и у каждого значка есть картинка")
+	# Закрытая вкладка отличается ПРИГЛУШЁННЫМ значком — это и есть бывший замок.
+	var lock_dim : bool = true
+	for i in (lm.get("MODES") as Array).size():
+		var m : int = int((lm.get("MODES") as Array)[i])
+		var lit : bool = (icons[i] as TextureRect).modulate.a >= 0.99
+		if lit != bool(scr.call("_is_mode_unlocked", m)):
+			lock_dim = false
+	_check(lock_dim, "значок закрытой вкладки приглушён, открытой — в полный цвет")
+
 	_feed(scr, 0, 12, "А")
 	await process_frame
 	var first : Array = (scr.get("_podium_ranks") as Array).duplicate()
