@@ -99,6 +99,62 @@ const CLR_TEXT   := Color(1.00, 0.96, 0.88)
 const CLR_DIM    := Color(0.74, 0.71, 0.64)
 const CLR_WARN   := Color(1.00, 0.55, 0.45)
 
+# ── Раздел ПРЕДМЕТЫ ──────────────────────────────────────────────────────────
+# Лаборатория задумывалась под скины, но вопрос у неё один и тот же: «то ли, что
+# нарисовано, видит игрок». У предметов он стоит ровно так же — рисунок ужался
+# сильнее нужного, хитбокс не совпал с рисунком, — и заводить ради него второй
+# экран с той же плиткой, лейнами и кнопками значило бы завести вторую
+# лабораторию.
+#
+# Поэтому здесь РЕЖИМ, а не второй экран: чип СКИНЫ/ПРЕДМЕТЫ меняет то, что
+# стоит по центру и что правят −/+, а разметка, фон, СОХРАНИТЬ/ОТМЕНА/СБРОС
+# остаются те же.
+const ITEM_TWEAKS := preload("res://scripts/item_tweaks.gd")
+
+# Что можно править. Список ЯВНЫЙ, а не «все png из assets/items»: правят не
+# каждую картинку в игре, а предметы потока, и каталог из двухсот файлов, среди
+# которых иконки интерфейса и куски фона, искать в них мешал бы.
+#
+# Пары «подпись — путь». Подпись нужна: путь к текстуре не читается с экрана.
+const LAB_ITEMS : Array = [
+	["ПИЦЦА",     "res://assets/items/pizza.png"],
+	["ДОЛЛАР",    "res://assets/items/dollar.png"],
+	["КАМЕНЬ",    "res://assets/items/stone.png"],
+	["МУСОРКА",   "res://assets/items/trash_bin.png"],
+	["БАНАН",     "res://assets/items/banana_peel.png"],
+	["ПИВО",      "res://assets/items/beer.png"],
+	["КОКТЕЙЛЬ",  "res://assets/items/cocktail.png"],
+	["КОНУС",     "res://assets/items/cone.png"],
+	["ЖЕТОН",     "res://assets/items/token.png"],
+	["МЕШОК",     "res://assets/items/money_bag.png"],
+	["ЗМЕЯ",      "res://assets/items/snake.png"],
+	["БОМЖ",      "res://assets/items/homeless1.png"],
+	["ЗОНТ",      "res://assets/items/umbrella.png"],
+	["ШЕЗЛОНГ",   "res://assets/items/lounger.png"],
+	["КОЛЕСО",    "res://assets/items/tire.png"],
+	["ПТИЦА",     "res://assets/items/bird.png"],
+	["КОП",       "res://assets/items/cop.png"],
+	["ШАМАН",     "res://assets/items/shaman.png"],
+	["ШТУРВАЛ",   "res://assets/skills/ship_wheel.png"],
+	["БУТЫЛКА",   "res://assets/items/letter_bottle.png"],
+	["ГРИБ",      "res://assets/items/mushroom.png"],
+	["ШЛЯПА",     "res://assets/items/magic_hat.png"],
+	["МАСКА",     "res://assets/items/casey_mask.png"],
+	["НАРУЧНИКИ", "res://assets/items/handcuffs.png"],
+]
+
+# Базовый радиус хитбокса для показа. Настоящий ставит каждый предмет сам, и
+# единого числа у них нет; здесь нужен ЭТАЛОН, относительно которого видно, во
+# что превращает его множитель.
+const ITEM_BASE_R : float = 30.0
+
+var _mode      : String = "skins"   # "skins" | "items"
+var _item      : int    = 0
+var _item_snap : Dictionary = {}
+var _mode_lbl  : Label    = null
+var _item_lbl  : Label    = null
+var _item_spr  : Sprite2D = null
+
 var _hud   : Node = null
 var _skin  : int  = 0
 var _fat   : int  = 0
@@ -128,7 +184,14 @@ var _worn_lbl  : Label  = null
 const WORN_ORDER : Array = ["", "hat", "mask"]
 const WORN_TITLE : Dictionary = { "": "ВЕЩЬ: НЕТ", "hat": "ВЕЩЬ: ШЛЯПА", "mask": "ВЕЩЬ: МАСКА" }
 var _skin_lbl : Label = null
-var _last_chip_label : Label = null
+var _last_chip_label : Label  = null
+var _last_chip_btn   : Button = null
+# Органы, относящиеся ТОЛЬКО к скинам. В режиме предметов они не просто
+# бесполезны — они врут: «ВЕЩЬ: НЕТ» над предметом читается как «на предмет
+# можно надеть шляпу», а кнопки жиров как «у предмета есть жиры».
+var _skin_only : Array = []
+var _item_only : Array = []
+var _item_hint : Label = null
 var _head_ruler_lbl : Label = null
 
 func setup(hud: Node) -> void:
@@ -139,7 +202,8 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	layer = 90
 	_read_live_geometry()
-	_snapshot = SkinMetrics.layout_snapshot()
+	_snapshot  = SkinMetrics.layout_snapshot()
+	_item_snap = ITEM_TWEAKS.snapshot()
 	_build()
 	_refresh()
 
@@ -181,6 +245,13 @@ func _build() -> void:
 	_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	add_child(_sprite)
 
+	# Предмет живёт СВОИМ спрайтом рядом со скином: они показываются по очереди,
+	# и переиспользовать один узел значило бы каждый раз пересобирать посадку.
+	_item_spr = Sprite2D.new()
+	_item_spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_item_spr.visible        = false
+	add_child(_item_spr)
+
 	_marks = Marks.new()
 	_marks.name = "Marks"
 	_marks.lab = self
@@ -193,8 +264,9 @@ func _build() -> void:
 
 	_build_panel(vp)
 	_build_controls(vp)
-	_label("эталон 91", 9, CLR_RULER, Vector2(_hero_pos.x + 56.0, 46.0),
-		Vector2(80.0, 16.0), HORIZONTAL_ALIGNMENT_LEFT)
+	_skin_only.append(_label("эталон 91", 9, CLR_RULER,
+		Vector2(_hero_pos.x + 56.0, 46.0), Vector2(80.0, 16.0),
+		HORIZONTAL_ALIGNMENT_LEFT))
 	_head_ruler_lbl = _label("", 9, Color(1, 1, 1, 0.85),
 		Vector2(_hero_pos.x + 56.0, 60.0), Vector2(80.0, 16.0), HORIZONTAL_ALIGNMENT_LEFT)
 
@@ -235,11 +307,21 @@ func _build_controls(vp: Vector2) -> void:
 	# Назад
 	_chip(Vector2(10.0, 10.0), Vector2(52.0, 26.0), "НАЗАД", _on_close)
 
+	# Режим. Стоит рядом с «НАЗАД», а не в нижнем ряду: он переключает ВЕСЬ
+	# экран, и место ему там же, где у выхода, — среди того, что делает с
+	# лабораторией, а не с тем, что в ней лежит.
+	_chip(Vector2(68.0, 10.0), Vector2(104.0, 26.0), "", _cycle_mode)
+	_mode_lbl = _last_chip_label
+
 	# Скин: влево / вправо и подпись между ними.
 	var y : float = vp.y - 36.0
-	_chip(Vector2(10.0, y), Vector2(34.0, 26.0), "◀", func(): _step_skin(-1))
-	_chip(Vector2(160.0, y), Vector2(34.0, 26.0), "▶", func(): _step_skin(1))
+	_chip(Vector2(10.0, y), Vector2(34.0, 26.0), "◀", func(): _step(-1))
+	_chip(Vector2(160.0, y), Vector2(34.0, 26.0), "▶", func(): _step(1))
 	_skin_lbl = _label("", 12, CLR_TEXT, Vector2(48.0, y), Vector2(108.0, 26.0),
+		HORIZONTAL_ALIGNMENT_CENTER)
+	# Подпись предмета стоит НА ТОМ ЖЕ месте, что и подпись скина: стрелки те
+	# же, и разводить их подписи по разным углам значило бы учить экран заново.
+	_item_lbl = _label("", 12, CLR_TEXT, Vector2(48.0, y), Vector2(108.0, 26.0),
 		HORIZONTAL_ALIGNMENT_CENTER)
 
 	# Жир 1…4 — четыре кнопки, а не стрелки: прыгать между состояниями надо
@@ -247,21 +329,39 @@ func _build_controls(vp: Vector2) -> void:
 	_fat_lbl.clear()
 	for i in 4:
 		var bx : float = 210.0 + 40.0 * float(i)
-		_chip(Vector2(bx, y), Vector2(34.0, 26.0), str(i + 1), func(): _set_fat(i))
+		_skin_only.append(_chip(Vector2(bx, y), Vector2(34.0, 26.0), str(i + 1),
+			func(): _set_fat(i)))
+		_skin_only.append(_last_chip_btn)
 		_fat_lbl.append(_last_chip_label)
 
 	_chip(Vector2(390.0, y), Vector2(96.0, 26.0), "РАЗМЕТКА", _toggle_marks)
-	_chip(Vector2(390.0, y - 30.0), Vector2(96.0, 26.0), "", _cycle_worn)
+	_skin_only.append(_chip(Vector2(390.0, y - 30.0), Vector2(96.0, 26.0), "", _cycle_worn))
+	_skin_only.append(_last_chip_btn)
 	_worn_lbl = _last_chip_label
 	_worn_lbl.text = String(WORN_TITLE[_worn])
 	# Рядом с выбором вещи, а не в ряду размеров: относится она к вещи, а не к
 	# скину, и стоять должна там, где вещь и выбирают.
-	_chip(Vector2(494.0, y - 30.0), Vector2(140.0, 26.0), "Ш = ВСЕМ ЖИРАМ",
-		_worn_same_width)
+	_skin_only.append(_chip(Vector2(494.0, y - 30.0), Vector2(140.0, 26.0),
+		"Ш = ВСЕМ ЖИРАМ", _worn_same_width))
+	_skin_only.append(_last_chip_btn)
 
 	# Размер: шаг 0.01 — с ним заметно за одно нажатие и не проскакивает мимо.
 	_chip(Vector2(500.0, y), Vector2(30.0, 26.0), "−", func(): _bump_tweak(-0.01))
 	_chip(Vector2(534.0, y), Vector2(30.0, 26.0), "+", func(): _bump_tweak(0.01))
+	# Хитбокс — СВОЯ пара кнопок, а не переключатель «что сейчас правит колесо».
+	# Размер и зона удара правятся вперемешку, по очереди, глядя друг на друга, и
+	# режим между ними означал бы щелчок на каждый шаг.
+	# Место выбрано пустое НАД рядом жиров: первая версия встала на «Ш = ВСЕМ
+	# ЖИРАМ», и на кадре было видно две подписи одна поверх другой.
+	_item_only.append(_chip(Vector2(210.0, y - 30.0), Vector2(34.0, 26.0), "Х−",
+		func(): _bump_item(0.0, -0.02)))
+	_item_only.append(_last_chip_btn)
+	_item_only.append(_chip(Vector2(250.0, y - 30.0), Vector2(34.0, 26.0), "Х+",
+		func(): _bump_item(0.0, 0.02)))
+	_item_only.append(_last_chip_btn)
+	_item_hint = _label("ХИТБОКС", 10, CLR_DIM, Vector2(288.0, y - 30.0),
+		Vector2(80.0, 26.0), HORIZONTAL_ALIGNMENT_LEFT)
+	_item_only.append(_item_hint)
 	_chip(Vector2(576.0, y), Vector2(66.0, 26.0), "СБРОС", _reset_current)
 	_chip(Vector2(648.0, y), Vector2(72.0, 26.0), "ОТМЕНА", _revert_all)
 	_chip(Vector2(726.0, y), Vector2(92.0, 26.0), "СОХРАНИТЬ", _save)
@@ -269,7 +369,7 @@ func _build_controls(vp: Vector2) -> void:
 	_status = _label("", 10, CLR_DIM, Vector2(10.0, y - 22.0), Vector2(500.0, 18.0),
 		HORIZONTAL_ALIGNMENT_LEFT)
 
-func _chip(pos: Vector2, size: Vector2, text: String, on_press: Callable) -> void:
+func _chip(pos: Vector2, size: Vector2, text: String, on_press: Callable) -> Control:
 	var visual := Control.new()
 	visual.size         = size
 	visual.position     = pos
@@ -291,6 +391,8 @@ func _chip(pos: Vector2, size: Vector2, text: String, on_press: Callable) -> voi
 	btn.button_up.connect(UiKit.press_anim.bind(visual, false))
 	btn.mouse_exited.connect(UiKit.press_anim.bind(visual, false))
 	_root.add_child(btn)
+	_last_chip_btn = btn
+	return visual
 
 func _label(text: String, size_px: int, col: Color, pos: Vector2, size: Vector2,
 		align: int, parent: Node = null) -> Label:
@@ -388,7 +490,61 @@ func _drag_worn(id: String, tex: Texture2D, delta: Vector2) -> void:
 	_dirty = true
 	_refresh()
 
+# ── Раздел ПРЕДМЕТЫ ──────────────────────────────────────────────────────────
+
+func _cycle_mode() -> void:
+	_mode = "items" if _mode == "skins" else "skins"
+	_refresh()
+
+func _item_path() -> String:
+	return String((LAB_ITEMS[clampi(_item, 0, LAB_ITEMS.size() - 1)] as Array)[1])
+
+func _item_name() -> String:
+	return String((LAB_ITEMS[clampi(_item, 0, LAB_ITEMS.size() - 1)] as Array)[0])
+
+func _step_item(d: int) -> void:
+	_item = wrapi(_item + d, 0, LAB_ITEMS.size())
+	_refresh()
+
+# −/+ правят РАЗМЕР, кнопки «Х −/+» — хитбокс. Один орган на два числа
+# потребовал бы ещё одного переключателя и памяти о том, что он сейчас значит.
+func _bump_item(dsize: float, dhit: float) -> void:
+	var path := _item_path()
+	var m : Dictionary = ITEM_TWEAKS.mult_for(path)
+	ITEM_TWEAKS.set_mult(path,
+		float(m["size"]) + dsize, float(m["hit"]) + dhit)
+	_dirty = true
+	_refresh()
+
+func _reset_item() -> void:
+	ITEM_TWEAKS.reset(_item_path())
+	_dirty = true
+	_refresh()
+	_set_status("предмет сброшен к замеру: %s" % _item_name())
+
+# Предмет показывается В НАСТОЯЩЕМ РАЗМЕРЕ — тем же `content_scale`, каким его
+# считает игра, — и поверх него рисуется его хитбокс. Своя формула здесь
+# разошлась бы с игрой на первой же правке, и лаборатория показывала бы не то,
+# что видит игрок.
+func _refresh_item() -> void:
+	var tex : Texture2D = load(_item_path()) as Texture2D
+	var m : Dictionary = ITEM_TWEAKS.mult_for(_item_path())
+	if is_instance_valid(_item_lbl):
+		_item_lbl.text = _item_name()
+	if is_instance_valid(_item_spr):
+		_item_spr.texture  = tex
+		_item_spr.position = _hero_pos
+		if tex != null:
+			_item_spr.scale = Vector2.ONE \
+				* (ItemSizing.content_scale(tex, ItemSizing.BASE_PX) * float(m["size"]))
+
+func _item_hit_r() -> float:
+	return ITEM_BASE_R * float(ITEM_TWEAKS.mult_for(_item_path())["hit"])
+
 func _bump_tweak(d: float) -> void:
+	if _mode == "items":
+		_bump_item(d, 0.0)
+		return
 	var id : String = _skin_id()
 	# Надета вещь — колесо и кнопки меняют ЕЁ ширину, а не размер скина: иначе
 	# пришлось бы держать два набора кнопок и помнить, к чему сейчас относится
@@ -411,6 +567,9 @@ func _apply(id: String, tweak: float, nudge: Vector2) -> void:
 	_refresh()
 
 func _reset_current() -> void:
+	if _mode == "items":
+		_reset_item()
+		return
 	if not _worn.is_empty():
 		SkinMetrics.worn_clear(_skin_id(), _fat, _worn)
 		_dirty = true
@@ -420,8 +579,12 @@ func _reset_current() -> void:
 	_apply(_skin_id(), 1.0, Vector2.ZERO)
 	_set_status("сброшено к замеру: %s, жир %d" % [_skin_id(), _fat + 1])
 
+# ОТМЕНА и СОХРАНЕНИЕ трогают ОБА слоя разом, а не только тот, что виден. Иначе
+# правки другого режима либо тихо теряются на отмене, либо тихо не сохраняются —
+# и то и другое замечаешь через полчаса, когда возвращаться уже не к чему.
 func _revert_all() -> void:
 	SkinMetrics.layout_restore(_snapshot)
+	ITEM_TWEAKS.restore(_item_snap)
 	_dirty = false
 	_refresh()
 	_set_status("все правки отменены")
@@ -429,8 +592,10 @@ func _revert_all() -> void:
 func _save() -> void:
 	var err : String = SkinMetrics.layout_save()
 	if err.is_empty():
+		err = ITEM_TWEAKS.save()
+	if err.is_empty():
 		_dirty = false
-		_set_status("сохранено в dev/skin_layout.json")
+		_set_status("сохранено в dev/skin_layout.json и dev/item_layout.json")
 	else:
 		# Отдельным цветом и словами: запись в res:// работает только при
 		# запуске из редактора, и молчаливый отказ съел бы всю правку.
@@ -442,6 +607,12 @@ func _set_status(text: String, col: Color = CLR_DIM) -> void:
 		_status.modulate = col
 
 # ── Обновление ───────────────────────────────────────────────────────────────
+
+func _step(d: int) -> void:
+	if _mode == "items":
+		_step_item(d)
+		return
+	_step_skin(d)
 
 func _step_skin(d: int) -> void:
 	_skin = wrapi(_skin + d, 0, SkinRegistry.SKINS.size())
@@ -457,6 +628,36 @@ func _toggle_marks() -> void:
 	_marks.queue_redraw()
 
 func _refresh() -> void:
+	var items := _mode == "items"
+	if is_instance_valid(_mode_lbl):
+		_mode_lbl.text = "РЕЖИМ: ПРЕДМЕТЫ" if items else "РЕЖИМ: СКИНЫ"
+	# Показывается ровно одно: скин или предмет. Оба разом читались бы как
+	# «предмет надет на героя», чего в игре не бывает.
+	if is_instance_valid(_sprite):
+		_sprite.visible = not items
+	if is_instance_valid(_item_spr):
+		_item_spr.visible = items
+	if is_instance_valid(_worn_spr):
+		_worn_spr.visible = not items
+	if is_instance_valid(_item_lbl):
+		_item_lbl.visible = items
+	if is_instance_valid(_skin_lbl):
+		_skin_lbl.visible = not items
+	for n in _skin_only:
+		if is_instance_valid(n):
+			(n as CanvasItem).visible = not items
+	for n in _item_only:
+		if is_instance_valid(n):
+			(n as CanvasItem).visible = items
+	# Линейка головы — про скины, и над предметом она читается как его размер.
+	if is_instance_valid(_head_ruler_lbl):
+		_head_ruler_lbl.visible = not items
+	if items:
+		_refresh_item()
+		_marks.queue_redraw()
+		_refresh_item_info()
+		return
+
 	var id : String = _skin_id()
 	var tex : Texture2D = _tex()
 	_skin_lbl.text = String(SkinRegistry.SKINS[_skin].get("name_ru", id))
@@ -638,6 +839,68 @@ func _refresh_info(id: String, tex: Texture2D) -> void:
 # Отдельным УЗЛОМ, а не в `_draw` самой лаборатории: собственный `_draw` узла
 # рисуется ПОД его детьми, а разметка обязана лечь поверх скина — именно их
 # взаимное положение и проверяется.
+# ── Разметка предмета ────────────────────────────────────────────────────────
+# Здесь важны ровно две вещи, и обе — про СООТНОШЕНИЕ, а не про абсолют:
+#   рисунок против лейна — влезает предмет в свою линию или лезет в соседние;
+#   хитбокс против рисунка — бьёт он там, где нарисован, или мимо себя.
+#
+# Поэтому рядом с предметом рисуется и круг его зоны удара, и коробка лейна.
+func _draw_item_marks(c: CanvasItem) -> void:
+	var tex : Texture2D = load(_item_path()) as Texture2D
+	if tex == null:
+		return
+	var vp := get_viewport().get_visible_rect().size
+	var lane_h : float = vp.y / float(LANE_COUNT)
+
+	# Коробка лейна вокруг предмета: перерос её — начал есть соседние линии.
+	_rect(c, _hero_pos, Vector2(lane_h, lane_h), CLR_BODY)
+
+	# Хитбокс — тем же зелёным, что у героя: это одно и то же понятие.
+	c.draw_arc(_hero_pos, _item_hit_r(), 0.0, TAU, 48, CLR_HITBOX, 1.5)
+
+	# Габариты нарисованного — красным, если вылез за лейн.
+	var r : Rect2i = ItemSizing.content_rect(tex)
+	var k : float = ItemSizing.content_scale(tex, ItemSizing.BASE_PX) \
+		* float(ITEM_TWEAKS.mult_for(_item_path())["size"])
+	var draw_px := Vector2(float(r.size.x) * k, float(r.size.y) * k)
+	var over : bool = draw_px.y > lane_h
+	_rect(c, _hero_pos, draw_px, CLR_WARN if over else CLR_RULER)
+
+# Правая панель в режиме предметов. Показывает ЧИСЛА, по которым правят: сам
+# множитель, во что он превращает размер и хитбокс, и не вылез ли предмет из
+# своей линии.
+func _refresh_item_info() -> void:
+	var tex : Texture2D = load(_item_path()) as Texture2D
+	var m : Dictionary = ITEM_TWEAKS.mult_for(_item_path())
+	var vp := get_viewport().get_visible_rect().size
+	var lane_h : float = vp.y / float(LANE_COUNT)
+	var lines : Array = []
+	lines.append("ПРЕДМЕТ: %s" % _item_name())
+	lines.append(_item_path().replace("res://assets/", ""))
+	lines.append("")
+	if tex != null:
+		var r : Rect2i = ItemSizing.content_rect(tex)
+		var base : float = ItemSizing.content_scale(tex, ItemSizing.BASE_PX)
+		var k : float = base * float(m["size"])
+		var draw_px := Vector2(float(r.size.x) * k, float(r.size.y) * k)
+		lines.append("кадр      %d × %d" % [int(tex.get_size().x), int(tex.get_size().y)])
+		lines.append("рисунок   %d × %d" % [r.size.x, r.size.y])
+		lines.append("")
+		lines.append("размер   ×%.2f" % float(m["size"]))
+		lines.append("на экране %d × %d px" % [int(draw_px.x), int(draw_px.y)])
+		lines.append("лейн      %d px" % int(lane_h))
+		if draw_px.y > lane_h:
+			lines.append("ВЫЛЕЗ ИЗ ЛИНИИ на %d px" % int(draw_px.y - lane_h))
+		lines.append("")
+	lines.append("хитбокс  ×%.2f" % float(m["hit"]))
+	lines.append("радиус    %d px" % int(_item_hit_r()))
+	lines.append("")
+	lines.append("правка есть" if ITEM_TWEAKS.has_tweak(_item_path()) else "правки нет")
+	for i in _info.size():
+		var l : Label = _info[i]
+		l.text     = String(lines[i]) if i < lines.size() else ""
+		l.modulate = CLR_WARN if l.text.begins_with("ВЫЛЕЗ") else CLR_TEXT
+
 class Marks extends Node2D:
 	var lab : Node = null
 	func _draw() -> void:
@@ -655,6 +918,10 @@ func draw_marks(c: CanvasItem) -> void:
 	for i in LANE_COUNT:
 		var y : float = lane_h * (float(i) + 0.5)
 		c.draw_line(Vector2(0.0, y), Vector2(vp.x, y), CLR_LANE_C, 1.0)
+
+	if _mode == "items":
+		_draw_item_marks(c)
+		return
 
 	var id : String = _skin_id()
 	var tex : Texture2D = _tex()

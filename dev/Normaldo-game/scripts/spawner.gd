@@ -12,6 +12,7 @@ signal hardcore_tier_up(tier: int)
 
 const ITEM_SCENE         := preload("res://scenes/item.tscn")
 const PIZZA_PACK_SCENE   := preload("res://scenes/pizza_pack.tscn")
+const ITEM_TWEAKS        := preload("res://scripts/item_tweaks.gd")
 const BOOMBOX_SCENE      := preload("res://scenes/boombox.tscn")
 const MAGNET_SCENE       := preload("res://scenes/magnet.tscn")
 const BANANA_PEEL_SCENE  := preload("res://scenes/banana_peel.tscn")
@@ -407,6 +408,9 @@ func _storm_convert() -> void:
 
 func _ready() -> void:
 	set_process(false)
+	# Ручной слой размеров/хитбоксов накладывается на КАЖДЫЙ появившийся предмет,
+	# каким бы путём он ни появился (см. `_on_item_entered`).
+	child_entered_tree.connect(_on_item_entered)
 
 func _process(delta: float) -> void:
 	if boss_test_mode:
@@ -2485,6 +2489,28 @@ func dev_skip_to_next_phase() -> void:
 	phase_entered.emit(_phase)
 	if _phase == CAMPAIGN_PHASES.size() - 1:
 		_start_pre_boss_resource_rain()
+
+# ── Ручной слой размеров и хитбоксов ─────────────────────────────────────────
+# ОДИН вход на все предметы, какими бы путями они ни появлялись. Размер и хитбокс
+# ставят тридцать пять разных скриптов, каждый по-своему; ловить их поимённо
+# значило бы править тридцать пять мест и помнить про тридцать шестое, когда его
+# напишут. `child_entered_tree` ловит всех разом — и тех, кого ещё нет.
+#
+# См. scripts/item_tweaks.gd
+# ── ПОСЛЕ `_ready` ПРЕДМЕТА, А НЕ ДО ────────────────────────────────────────
+# `child_entered_tree` приходит РАНЬШЕ, чем предмет отработает свой `_ready`, а
+# форму столкновения половина предметов строит именно там (`item.gd` создаёт
+# CircleShape2D с нуля). Наложенная до этого правка хитбокса просто затиралась —
+# рисунок менялся, а зона удара оставалась прежней, и на экране это выглядело
+# как «размер правится, коллизия нет».
+#
+# Поэтому ждём сигнала `ready`. Уже готовый узел (предмет перевесили на другой
+# родитель) второй раз `_ready` не зовёт — его правим сразу.
+func _on_item_entered(child: Node) -> void:
+	if child.is_node_ready():
+		ITEM_TWEAKS.apply(child)
+		return
+	child.ready.connect(ITEM_TWEAKS.apply.bind(child), CONNECT_ONE_SHOT)
 
 func clear_items() -> void:
 	set_process(false)
