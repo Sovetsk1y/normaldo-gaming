@@ -41,6 +41,7 @@ func _initialize() -> void:
 	print("── Задания и баланс ──")
 	await _test_quests(hud, save)
 	print("── Награда за уровень ──")
+	await _test_claim(hud, save)
 	await _test_reward(hud, save)
 	print("── Двойная выгода ──")
 	await _test_double_money(hud, save)
@@ -225,6 +226,45 @@ func _test_quests(hud: Node, save: Node) -> void:
 			missing.append(def.get("title", ""))
 	_check(missing.is_empty(), "задания дня перечислены: нет %s" % [missing])
 	_check(_count(txt, "ЗАДАНИЯ ДНЯ") == 1, "заголовок блока заданий на месте")
+	await _shut(hud, fresh)
+
+# ── НАГРАДА ЗАБИРАЕТСЯ ПРЯМО ЗДЕСЬ ───────────────────────────────────────────
+# Выполненное задание показывалось на экране смерти словом «ГОТОВО», и за
+# наградой надо было выйти в меню и открыть экран заданий. Момент, когда игрок
+# уже смотрит на своё выполненное задание, и есть лучшее место её отдать.
+#
+# Проверяется цепочка целиком, а не наличие кнопки: кнопка без выдачи — это
+# ровно то же «ГОТОВО», только обманчивое.
+func _test_claim(hud: Node, save: Node) -> void:
+	var qm : Node = get_root().get_node_or_null("QuestManager")
+	# Первое задание отмечаем выполненным руками: ждать его честного выполнения
+	# в тесте экрана смерти значило бы проверять заодно и весь счётчик заданий.
+	var q : Dictionary = qm.daily_quests[0]
+	q["completed"] = true
+	q["claimed"]   = false
+	var fresh : Array = await _open(hud, save, 411, 86, 134.0, 480, 3200, 4)
+	var txt : Array = _texts(fresh)
+	_check(_count(txt, "ЗАБРАТЬ!") >= 1, "у выполненного задания есть кнопка: %s" % [txt])
+
+	var claim_map : Dictionary = hud.get("_go_quest_claim")
+	_check(claim_map.has(0), "кнопка привязана к слоту задания")
+	var d0 : int = int(save.get("dollars"))
+	var def : Dictionary = qm.call("_daily_def", 0)
+	hud.call("_on_go_claim_daily", 0, Vector2(100.0, 100.0))
+	await process_frame
+	_check(bool((qm.daily_quests[0] as Dictionary).get("claimed", false)),
+		"нажатие отметило задание забранным")
+	_check(int(save.get("dollars")) == d0 + int(def.get("reward_d", 0)),
+		"и деньги пришли: %d → %d при награде %d"
+			% [d0, int(save.get("dollars")), int(def.get("reward_d", 0))])
+	# Кнопка исчезла: оставить её — значит пригласить нажать второй раз, а
+	# второй раз не даст ничего и прочтётся как сбой.
+	_check(not (hud.get("_go_quest_claim") as Dictionary).has(0),
+		"а кнопка после нажатия убрана")
+	var d1 : int = int(save.get("dollars"))
+	hud.call("_on_go_claim_daily", 0, Vector2(100.0, 100.0))
+	await process_frame
+	_check(int(save.get("dollars")) == d1, "повторное нажатие не платит второй раз")
 	await _shut(hud, fresh)
 
 func _test_reward(hud: Node, save: Node) -> void:

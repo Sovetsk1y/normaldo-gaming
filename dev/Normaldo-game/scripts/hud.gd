@@ -264,6 +264,12 @@ var _go_balance_value   : int       = 0
 var _go_balance_target  : int       = 0
 var _go_dollar_spawn_pos: Vector2   = Vector2.ZERO
 var _go_balance_anchor  : Vector2   = Vector2.ZERO
+# Узлы кнопки «ЗАБРАТЬ!» на экране смерти, по слоту задания. Нужны, чтобы после
+# получения убрать кнопку и переписать полоску, НЕ пересобирая весь экран: его
+# сборка запускает анимации итогов заново, и забранная награда выглядела бы как
+# повторный конец забега.
+var _go_quest_claim : Dictionary = {}
+var _go_quest_bar   : Dictionary = {}
 
 var _btn_sfx : AudioStreamPlayer = null
 var _dev_btn : Node2D            = null
@@ -7022,7 +7028,42 @@ func _on_level_cleared(boss: String, next_level: int) -> void:
 
 const BOSS_SCENES : Dictionary = { "ninja": "scene", "croc": "croc", "club": "club" }
 
+# ── БОСС ЖДЁТ КОНЦА МИНИ-ИГРЫ ────────────────────────────────────────────────
+# Мутаген (и «пицца-пати», и слоты) ловится из общего потока, а босс выходит по
+# выложенному слову NORMALDO. Эти два события ничем не связаны, и совпасть могут
+# запросто: поймал мутаген за секунду до последней буквы — и мини-игра идёт
+# ОДНОВРЕМЕННО с боем.
+#
+# Выглядит это не как «два события сразу», а как поломка: поверх арены босса
+# висит полоска мутагена и подсказка «тапай», приз мини-игры начисляется посреди
+# драки, а её интерфейс остаётся на экране до конца боя, потому что снимать его
+# уже некому.
+#
+# Ждём до IDLE, а не до «перестал играть»: `is_busy()` у мини-игр держится и на
+# выдаче приза, и на уборке интерфейса — то есть ровно до момента, когда экран
+# снова принадлежит забегу.
+#
+# Ожидание ОГРАНИЧЕНО. Если мини-игра по какой-то причине залипнет, забег без
+# босса кончиться не может вовсе — игрок останется в пустом уровне навсегда.
+# Лучше выпустить босса поверх залипшей мини-игры, чем не выпустить никогда.
+const BOSS_WAIT_MINIGAME_MAX : float = 30.0
+
+func _minigame_busy() -> bool:
+	for n in ["FatBoss", "PizzaParty", "SlotsGame"]:
+		var mg : Node = get_parent().get_node_or_null(n)
+		if is_instance_valid(mg) and mg.has_method("is_busy") and mg.call("is_busy"):
+			return true
+	return false
+
+func _await_minigames_done() -> void:
+	var waited := 0.0
+	while _minigame_busy() and waited < BOSS_WAIT_MINIGAME_MAX:
+		await get_tree().process_frame
+		waited += get_process_delta_time()
+
 func _summon_boss(kind: String) -> void:
+	if _minigame_busy():
+		await _await_minigames_done()
 	var game_root := get_parent() as Node2D
 	var normaldo  := get_parent().get_node_or_null("Normaldo") as Node2D
 	var spawner   := get_parent().get_node_or_null("Spawner")
@@ -7688,6 +7729,10 @@ func _show_game_over(total_pizzas: int, level_rewards: Array, xp_before: int, le
 	# гарантия «пока открыт этот экран, забег стоит» держалась на одной строке
 	# в другом месте.
 	get_tree().paused = true
+	# Ссылки на кнопки «ЗАБРАТЬ!» прошлого экрана смерти — на новом их узлы уже
+	# мертвы, и держать их значит однажды дёрнуть освобождённый узел.
+	_go_quest_claim.clear()
+	_go_quest_bar.clear()
 	var vp  := get_viewport().get_visible_rect().size
 	var sx  : float = vp.x / MENU_CANVAS_W
 	var sy  : float = vp.y / MENU_CANVAS_H
@@ -8133,10 +8178,95 @@ func _build_go_quest_row(pos: Vector2, size: Vector2, slot: int, _pm: int) -> vo
 		var pr : Vector2i = QuestManager.daily_progress(slot)
 		line = QuestManager.daily_progress_text(slot)
 		frac = float(pr.x) / maxf(1.0, float(pr.y))
-	_go_bar(pos + Vector2(8.0, size.y - 19.0), size.x - 16.0, 14.0, frac, col, line, _pm)
 
+	# ── ЗАБРАТЬ ПРЯМО ЗДЕСЬ ──────────────────────────────────────────────────
+	# Задание, выполненное в этом самом забеге, показывалось на экране смерти
+	# словом «ГОТОВО» — и всё: за наградой надо было выйти в меню и открыть
+	# экран заданий. Момент, когда игрок УЖЕ смотрит на своё выполненное
+	# задание, и есть лучшее место её отдать; отправлять его за ней в другое
+	# место — значит просить лишний шаг ровно там, где всё уже случилось.
+	#
+	# В ПАУЗЕ такой кнопки нет намеренно: пауза посреди забега, награда летит в
+	# баланс монетками, и в этот момент игрок должен смотреть на поле, а не на
+	# анимацию начисления. На экране смерти забег уже кончился, спешить некуда.
+	var ready : bool = done and not taken and not on_cd
+	var bar_w : float = size.x - 16.0
+	if ready:
+		var bw : float = 84.0
+		bar_w -= bw + 6.0
+		var bp := pos + Vector2(8.0 + bar_w + 6.0, size.y - 21.0)
+		var bs := Vector2(bw, 18.0)
+		UiKit.panel(self, bp, bs, Color(0.09, 0.24, 0.10, 0.96), 6,
+			Color(0.50, 1.00, 0.55, 0.95), 1).process_mode = _pm
+		var bl := Label.new()
+		bl.add_theme_font_override("font", UI_FONT)
+		bl.add_theme_font_size_override("font_size", 10)
+		_apply_menu_caption_fx(bl)
+		bl.text                 = "ЗАБРАТЬ!"
+		bl.modulate             = Color(0.70, 1.00, 0.72)
+		bl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		bl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		bl.process_mode         = _pm
+		bl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+		UiKit.place(self, bl, bp, bs)
+		var btn := Button.new()
+		btn.flat         = true
+		btn.focus_mode   = Control.FOCUS_NONE
+		btn.process_mode = _pm
+		btn.pressed.connect(_on_go_claim_daily.bind(slot, bp + bs * 0.5))
+		UiKit.place(self, btn, bp, bs)
+		_go_quest_claim[slot] = [btn, bl]
+	_go_quest_bar[slot] = _go_bar(pos + Vector2(8.0, size.y - 19.0), bar_w, 14.0,
+		frac, col, line, _pm)
+
+# Забрать награду задания с экрана смерти.
+#
+# Правится ОДНА СТРОКА, а не пересобирается экран: сборка экрана смерти
+# запускает анимации итогов с начала, и забранная награда выглядела бы как
+# повторный конец забега.
+func _on_go_claim_daily(slot: int, src: Vector2) -> void:
+	var q : Dictionary = QuestManager.daily_quests[slot]
+	if not bool(q.get("completed", false)) or bool(q.get("claimed", false)):
+		return
+	_play_btn_sfx()
+	var def := QuestManager._daily_def(slot)
+	if int(def.get("reward_d", 0)) > 0:
+		_go_fly_icons(DOLLAR_TEXTURE, src, 5)
+	if int(def.get("reward_t", 0)) > 0:
+		_go_fly_icons(TOKEN_TEXTURE, src, clampi(int(def.get("reward_t", 0)), 1, 4))
+	QuestManager.claim_daily(slot)
+	# Кнопка уходит сразу: она уже нажата, и оставить её значит пригласить
+	# нажать второй раз — а второй раз не даст ничего, и это читается как сбой.
+	for n in (_go_quest_claim.get(slot, []) as Array):
+		if is_instance_valid(n):
+			(n as Node).queue_free()
+	_go_quest_claim.erase(slot)
+	var bar : Label = _go_quest_bar.get(slot)
+	if is_instance_valid(bar):
+		bar.text     = "ЗАБРАНО"
+		bar.modulate = Color(0.70, 1.00, 0.72)
+
+# Иконки награды летят к балансу. Отдельно от `_go_fly_dollars`: тот ещё и
+# крутит счётчик долларов по дороге, а здесь баланс уже изменил `claim_daily`,
+# и второй раз его крутить нельзя.
+func _go_fly_icons(tex: Texture2D, src: Vector2, count: int) -> void:
+	for i in count:
+		var fly := _make_icon(tex, 14.0)
+		fly.position     = src + Vector2(randf_range(-8, 8), randf_range(-6, 6))
+		fly.process_mode = Node.PROCESS_MODE_ALWAYS
+		fly.z_index      = 10
+		add_child(fly)
+		var tw := create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		tw.tween_interval(float(i) * 0.06)
+		tw.tween_property(fly, "position", _go_balance_anchor, 0.40)\
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+		tw.parallel().tween_property(fly, "modulate:a", 0.0, 0.18).set_delay(0.28)
+		tw.tween_callback(fly.queue_free)
+
+# Возвращает подпись полоски: строке задания она нужна, чтобы переписать её на
+# «ЗАБРАНО» после получения награды.
 func _go_bar(pos: Vector2, w: float, h: float, frac: float, col: Color,
-		text: String, _pm: int) -> void:
+		text: String, _pm: int) -> Label:
 	UiKit.panel(self, pos, Vector2(w, h),
 		Color(0.03, 0.03, 0.05, 0.95), 6, Color(0.28, 0.30, 0.38, 0.9), 1).process_mode = _pm
 	var f : float = clampf(frac, 0.0, 1.0)
@@ -8159,6 +8289,7 @@ func _go_bar(pos: Vector2, w: float, h: float, frac: float, col: Color,
 	l.process_mode         = _pm
 	l.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	UiKit.place(self, l, pos, Vector2(w, h))
+	return l
 
 # Быстрая прокачка скина прямо с экрана смерти: четыре кнопки опыта и сброс
 # уровня. Нужны, чтобы за минуту прогнать скин по всей лестнице наград.

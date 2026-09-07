@@ -180,7 +180,10 @@ func _run_boss() -> void:
 		game_music.start()
 	if boss_test_mode:
 		# Undo the freeze set by clear_items() so patterns can spawn again.
-		_spawner.set("_frozen", false)
+		# `force_resume`, а не запись в `_frozen`: заморозка считается, и запись
+		# мимо счётчика с ним разошлась бы (см. `spawner.pause_for_event`).
+		if _spawner.has_method("force_resume"):
+			_spawner.call("force_resume")
 		_spawner.set("_pattern_running", false)
 		_spawner.set_process(true)
 		if is_instance_valid(bg):

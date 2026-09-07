@@ -273,8 +273,12 @@ func _run_boss() -> void:
 	if boss_test_mode:
 		# Дев-вызов: возвращаем забег в рабочее состояние — заморозку снял бы
 		# только конец кампании, а его тут нет.
-		if is_instance_valid(_spawner):
-			_spawner.set("_frozen", false)
+		#
+		# Через `force_resume`, а не записью в `_frozen`: заморозка теперь
+		# СЧИТАЕТСЯ (см. `spawner.pause_for_event`), и запись мимо счётчика
+		# разошлась бы с ним — следующая честная пауза просто не сработала бы.
+		if is_instance_valid(_spawner) and _spawner.has_method("force_resume"):
+			_spawner.call("force_resume")
 			_spawner.set("_pattern_running", false)
 			_spawner.set_process(true)
 		if is_instance_valid(bg) and bg.has_method("start_scrolling"):

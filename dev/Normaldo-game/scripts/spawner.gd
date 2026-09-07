@@ -792,27 +792,30 @@ func apply_slow_mo(factor: float = SLOW_MO_FACTOR, duration: float = SLOW_MO_DUR
 	var tok := _slow_mo_token
 	# Если поток уже стоит — значит идёт мини-игра или босс, и пауза/возобновление
 	# принадлежат им. Тогда только замедляем то, что уже летит.
-	var owns_pause := not _frozen
 	if is_equal_approx(world_speed_mult, 1.0):
 		_scale_live_speeds(factor)
 	world_speed_mult = factor
 	_set_background_mult(factor)
 	_set_slow_mo_fx(true, factor)
-	if owns_pause:
-		pause_for_event()
+	# Паузу берём ВСЕГДА и всегда же отпускаем — «владение» больше не считается
+	# (см. комментарий у `pause_for_event`). Отпускаем и на раннем выходе: пауза
+	# наша, и уйти, не вернув её, значит заморозить поток навсегда.
+	pause_for_event()
 
 	await get_tree().create_timer(duration).timeout
 
-	# Пока часы висели, мог прилететь второй экземпляр — тогда выход из режима
-	# принадлежит ему, а не нам.
-	if not is_instance_valid(self) or tok != _slow_mo_token:
+	if not is_instance_valid(self):
+		return
+	# Пока часы висели, мог прилететь второй экземпляр — тогда возврат скоростей
+	# принадлежит ему. А свою паузу отдаём в любом случае.
+	if tok != _slow_mo_token:
+		resume_after_event()
 		return
 	_scale_live_speeds(1.0 / factor)
 	world_speed_mult = 1.0
 	_set_background_mult(1.0)
 	_set_slow_mo_fx(false, 1.0)
-	if owns_pause:
-		resume_after_event()
+	resume_after_event()
 
 # Обвязка замедления: мир в чёрно-белом и музыка в замедленном темпе. Ставится
 # ЗДЕСЬ, а не у песочных часов и венца мага по отдельности: `apply_slow_mo` —
@@ -2372,7 +2375,29 @@ func _reset_spans() -> void:
 # pause_for_event stops phase advancement + new pattern spawns while keeping the
 # current phase intact; resume_after_event restarts the runner where it left off.
 
+# ── ЗАМОРОЗКА СЧИТАЕТСЯ, А НЕ ПЕРЕКЛЮЧАЕТСЯ ──────────────────────────────────
+# Событий, останавливающих поток, несколько — мини-игры, итоговые барабаны,
+# замедление времени, — и накладываются они запросто. Пока это был простой флаг,
+# накладка ломала поток НАСМЕРТЬ.
+#
+# Как именно. `apply_slow_mo` брала паузу «в собственность» по условию
+# `owns_pause := not _frozen`: кто заморозил, тот и разморозит. Два замедления
+# подряд (а мэджик бокс выплёвывает замедляющие пачкой) давали такую картину:
+# первое замораживает и уходит ждать; второе видит `_frozen == true`, решает,
+# что пауза чужая, и разморозку на себя не берёт; первое, увидев чужой токен,
+# выходит рано и тоже не размораживает. Поток оставался стоять до конца забега —
+# предметы, что были в кадре, улетали, новые не появлялись, и снаружи это
+# выглядело как «спамишь спелл — потом пропадают спрайты и ничего не летит».
+#
+# Со счётчиком владение не нужно вовсе: каждый, кто попросил паузу, обязан её
+# отпустить, а поток оживает на последнем отпускании. Лишний `resume` без своего
+# `pause` не делает ничего — это защита от того же класса ошибок с другой стороны.
+var _event_pause_depth : int = 0
+
 func pause_for_event() -> void:
+	_event_pause_depth += 1
+	if _event_pause_depth > 1:
+		return
 	_frozen          = true
 	_pattern_running = false
 	_reset_spans()
@@ -2430,6 +2455,25 @@ func collapse_items() -> void:
 			child.queue_free()
 
 func resume_after_event() -> void:
+	if _event_pause_depth <= 0:
+		return
+	_event_pause_depth -= 1
+	if _event_pause_depth > 0:
+		return
+	_frozen          = false
+	_pattern_running = false
+	_spawn_timer     = 0.6
+	_reset_spans()
+	set_process(true)
+
+# Снять заморозку ЦЕЛИКОМ, сколько бы событий её ни держало.
+#
+# Нужно боссам: бой обрывает всё, что шло до него, и досчитывать чужие паузы
+# после него некому — тот, кто их брал, до своего `resume` уже не доживёт.
+# Раньше боссы писали `_frozen = false` напрямую; со счётчиком такая запись
+# разошлась бы с ним, и следующая же честная пауза не сработала бы.
+func force_resume() -> void:
+	_event_pause_depth = 0
 	_frozen          = false
 	_pattern_running = false
 	_spawn_timer     = 0.6
