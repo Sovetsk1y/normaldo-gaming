@@ -169,12 +169,22 @@ var _boss_test_t      : float = 0.0
 # босса эпизод просто обрывается, засчитаться ему нечем. Поэтому два эпизода
 # доигрывают чужим боссом, и это помечено — чтобы при появлении своих не пришлось
 # гадать, где заглушка, а где замысел.
+#
+# `story` — строка на карточке эпизода: ЗАЧЕМ игрок сюда бежит. Название
+# («ПЛЯЖ») говорит, где он; без второй строки кампания читается как набор
+# декораций, а не как дорога куда-то. Живёт здесь же, рядом с названием: два
+# списка про одни и те же эпизоды разошлись бы при первой перестановке.
 const CAMPAIGN_LEVELS : Array = [
-	{ "name": "КАНАЛИЗАЦИЯ", "boss": "ninja", "letter": 14.0, "phase": 0 },
-	{ "name": "РЕКА",        "boss": "croc",  "letter": 13.0, "phase": 1 },
-	{ "name": "ПЛЯЖ",        "boss": "croc",  "letter": 12.0, "phase": 2, "boss_tmp": true },
-	{ "name": "ДВОР",        "boss": "club",  "letter": 11.0, "phase": 3, "boss_tmp": true },
-	{ "name": "КЛУБ",        "boss": "club",  "letter": 10.0, "phase": 4 },
+	{ "name": "КАНАЛИЗАЦИЯ", "boss": "ninja", "letter": 14.0, "phase": 0,
+	  "story": "Выберись из канализации" },
+	{ "name": "РЕКА",        "boss": "croc",  "letter": 13.0, "phase": 1,
+	  "story": "Исследуй прибрежную зону" },
+	{ "name": "ПЛЯЖ",        "boss": "croc",  "letter": 12.0, "phase": 2, "boss_tmp": true,
+	  "story": "Найди дорогу к клубу" },
+	{ "name": "ДВОР",        "boss": "club",  "letter": 11.0, "phase": 3, "boss_tmp": true,
+	  "story": "Направляйся к клубу" },
+	{ "name": "КЛУБ",        "boss": "club",  "letter": 10.0, "phase": 4,
+	  "story": "Найди вход в клуб" },
 ]
 
 # Свой ли у эпизода босс. Интерфейс по этому ничего не рисует — флаг для нас:
@@ -186,6 +196,11 @@ func boss_is_temp(idx: int) -> bool:
 # Текущий уровень, 0-based. Публичный: интерфейс рисует по нему карточку и
 # счётчик, фон — свою полосу.
 var level : int = 0
+
+# Сюжетная строка текущего эпизода — для карточки перехода.
+func level_story() -> String:
+	var l : Dictionary = CAMPAIGN_LEVELS[clampi(level, 0, CAMPAIGN_LEVELS.size() - 1)]
+	return String(l.get("story", ""))
 
 func level_name() -> String:
 	return String(CAMPAIGN_LEVELS[clampi(level, 0, CAMPAIGN_LEVELS.size() - 1)]["name"])

@@ -7302,6 +7302,40 @@ func _show_shout(big: String, small: String, hold: float,
 # читались бы как один бесконечный, а игрок должен знать, сколько он прошёл.
 const LEVEL_CARD_T : float = 1.7
 
+# ── Доллары через экран на переходе между эпизодами ──────────────────────────
+# Сколько их и как долго. Поток идёт ВСЁ время карточки — от затемнения до
+# просветления, — иначе деньги кончаются раньше текста и переход снова
+# разваливается на «событие, потом пауза».
+const LC_BILLS      : int   = 34
+const LC_BILL_PX    : float = 34.0
+const LC_FLY_MIN    : float = 0.85   # быстрые пролетают экран за это время
+const LC_FLY_MAX    : float = 1.70
+
+# Купюры летят СЛЕВА НАПРАВО, против хода забега. В забеге всё летит навстречу
+# игроку справа; пустив деньги туда же, мы бы сказали «уровень продолжается», а
+# карточка говорит обратное — этот кончился.
+func _level_card_dollars(cl: CanvasLayer, vp: Vector2) -> void:
+	for i in LC_BILLS:
+		var b := _make_icon(DOLLAR_TEXTURE, LC_BILL_PX * randf_range(0.7, 1.35))
+		# НАД плёнкой затемнения, но ПОД текстом. Плёнка добавлена в слой первой
+		# и лежит на z = 0; купюра с отрицательным z уходила под неё и гасла
+		# вместе с фоном — на экране оставались тусклые пятна вместо денег.
+		b.z_index      = 1
+		b.modulate     = Color(1, 1, 1, randf_range(0.45, 1.0))
+		b.rotation     = randf_range(-0.5, 0.5)
+		b.process_mode = Node.PROCESS_MODE_ALWAYS
+		var y : float = randf_range(-40.0, vp.y + 40.0)
+		b.position     = Vector2(-80.0 - randf_range(0.0, vp.x), y)
+		cl.add_child(b)
+		var dur : float = randf_range(LC_FLY_MIN, LC_FLY_MAX)
+		var tw := b.create_tween().set_loops().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		tw.tween_property(b, "position:x", vp.x + 120.0, dur).from(b.position.x)
+		# Крутится на лету — плоская купюра, ползущая по прямой, читается как
+		# спрайт, забытый на экране.
+		var spin := b.create_tween().set_loops().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		spin.tween_property(b, "rotation", b.rotation + TAU * (1.0 if i % 2 == 0 else -1.0),
+			randf_range(1.4, 2.6))
+
 func _show_level_card(next_level: int) -> void:
 	var game_root := get_parent() as Node2D
 	var normaldo  := get_parent().get_node_or_null("Normaldo")
@@ -7332,6 +7366,7 @@ func _show_level_card(next_level: int) -> void:
 	num.size                 = Vector2(vp.x, 56.0)
 	num.position             = Vector2(0.0, vp.y * 0.36)
 	num.modulate             = Color(1.0, 0.92, 0.55, 0.0)
+	num.z_index              = 3   # поверх летящих денег
 	cl.add_child(num)
 
 	var nm := Label.new()
@@ -7342,10 +7377,29 @@ func _show_level_card(next_level: int) -> void:
 	nm.size                 = Vector2(vp.x, 30.0)
 	nm.position             = Vector2(0.0, vp.y * 0.36 + 58.0)
 	nm.modulate             = Color(0.75, 0.95, 1.0, 0.0)
+	nm.z_index              = 3
 	cl.add_child(nm)
+
+	# Сюжетная строка: ЗАЧЕМ игрок сюда бежит. Название говорит, где он; без неё
+	# кампания читается как набор декораций, а не как дорога куда-то.
+	var st := Label.new()
+	st.add_theme_font_override("font", UI_FONT)
+	st.add_theme_font_size_override("font_size", 15)
+	st.text                 = ""
+	st.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	st.size                 = Vector2(vp.x, 24.0)
+	st.position             = Vector2(0.0, vp.y * 0.36 + 92.0)
+	st.modulate             = Color(0.90, 0.88, 0.70, 0.0)
+	st.z_index              = 3
+	cl.add_child(st)
 
 	var tw := dim.create_tween()
 	tw.tween_property(dim, "color:a", 0.85, 0.30)
+	# Доллары летят через ВЕСЬ экран, пока карточка держится. Раньше переход был
+	# просто затемнением: экран гас, менялся и загорался, и между эпизодами
+	# ничего не происходило — пауза без события. Деньги — то, ради чего забег и
+	# идёт, и они же связывают конец одного эпизода с началом следующего.
+	_level_card_dollars(cl, vp)
 	await tw.finished
 
 	# Подмена ПОД карточкой: и полоса фона, и уровень спавнера меняются, пока
@@ -7353,6 +7407,7 @@ func _show_level_card(next_level: int) -> void:
 	if spawner:
 		spawner.call("advance_level")
 		nm.text  = String(spawner.call("level_name"))
+		st.text  = String(spawner.call("level_story"))
 		num.text = "УРОВЕНЬ %d" % (int(spawner.get("level")) + 1)
 	else:
 		num.text = "УРОВЕНЬ %d" % (next_level + 1)
@@ -7363,6 +7418,7 @@ func _show_level_card(next_level: int) -> void:
 	var tw2 := num.create_tween()
 	tw2.tween_property(num, "modulate:a", 1.0, 0.22)
 	tw2.parallel().tween_property(nm, "modulate:a", 1.0, 0.22)
+	tw2.parallel().tween_property(st, "modulate:a", 1.0, 0.22).set_delay(0.10)
 	await get_tree().create_timer(LEVEL_CARD_T).timeout
 	if not is_instance_valid(cl):
 		return
@@ -7370,6 +7426,7 @@ func _show_level_card(next_level: int) -> void:
 	out.tween_property(dim, "color:a", 0.0, 0.30)
 	out.parallel().tween_property(num, "modulate:a", 0.0, 0.30)
 	out.parallel().tween_property(nm, "modulate:a", 0.0, 0.30)
+	out.parallel().tween_property(st, "modulate:a", 0.0, 0.30)
 	out.tween_callback(cl.queue_free)
 	if bg and bg.has_method("start_scrolling"):
 		bg.call("start_scrolling")

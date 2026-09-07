@@ -30,7 +30,7 @@ const LEVELS : int = 5
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 53
+const EXPECTED_CHECKS : int = 55
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -86,6 +86,21 @@ func _test_table() -> void:
 		if String(d["boss"]).is_empty():
 			all_bossed = false
 	_check(all_bossed, "каждый эпизод кончается боссом")
+
+	# СЮЖЕТНАЯ СТРОКА ЕСТЬ У КАЖДОГО и у всех разная. Она показывается на
+	# карточке перехода под названием и отвечает на «зачем я сюда бегу»; эпизод
+	# без неё выглядит не как пропуск, а как обычная карточка — заметить пропажу
+	# можно только дойдя до него в игре.
+	var no_story : Array = []
+	var stories  : Dictionary = {}
+	for i in lv.size():
+		var st : String = String((lv[i] as Dictionary).get("story", ""))
+		if st.strip_edges().is_empty():
+			no_story.append(i + 1)
+		stories[st] = true
+	_check(no_story.is_empty(), "сюжетная строка есть у каждого эпизода: нет у %s" % [no_story])
+	_check(stories.size() == lv.size(),
+		"и у всех она своя: %d разных на %d эпизодов" % [stories.size(), lv.size()])
 
 	# Планка старта НЕ ПАДАЕТ от эпизода к эпизоду. Не «строго растёт» нарочно:
 	# фаз конечное число, и если эпизодов станет больше, соседям на хвосте
