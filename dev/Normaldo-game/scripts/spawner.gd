@@ -244,10 +244,10 @@ const CAMPAIGN_PAT_WEIGHTS : Array = [
 # отдельно и трогать его — значит менять сложность, а не плотность.
 const CAMPAIGN_DIRECTOR : Array = [
 	{ "res": 0.90, "int": 0.62, "cad": 14.0, "sp": ["sandwich", "zigzag", "cone", "bum_crowd"] },
-	{ "res": 0.76, "int": 0.54, "cad": 12.0, "sp": ["sandwich", "zigzag", "barrel_cascade", "snake_columns", "bum_crowd", "bum_barrel", "glove_wave", "cone"] },
-	{ "res": 0.66, "int": 0.48, "cad": 10.0, "sp": ["barrel_cascade", "snake_columns", "stone_chess", "bum_wall", "bum_crowd", "bum_barrel", "diagonal", "glove_wave", "cone"] },
-	{ "res": 0.58, "int": 0.42, "cad":  9.0, "sp": ["snake_columns", "stone_chess", "glove_wave", "diagonal", "bum_wall", "bum_crowd", "bum_barrel", "cone"] },
-	{ "res": 0.52, "int": 0.38, "cad":  8.0, "sp": ["stone_chess", "glove_wave", "molotov_wave", "diagonal", "bum_crowd", "bum_barrel"] },
+	{ "res": 0.76, "int": 0.54, "cad": 12.0, "sp": ["sandwich", "zigzag", "barrel_cascade", "snake_columns", "bum_crowd", "bum_barrel", "glove_wave", "cone", "pizza_wall"] },
+	{ "res": 0.66, "int": 0.48, "cad": 10.0, "sp": ["barrel_cascade", "snake_columns", "stone_chess", "bum_wall", "bum_crowd", "bum_barrel", "diagonal", "glove_wave", "cone", "pizza_wall"] },
+	{ "res": 0.58, "int": 0.42, "cad":  9.0, "sp": ["snake_columns", "stone_chess", "glove_wave", "diagonal", "bum_wall", "bum_crowd", "bum_barrel", "cone", "pizza_wall"] },
+	{ "res": 0.52, "int": 0.38, "cad":  8.0, "sp": ["stone_chess", "glove_wave", "molotov_wave", "diagonal", "bum_crowd", "bum_barrel", "pizza_wall"] },
 ]
 
 # Сет-писы хвоста — ВСЕ, что есть в игре, а не список одной фазы. По той же
@@ -256,7 +256,7 @@ const CAMPAIGN_DIRECTOR : Array = [
 const HARDCORE_SET_PIECES : Array = [
 	"sandwich", "zigzag", "cone", "bum_crowd", "bum_wall", "bum_barrel",
 	"barrel_cascade", "snake_columns", "stone_chess", "diagonal",
-	"glove_wave", "molotov_wave",
+	"glove_wave", "molotov_wave", "pizza_wall",
 ]
 
 # Item speed goes up in STEPS (background scrolls at a fixed, slower pace — see
@@ -1260,6 +1260,16 @@ func dev_send_bum_barrel() -> void:
 	var speed : float = _campaign_item_speed() if campaign_mode else 250.0
 	_setpiece_bum_barrel(speed, lanes, vp_w)
 
+# Стена пиццы — единственный сет-пис с СОБСТВЕННЫМ КУЛДАУНОМ, и без кнопки её
+# вживую не посмотреть вовсе: раньше 75-й секунды забега она не выпадает по
+# определению, а дальше конкурирует с остальным пулом. Кнопка зовёт тот же
+# сет-пис с той же скоростью потока, а не отдельную «тестовую» копию.
+func dev_send_pizza_wall() -> void:
+	var vp_w  := get_viewport_rect().size.x
+	var lanes := _lane_centers()
+	var speed : float = _campaign_item_speed() if campaign_mode else 250.0
+	_setpiece_pizza_wall(speed, lanes, vp_w)
+
 # Спавн любого из новых script-only предметов (компас/вор/бомж-со-знаком).
 func _spawn_scripted(script: Script, y: float, vp_w: float, speed: float) -> void:
 	var node := Area2D.new()
@@ -1373,18 +1383,39 @@ func _breather(speed: float, lanes: Array, vp_w: float) -> void:
 # вернули, когда она пришла раскадровкой (см. scripts/bum_barrel.gd).
 const SP_DISABLED : Array = []
 
+# ── РЕДКИЕ СЕТ-ПИСЫ ──────────────────────────────────────────────────────────
+# Из пула сет-писы выпадают РАВНОВЕРОЯТНО, и в списке из восьми позиций «редкий»
+# означал бы «каждый восьмой», то есть раз в полторы минуты — это не редкость, а
+# просто ещё один номер программы. Здесь у редкого есть собственный кулдаун: пока
+# он не остыл, его нет в списке выбора вовсе.
+#
+# Отсчёт идёт от НАЧАЛА ЗАБЕГА, а не от «никогда»: несыгранный сет-пис числится
+# сыгранным на нулевой секунде, и потому первый раз он может прийти не раньше,
+# чем через свой кулдаун. Иначе «редкое» имело бы обыкновение вываливаться в
+# первую же минуту, когда игрок ещё не видел обычного потока.
+const SP_RARE_COOLDOWN : Dictionary = {
+	"pizza_wall": 75.0,
+}
+
+var _sp_last_at : Dictionary = {}   # id сет-писа → _elapsed последнего показа
+
 func _pick_set_piece(pool: Array) -> String:
 	if pool.is_empty():
 		return "sandwich"
 	var choices := pool.duplicate()
 	for off in SP_DISABLED:
 		choices.erase(off)
+	for rare in SP_RARE_COOLDOWN:
+		if choices.has(rare) \
+				and _elapsed - float(_sp_last_at.get(rare, 0.0)) < float(SP_RARE_COOLDOWN[rare]):
+			choices.erase(rare)
 	if choices.is_empty():
 		return "sandwich"
 	if choices.size() > 1 and _last_sp_id in choices:
 		choices.erase(_last_sp_id)   # no immediate repeats
 	var pick : String = choices[randi() % choices.size()]
 	_last_sp_id = pick
+	_sp_last_at[pick] = _elapsed
 	return pick
 
 func _run_set_piece(id: String, speed: float, lanes: Array, vp_w: float) -> void:
@@ -1409,7 +1440,96 @@ func _run_set_piece(id: String, speed: float, lanes: Array, vp_w: float) -> void
 		"diagonal":       await _t3_diagonal(speed, lanes, vp_w)
 		"glove_wave":     await _wave_glove_sweep(speed, lanes, vp_w)
 		"molotov_wave":   await _pat_t5(speed, lanes, vp_w)
+		"pizza_wall":     await _setpiece_pizza_wall(speed, lanes, vp_w)
 		_:                await _t1_center_line(speed, lanes, vp_w)
+
+# ── Стена пиццы ──────────────────────────────────────────────────────────────
+# Редкий ивент из оригинала. Сначала во все пять линий уходит колонна ЗАМЕДЛЯЮЩИХ
+# предметов текущего уровня, а следом, вдвое быстрее, идёт сплошная стена пиццы и
+# нагоняет её примерно на середине экрана.
+#
+# ── В чём тут игра ───────────────────────────────────────────────────────────
+# Замедляющую колонну не объехать: она перекрывает все линии. Значит выбор не
+# «попасть или нет», а КОГДА получить замедление — и успеешь ли ты после этого
+# развернуться под стену. Пицца летит вдвое быстрее и потому проходит экран
+# вдвое быстрее; замедленный Нормальдо в этот момент двигается медленнее (см.
+# FAT_SPEED_MULT и эффект замедления), и стена, которая обычно кормит, начинает
+# проезжать мимо.
+#
+# Пицца тут не наказание, а приз: за стеной она идёт СПЛОШНЫМ фронтом, и сколько
+# её достанется — ровно столько, сколько игрок сумел удержать скорость. Это тот
+# же торг, что и в мешке денег: жадность против манёвра.
+#
+# ── Почему замедляющие «текущего уровня», а не банан всегда ──────────────────
+# Набор берётся из таблицы уровня (`HAZ_LEVEL`), а не выписан отдельным списком:
+# второй список разъехался бы с первым в первый же раз, когда раскладку правят.
+# На уровне, где замедляющих нет вовсе (двор), берётся банан — он же летит и в
+# общем пуле, так что чужим не выглядит.
+const SLOWING_KINDS : Array = ["banana", "beer", "cocktail"]
+
+# Насколько пицца быстрее колонны. Ровно вдвое — как в оригинале: меньше и стена
+# не догоняет вовсе, больше и она проскакивает экран раньше, чем игрок успевает
+# перестроиться.
+const PIZZA_WALL_SPEED_MULT : float = 2.0
+const PIZZA_WALL_COLS_MIN   : int   = 5
+const PIZZA_WALL_COLS_MAX   : int   = 8
+
+# ГДЕ стена догоняет колонну — доля ширины экрана. В константе стоит именно
+# ТОЧКА ВСТРЕЧИ, а фора считается из неё, потому что смысл ивента в погоне: её
+# надо увидеть. Первая версия задавала форой, и та молча промахивалась — при
+# форе в 0.72 экрана встреча приходилась на x = −346, то есть уже за левым краем:
+# игрок видел колонну, потом отдельно стену, и никакой погони.
+#
+# 0.35 — левее середины, но с запасом до края: к моменту встречи игрок уже
+# выбрал линию под колонну и должен успеть увидеть, чем это обернулось.
+const PIZZA_WALL_MEET_X : float = 0.35
+# Отступ, с которым предметы выходят из-за края (см. `_spawn_item`). Он входит в
+# расстояние между колонной и стеной, и без него встреча уезжает на сотню px.
+const PIZZA_WALL_SPAWN_OFF : float = 80.0
+
+# Фора колонны в СЕКУНДАХ. Стена выходит из той же точки вдогонку, поэтому на
+# момент её выхода расстояние между ними равно `фора × speed`, а сближаются они
+# со скоростью `(mult − 1) × speed`. Отсюда колонна на момент встречи стоит в
+#   X0 − speed × фора × mult / (mult − 1),
+# и фора — обратная этому величина.
+func _pizza_wall_lead(speed: float, vp_w: float) -> float:
+	var x0   : float = vp_w + PIZZA_WALL_SPAWN_OFF
+	var meet : float = PIZZA_WALL_MEET_X * vp_w
+	var k    : float = (PIZZA_WALL_SPEED_MULT - 1.0) / PIZZA_WALL_SPEED_MULT
+	return maxf(0.2, (x0 - meet) * k / maxf(1.0, speed))
+
+func _level_slowing_kinds() -> Array:
+	var pool := _hazard_pool()
+	var out : Array = []
+	for k in SLOWING_KINDS:
+		if pool.has(k):
+			out.append(k)
+	if out.is_empty():
+		out.append("banana")
+	return out
+
+func _setpiece_pizza_wall(speed: float, lanes: Array, vp_w: float) -> void:
+	# Вид замедляющего выбирается ОДИН РАЗ на всю колонну: вперемешку банан с
+	# коктейлем читались бы как обычный поток, а не как стена.
+	var kinds := _level_slowing_kinds()
+	var kind : String = kinds[randi() % kinds.size()]
+	for y in lanes:
+		_spawn_level_hazard(kind, y, vp_w, speed)
+
+	await get_tree().create_timer(_pizza_wall_lead(speed, vp_w)).timeout
+	if _frozen:
+		return
+
+	var fast := speed * PIZZA_WALL_SPEED_MULT
+	var gap  := _col_gap(fast)
+	var cols := randi_range(PIZZA_WALL_COLS_MIN, PIZZA_WALL_COLS_MAX)
+	for c in cols:
+		if _frozen:
+			return
+		for y in lanes:
+			_spawn_item(y, vp_w, PIZZA_TEX, 0.09, fast, 0, true, true, true)
+		if c < cols - 1:
+			await get_tree().create_timer(gap).timeout
 
 # Толпа бомжей — тучи бомжей БЫСТРО пролетают большими кучами, оставляя ровно
 # 2 СОСЕДНИХ свободных лейна; каждая следующая туча сдвигает щель НА ОДИН лейн.

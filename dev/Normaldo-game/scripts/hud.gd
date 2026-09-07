@@ -6164,6 +6164,7 @@ func _start_game() -> void:
 		_build_dev_thief_btn()
 		_build_dev_bum_wave_btn()
 		_build_dev_bum_barrel_btn()
+		_build_dev_pizza_wall_btn()
 		_build_dev_immortal_btn()
 		_build_dev_phase_btn()
 	# Cue the run-start daily quest reminders (skips finished/claimed slots).
@@ -6500,6 +6501,13 @@ func _build_dev_bum_wave_btn() -> void:
 # по которой кнопку можно было узнать.
 func _build_dev_bum_barrel_btn() -> void:
 	_dev_spawner_btn(5, BARREL_TEXTURE, "dev_send_bum_barrel", "БОЧКА")
+
+# Стена пиццы. Кнопка ей нужнее всех остальных: у ивента собственный кулдаун в
+# 75 секунд, то есть до второй минуты забега он не выпадает вовсе, а дальше
+# конкурирует с семью другими сет-писами. Посмотреть его без кнопки — это
+# доиграть до поздней фазы и надеяться.
+func _build_dev_pizza_wall_btn() -> void:
+	_dev_spawner_btn(6, PIZZA_TEXTURE, "dev_send_pizza_wall", "СТЕНА")
 
 # Общая сборка дев-кнопки в нижнем ряду: место в ряду, иконка, подпись, метод
 # спавнера.
