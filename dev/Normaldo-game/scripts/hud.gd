@@ -99,6 +99,9 @@ const MENU_MODE_BTN_Y : float = 105.0
 const NINJA_FOOT_SCENE := preload("res://scenes/ninja_foot.tscn")
 const LEATHERHEAD_SCRIPT := preload("res://scripts/leatherhead.gd")
 const CLUB_BOSS_SCRIPT   := preload("res://scripts/club_boss.gd")
+# Денежное облако с сюжетной строкой — им первый эпизод говорит то, что
+# остальным говорит занавес (см. `money_cloud.gd`).
+const MONEY_CLOUD        := preload("res://scripts/money_cloud.gd")
 
 const FAT_THRESHOLDS := [40, 120, 260]
 const SECTION_H      := 44.0
@@ -6101,6 +6104,22 @@ func _start_game() -> void:
 	if normaldo:
 		normaldo.enable_input()
 		_build_skill_badges(normaldo)
+
+	# ── Сюжетная строка первого эпизода ──────────────────────────────────────
+	# У эпизодов 2…5 её показывает занавес. У первого занавеса нет и быть не
+	# должно: он прикрывает подмену фона, а первый эпизод начинается на том же
+	# фоне, на котором доиграло интро.
+	#
+	# Поэтому здесь — денежное облако: влетает справа сразу после броска пульта,
+	# висит с надписью и уходит дальше. Оно НЕ ОСТАНАВЛИВАЕТ забег: игра уже
+	# идёт, Нормальдо летит, и окно поверх него означало бы «стоп». Облако летит
+	# вместе с миром и потому окном не читается.
+	#
+	# Условие ровно обратное занавесу: где занавес был — облако не нужно, оно
+	# сказало бы то же самое второй раз подряд.
+	if is_campaign and not need_curtain and spawner:
+		MONEY_CLOUD.spawn(get_parent(), String(spawner.call("level_story")))
+
 	var music := get_parent().get_node_or_null("Music")
 	if music:
 		# Из меню приходим с ЧУЖИМ треком в стволе, поэтому не start(), а

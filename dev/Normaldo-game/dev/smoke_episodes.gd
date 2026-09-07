@@ -51,6 +51,8 @@ func _initialize() -> void:
 	await _test_finish()
 	print("── Занавес перед сменой локации ──")
 	await _test_curtain()
+	print("── Денежное облако первого эпизода ──")
+	await _test_cloud()
 	print("── Вход в хвост ──")
 	await _test_hardcore_entry()
 	_finish()
@@ -270,3 +272,38 @@ func _finish() -> void:
 	else:
 		print("ПРОВАЛОВ: ", _fails)
 	quit(1 if _fails > 0 else 0)
+
+
+# ── ДЕНЕЖНОЕ ОБЛАКО ПЕРВОГО ЭПИЗОДА ──────────────────────────────────────────
+# Сюжетную строку эпизода показывает занавес — но у первого эпизода занавеса
+# нет и быть не должно: он прикрывает подмену фона, а первый начинается на том
+# же фоне, на котором доиграло интро.
+#
+# Поэтому первому нужен свой способ сказать то же самое, и он не должен
+# останавливать забег. Проверяется ровно эта развилка: у кого занавес — у того
+# нет облака, и наоборот. Сломается она молча: игрок первого эпизода просто
+# никогда не узнает, зачем он бежит, а игрок второго увидит одно и то же дважды.
+func _test_cloud() -> void:
+	# Само облако: собирается, несёт текст и не имеет столкновений — поймать его
+	# нельзя, иначе первые секунды забега стали бы ловушкой из ничего.
+	var cloud_script := load("res://scripts/money_cloud.gd")
+	var host := Node2D.new()
+	get_root().add_child(host)
+	var c : Node2D = cloud_script.call("spawn", host, "Выберись из канализации")
+	_check(c != null, "облако собралось")
+	if c != null:
+		await process_frame
+		var texts : Array = []
+		var areas : int = 0
+		for n in c.get_children():
+			if n is Label:
+				texts.append(String((n as Label).text))
+			if n is Area2D:
+				areas += 1
+		_check(texts.has("Выберись из канализации"), "и несёт сюжетную строку: %s" % [texts])
+		_check(areas == 0, "и не ловит столкновений: зон %d" % areas)
+	# Пустая строка облака не даёт вовсе: облако без текста — просто мусор,
+	# пролетевший через экран.
+	_check(cloud_script.call("spawn", host, "  ") == null, "без текста облака нет")
+	host.free()
+	await process_frame
