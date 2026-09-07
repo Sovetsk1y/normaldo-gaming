@@ -42,7 +42,7 @@ func _const(node: Node, name: String):
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 26
+const EXPECTED_CHECKS : int = 31
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -63,6 +63,8 @@ func _initialize() -> void:
 	await _test_editing()
 	print("── Шляпа и маска ──")
 	_test_worn()
+	print("── Ширина вещи ──")
+	await _test_worn_width()
 	_finish()
 
 # ── Геометрия ────────────────────────────────────────────────────────────────
@@ -301,6 +303,91 @@ func _test_worn() -> void:
 		"и правка скина на месте")
 
 	_met.call("layout_restore", snap)
+
+# ── Ширина вещи ──────────────────────────────────────────────────────────────
+# `k` — доля ШИРИНЫ КАДРА хозяина, а кадры у жиров РАЗНЫЕ. Отсюда то, на что и
+# наткнулись глазами: одинаковый коэффициент на всех жирах даёт РАЗНУЮ шляпу, и
+# по панели этого было не видно — она показывала только коэффициент.
+#
+# Проверяется поэтому не «панель что-то пишет», а само свойство: одинаковый `k`
+# даёт разные пиксели, а «Ш = ВСЕМ ЖИРАМ» — одинаковые.
+
+func _test_worn_width() -> void:
+	var snap : Dictionary = _met.call("layout_snapshot")
+	var id := "viking"
+	var hat : Texture2D = load("res://assets/items/magic_hat.png")
+
+	# Ширина считается по РИСУНКУ, а не по кадру: у шляпы кадр 536×615, и
+	# рисунок занимает в нём меньше половины. Число «по кадру» показывало бы поля.
+	var frame : float = hat.get_size().x
+	var art : float = float(WornItem.used_rect(hat).size.x)
+	_check(art > 0.0 and art < frame,
+		"ширина меряется по рисунку, а не по кадру: %d из %d" % [int(art), int(frame)])
+
+	# 1. ОДИН И ТОТ ЖЕ `k` даёт разный размер — то, из-за чего всё и затевалось.
+	var px : Array = []
+	for f in 4:
+		var host : Texture2D = _reg.call("get_avatar_texture", id, f)
+		px.append(WornItem.art_px(host, hat, 0.74,
+			float(_met.call("sprite_scale", id, f, host.get_size()))))
+	var spread : float = (px as Array).max() - (px as Array).min()
+	_check(spread > 1.0,
+		"одинаковый k даёт разную ширину: %.0f / %.0f / %.0f / %.0f" % px)
+
+	# 2. «Ш = ВСЕМ ЖИРАМ» выравнивает в пикселях. Допуск в один пиксель: `k`
+	#    зажат в 0.05…3.0, и на краю диапазона точное совпадение невозможно.
+	var lab : Node = await _open_lab()
+	if lab == null:
+		_met.call("layout_restore", snap)
+		return
+	# Лабораторию надо ПЕРЕВЕСТИ на тот же скин, что мерим. Первый вариант этой
+	# проверки забыл про это: лаборатория стояла на классике, уравнивала его, а
+	# сверялись мы с викингом — и провал выглядел как поломка уравнивания.
+	var idx := -1
+	for i in (_reg.get("SKINS") as Array).size():
+		if String((_reg.get("SKINS") as Array)[i]["id"]) == id:
+			idx = i
+	_check(idx >= 0, "скин %s нашёлся в реестре: №%d" % [id, idx])
+	lab.set("_skin", idx)
+	lab.set("_worn", "hat")
+	lab.set("_fat", 2)
+	lab.call("_worn_same_width")
+	var want : float = float(lab.call("_worn_px_at", id, 2))
+	var off : Array = []
+	for f in 4:
+		var got : float = float(lab.call("_worn_px_at", id, f))
+		if absf(got - want) > 1.0:
+			off.append("жир %d: %.0f вместо %.0f" % [f + 1, got, want])
+	_check(off.is_empty(), "после «Ш = ВСЕМ ЖИРАМ» ширина одна: %s" % [off])
+
+	# 3. Трогает ТОЛЬКО ширину. Посадку у каждого жира подбирают руками —
+	#    макушка у худого и у убера в разных местах, — и утащить её заодно
+	#    значило бы сбить сделанную работу.
+	var sink_before : float = float(_met.call("worn_for", id, 0, "hat")["sink"])
+	lab.call("_worn_same_width")
+	_check(is_equal_approx(float(_met.call("worn_for", id, 0, "hat")["sink"]), sink_before),
+		"глубина посадки не тронута")
+
+	lab.queue_free()
+	await process_frame
+	_met.call("layout_restore", snap)
+
+# Лаборатория поверх живой игры — тем же путём, каким её открывает игрок.
+func _open_lab() -> Node:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var hud : Node = game.get_node_or_null("HUD")
+	if hud == null or not hud.has_method("_show_skin_lab"):
+		return null
+	hud.call("_show_skin_lab")
+	for _i in 30:
+		get_root().get_tree().paused = false
+		await process_frame
+	for c in hud.get_children():
+		if c is SkinLab:
+			return c
+	return null
 
 func _finish() -> void:
 	print("")

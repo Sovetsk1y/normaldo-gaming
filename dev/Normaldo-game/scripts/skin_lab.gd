@@ -224,10 +224,10 @@ func _build_backdrop(vp: Vector2) -> void:
 func _build_panel(vp: Vector2) -> void:
 	var w : float = 250.0
 	var x : float = vp.x - w - 10.0
-	UiKit.panel(_root, Vector2(x, 10.0), Vector2(w, 292.0),
+	UiKit.panel(_root, Vector2(x, 10.0), Vector2(w, 316.0),
 		Color(0.05, 0.04, 0.03, 0.92), 10, Color(0.30, 0.26, 0.18, 0.95))
 	_info.clear()
-	for i in 13:
+	for i in 14:
 		_info.append(_label("", 11, CLR_TEXT, Vector2(x + 10.0, 16.0 + 21.0 * float(i)),
 			Vector2(w - 20.0, 20.0), HORIZONTAL_ALIGNMENT_LEFT))
 
@@ -254,6 +254,10 @@ func _build_controls(vp: Vector2) -> void:
 	_chip(Vector2(390.0, y - 30.0), Vector2(96.0, 26.0), "", _cycle_worn)
 	_worn_lbl = _last_chip_label
 	_worn_lbl.text = String(WORN_TITLE[_worn])
+	# Рядом с выбором вещи, а не в ряду размеров: относится она к вещи, а не к
+	# скину, и стоять должна там, где вещь и выбирают.
+	_chip(Vector2(494.0, y - 30.0), Vector2(140.0, 26.0), "Ш = ВСЕМ ЖИРАМ",
+		_worn_same_width)
 
 	# Размер: шаг 0.01 — с ним заметно за одно нажатие и не проскакивает мимо.
 	_chip(Vector2(500.0, y), Vector2(30.0, 26.0), "−", func(): _bump_tweak(-0.01))
@@ -485,6 +489,42 @@ func _sprite_offset(id: String, tex: Texture2D, s: float) -> Vector2:
 # Правая панель. Показывает не «что нарисовано», а ЧИСЛА, по которым это
 # нарисовано, — и отдельно то, из чего они сложились: замер, коробка, ручная
 # правка. Иначе непонятно, почему скин мелкий: так замерили или так ужали.
+# Текстура надетой вещи. Одно место, чтобы `TEX_HAT`/`TEX_MASK` не разъезжались
+# между сборкой, замером и уравниванием.
+func _worn_tex() -> Texture2D:
+	if _worn == "hat":
+		return TEX_HAT
+	return TEX_MASK if _worn == "mask" else null
+
+# ШИРИНА ВЕЩИ В ПИКСЕЛЯХ на заданном жире. Ради неё всё и затевалось: `k` — доля
+# КАДРА хозяина, кадры у жиров разные, и одинаковый `k` даёт РАЗНЫЙ размер. По
+# коэффициенту «одинаковую шляпу на всех жирах» подобрать нельзя, по пикселям —
+# можно.
+func _worn_px_at(id: String, fat: int) -> float:
+	var t : Texture2D = _worn_tex()
+	var host : Texture2D = SkinRegistry.get_avatar_texture(id, fat)
+	if t == null or host == null:
+		return 0.0
+	var w : Dictionary = SkinMetrics.worn_for(id, fat, _worn)
+	return WornItem.art_px(host, t, float(w["k"]),
+		SkinMetrics.sprite_scale(id, fat, host.get_size()))
+
+# Размер вещи: в пикселях и В ДОЛЯХ ГОЛОВЫ. Два числа, потому что «одинаковая
+# шляпа» читается двояко — то ли одна и та же на экране, то ли одинаковая
+# ОТНОСИТЕЛЬНО головы, а голова у убера втрое больше худой. Какое из двух нужно,
+# решает глаз, и оба должны быть на виду.
+func _worn_size_line(id: String, tex: Texture2D) -> String:
+	if _worn.is_empty():
+		return "—"
+	var px : float = _worn_px_at(id, _fat)
+	if px <= 0.0 or tex == null:
+		return "—"
+	var head : float = SkinMetrics.head_size_for(id, _fat).x * tex.get_size().x \
+		* SkinMetrics.sprite_scale(id, _fat, tex.get_size())
+	if head <= 0.0:
+		return "%d px" % int(round(px))
+	return "%d px  ·  %.2f головы" % [int(round(px)), px / head]
+
 # Строка про надетую вещь. У шляпы и маски РАЗНЫЕ поля, и показывать надо те,
 # что реально правятся: иначе непонятно, куда уходит движение пальца. Разница не
 # косметическая — шляпа садится от макушки (`глуб` растёт вниз), маска по доле
@@ -494,8 +534,42 @@ func _worn_line(id: String) -> String:
 		return "—"
 	var w : Dictionary = SkinMetrics.worn_for(id, _fat, _worn)
 	if _worn == "hat":
-		return "шляпа ш%.2f x%.3f глуб%.3f" % [float(w["k"]), float(w["x"]), float(w["sink"])]
-	return "маска ш%.2f x%.3f y%.3f" % [float(w["k"]), float(w["x"]), float(w["y"])]
+		return "ш%.2f x%.3f глуб%.3f" % [float(w["k"]), float(w["x"]), float(w["sink"])]
+	return "ш%.2f x%.3f y%.3f" % [float(w["k"]), float(w["x"]), float(w["y"])]
+
+# ── Одна ширина на все жиры ──────────────────────────────────────────────────
+# Берёт ширину вещи НА ТЕКУЩЕМ жире и пересчитывает `k` остальным трём так,
+# чтобы в пикселях вышло то же самое. Руками это не делается: `k` у каждого жира
+# свой знаменатель, и подгонять колесом до совпадения — значит не попасть.
+#
+# Трогает ТОЛЬКО ширину. Посадка (`x`, `глуб`, `y`) у каждого жира своя — макушка
+# у худого и у убера в разных местах, — и утащить её заодно значило бы сбить
+# то, что подбирали руками.
+func _worn_same_width() -> void:
+	if _worn.is_empty():
+		_set_status("вещь не надета", CLR_WARN)
+		return
+	var id : String = _skin_id()
+	var t : Texture2D = _worn_tex()
+	var want : float = _worn_px_at(id, _fat)
+	if t == null or want <= 0.0:
+		return
+	for f in 4:
+		if f == _fat:
+			continue
+		var host : Texture2D = SkinRegistry.get_avatar_texture(id, f)
+		if host == null:
+			continue
+		var k : float = WornItem.k_for_px(host, t, want,
+			SkinMetrics.sprite_scale(id, f, host.get_size()))
+		if k <= 0.0:
+			continue
+		var w : Dictionary = SkinMetrics.worn_for(id, f, _worn).duplicate()
+		w["k"] = clampf(k, 0.05, 3.0)
+		SkinMetrics.worn_set(id, f, _worn, w)
+	_dirty = true
+	_refresh()
+	_set_status("ширина %d px разослана на все жиры" % int(round(want)))
 
 func _refresh_info(id: String, tex: Texture2D) -> void:
 	if tex == null:
@@ -526,7 +600,8 @@ func _refresh_info(id: String, tex: Texture2D) -> void:
 		["туша", "%d×%d px" % [int(body_px.x), int(body_px.y)]],
 		["сдвиг", "%.4f / %.4f" % [nudge.x, nudge.y]],
 		["", ""],
-		["вещь", _worn_line(id)],
+		["вещь", _worn_size_line(id, tex)],
+		["", _worn_line(id)],
 	]
 	# Звёздочка у ручной правки — единственный способ отличить «так и было
 	# замерено» от «я это подвинул»: числа в панели одинаковые в обоих случаях.
@@ -535,7 +610,10 @@ func _refresh_info(id: String, tex: Texture2D) -> void:
 	for i in mini(_info.size(), rows.size()):
 		var l : Label = _info[i]
 		var r : Array = rows[i]
-		if String(r[0]).is_empty():
+		# Отступ — это когда пусто В ОБЕИХ клетках. Раньше хватало пустой
+		# подписи, и продолжение строки без своей подписи («ш0.74 x0.020 …»
+		# под размером вещи) молча стиралось как отступ.
+		if String(r[0]).is_empty() and String(r[1]).is_empty():
 			l.text = ""
 			continue
 		l.text = "%-9s %s" % [String(r[0]), String(r[1])]
@@ -547,6 +625,8 @@ func _refresh_info(id: String, tex: Texture2D) -> void:
 			l.modulate = CLR_WARN if clamp_k < 0.995 else CLR_DIM
 		elif String(r[0]) == "ИТОГ" or String(r[0]) == "СКИН":
 			l.modulate = CLR_TEXT
+		elif String(r[0]).is_empty():
+			l.modulate = CLR_DIM   # продолжение предыдущей строки
 		else:
 			l.modulate = CLR_DIM
 

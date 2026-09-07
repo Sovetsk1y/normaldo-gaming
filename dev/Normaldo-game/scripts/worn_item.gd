@@ -25,6 +25,49 @@ extends RefCounted
 #
 # См. /Концепция/Скины.md, scripts/skin_metrics.gd
 
+# ── Непрозрачная рамка рисунка ────────────────────────────────────────────────
+# `get_image()` РАСПАКОВЫВАЕТ текстуру на каждый вызов, а зовут её здесь дважды
+# на каждую пересборку вещи — то есть в лаборатории на каждый кадр перетаскивания.
+# Рамка при этом у текстуры одна и навсегда, считать её повторно незачем.
+static var _used_cache : Dictionary = {}
+
+static func used_rect(tex: Texture2D) -> Rect2i:
+	if tex == null:
+		return Rect2i()
+	var key := tex.get_rid()
+	if _used_cache.has(key):
+		return _used_cache[key]
+	var r : Rect2i = tex.get_image().get_used_rect()
+	_used_cache[key] = r
+	return r
+
+# ── Ширина вещи В ПИКСЕЛЯХ ────────────────────────────────────────────────────
+# `width_k` — доля ШИРИНЫ КАДРА хозяина, и кадр этот у каждого жира свой: у
+# худого он один, у убера другой. Поэтому ОДНО И ТО ЖЕ `k` даёт РАЗНЫЙ размер на
+# экране, и подбирать по нему «одинаковую шляпу на всех жирах» нельзя — ровно на
+# это и наткнулись, когда лаборатория показывала только коэффициент.
+#
+# Меряем РИСУНОК, а не кадр: у шляпы кадр 536×615, и рисунок занимает в нём
+# меньше половины по ширине. Число «по кадру» показывало бы поля, а не шляпу.
+static func art_px(host_tex: Texture2D, tex: Texture2D, width_k: float,
+		host_scale: float) -> float:
+	if host_tex == null or tex == null or tex.get_size().x <= 0.0:
+		return 0.0
+	var art : float = float(used_rect(tex).size.x)
+	if art <= 0.0:
+		art = tex.get_size().x
+	return art * host_tex.get_size().x * width_k * host_scale / tex.get_size().x
+
+# Обратное: какой `k` даёт заданную ширину. Нужен, чтобы уравнять вещь по жирам —
+# посчитать это в уме нельзя, а подбирать колесом до совпадения пикселей значит
+# так никогда и не попасть.
+static func k_for_px(host_tex: Texture2D, tex: Texture2D, px: float,
+		host_scale: float) -> float:
+	var one : float = art_px(host_tex, tex, 1.0, host_scale)
+	if one <= 0.0:
+		return 0.0
+	return px / one
+
 # Собирает спрайт вещи, но НЕ добавляет его в дерево: кто зовёт, тот и решает,
 # чьим ребёнком вещь станет и как появится.
 static func make(host_tex: Texture2D, tex: Texture2D, width_k: float,
@@ -44,7 +87,7 @@ static func make(host_tex: Texture2D, tex: Texture2D, width_k: float,
 
 static func crown_y(host_tex: Texture2D, w: Sprite2D, sink: float) -> float:
 	var head : Vector2 = host_tex.get_size()
-	var used : Rect2i  = host_tex.get_image().get_used_rect()
+	var used : Rect2i  = used_rect(host_tex)
 	if used.size.y <= 0:
 		return -head.y * 0.5
 	var art_top : float = float(used.position.y) - head.y * 0.5
@@ -54,7 +97,7 @@ static func crown_y(host_tex: Texture2D, w: Sprite2D, sink: float) -> float:
 	# значило бы повторить ту же ошибку с другой стороны — берём нижнюю кромку
 	# её РИСУНКА, то есть край полей шляпы, которым она и садится на голову.
 	var w_tex  : Vector2 = w.texture.get_size()
-	var w_used : Rect2i  = w.texture.get_image().get_used_rect()
+	var w_used : Rect2i  = used_rect(w.texture)
 	if w_used.size.y <= 0:
 		return art_top + art_h * sink - w_tex.y * w.scale.y * 0.5
 	var w_bottom : float = (float(w_used.end.y) - w_tex.y * 0.5) * w.scale.y
