@@ -928,16 +928,23 @@ func _walk_foe(delta: float) -> void:
 	var target : Vector2 = _hero_pos()
 	var to     : Vector2 = target - _foe_pos
 	_foe_state_t += delta
+	# КОРОЛЬ ДЕРЖИТ СВОЙ БОЙ САМ. Прямое преследование — язык рядовых: подошёл,
+	# зарядил, бросился. Оно и делало короля лёгким: он приходил по прямой на
+	# известную дистанцию и стоял там весь заряд.
+	if current_wave == "king" and _foe_state != "enter":
+		_walk_king(delta, to)
+		return
 	match _foe_state:
 		"enter":
 			# Идёт к кругу — оттуда, где появился: из-за края (рядовые) или из
-			# кольца (пират). Дошёл до круга — дальше обычное преследование.
+			# кольца (пират). Дошёл до круга — дальше преследование: у рядовых
+			# прямое, у короля своё (см. `_walk_king`).
 			var into : Vector2 = _arena_center() - _foe_pos
 			if into.length() > 1.0:
 				_foe_pos += into.normalized() * FOE_WALK * delta
 			_foe_sprite.position = _foe_pos + Vector2(0.0, sin(_foe_pos.x * 0.06) * 5.0)
 			if _in_arena(_foe_pos):
-				_foe_state   = "approach"
+				_foe_state   = "stalk" if current_wave == "king" else "approach"
 				_foe_state_t = 0.0
 			if is_instance_valid(_foe_sprite):
 				_foe_sprite.flip_h = to.x > 0.0
@@ -979,9 +986,226 @@ func _walk_foe(delta: float) -> void:
 	if is_instance_valid(_foe_sprite):
 		_foe_sprite.flip_h = to.x > 0.0
 
+# ── УМ КОРОЛЯ ────────────────────────────────────────────────────────────────
+# Он был лёгким, и лёгким по понятной причине: он дрался как рядовой, только с
+# пятью рейками. Подходил по прямой, вставал на дистанции удара и семь десятых
+# секунды стоял в заряде — то есть сам приходил под кулак и сам же ждал, пока
+# его ударят. А каждое попадание сбивало ему заряд, и бой сводился к «бей, как
+# перезарядится»: игрок ни разу не был вынужден отойти.
+#
+# Чинится это не числами. Прибавь ему рейку — и то же самое станет дольше;
+# ускорь рывок — и станет несправедливо, потому что читать в нём всё равно
+# нечего. Ему нужны СВОИ решения, и вот четыре, которые их дают:
+#
+#   1. ОН КРУЖИТ. Держит полосу дистанции — не подходит ближе `KING_NEAR` и не
+#      отпускает дальше `KING_FAR`, — и всё это время смещается вбок, меняя
+#      сторону. Стоять на месте и ждать, пока он придёт на длину руки, больше
+#      нельзя: он приходит не туда, где ты стоял.
+#   2. ОН ЧИТАЕТ УДАР. На твой замах, если тот дотягивается, он отвечает —
+#      ставит блок (и тут же бьёт в ответ) или уходит с линии. Чем меньше у него
+#      реек, тем чаще читает. Бить наугад перестаёт работать: каждый замах — это
+#      ставка.
+#   3. ОН ФИНТИТ. Часть зарядов обрывается отскоком вместо рывка. Наказание
+#      ровно за то, чему учит пункт 2: за удар на опережение по телеграфу.
+#   4. ОН НЕ РАССЫПАЕТСЯ ОТ КАЖДОГО ПОПАДАНИЯ. Стойкость: сбивает его каждый
+#      второй удар, остальные он проходит насквозь и доводит свой. Размен
+#      перестаёт быть бесплатным.
+#
+# Всё это — только у него. Рядовые остаются обучением: у них тот же прямой
+# рисунок, потому что их волны заведены объяснить по одному правилу.
+const KING_WALK       : float = 124.0   # кружит быстрее, чем ходят рядовые
+# ПОЛОСА, В КОТОРОЙ ОН КРУЖИТ, СЧИТАЕТСЯ ОТ ДЛИНЫ ТВОЕЙ РУКИ, а не задана числом.
+# Числом она и была — 158…252 px, — и в этом была вся его лёгкость: рука
+# достаёт на 265, то есть он кружил ВНУТРИ неё. Стоять и бить по готовности было
+# выигрышной стратегией, потому что он сам всё время держался под кулаком.
+#
+# Теперь без дела он стоит там, куда ты не дотягиваешься, и входит в твою
+# дистанцию только рывком. Отсюда и весь бой: ждать его броска и наказывать
+# отдышку — или идти за ним самому, зная, что он читает.
+const KING_SAFE       : float = 30.0    # запас поверх длины твоей руки
+const KING_BAND       : float = 120.0   # ширина полосы обхода
+
+func _king_near() -> float:
+	return SWING_REACH + FIST_R + _foe_r() + KING_SAFE
+
+func _king_far() -> float:
+	return _king_near() + KING_BAND
+
+const KING_STRAFE     : float = 0.95    # доля боковой скорости в кружении
+const KING_STRAFE_T   : float = 1.05    # как часто меняет сторону обхода
+# Читает он ЧАСТО — но только вне отдышки. Бить наугад, пока он кружит или
+# заряжается, теперь плохая мысль: почти каждый такой замах он встретит блоком и
+# ответит. А окно после его броска остаётся честным.
+const KING_READ_BASE  : float = 0.45    # шанс прочитать замах на полных рейках
+const KING_READ_GROW  : float = 0.40    # ...и насколько он растёт к последней
+const KING_PARRY_T    : float = 0.40    # сколько держит блок
+const KING_COUNTER_T  : float = 0.12    # ответ после парирования
+const KING_BACKSTEP_T : float = 0.28
+const KING_BACKSTEP_V : float = 330.0   # отскок быстрый: он уходит ОТ удара
+const KING_FEINT      : float = 0.30    # доля зарядов, которые окажутся финтом
+const KING_FEINT_T    : float = 0.26
+const KING_JAB        : float = 0.45    # добивающий джеб сразу после рывка
+const KING_JAB_T      : float = 0.20
+const KING_CHARGE_MIN : float = 0.34    # заряд на последней рейке
+const KING_POISE      : int   = 2       # каждый второй удар его НЕ сбивает
+# ОТ НЕГО НЕ УБЕЖИШЬ. Круг тесный, но игрок в нём быстрее пешего короля, и
+# кружить от него можно было бесконечно: бой превращался в ничью на таймере — ни
+# он не достаёт, ни его не бьют. Поэтому чем дольше он не доставал, тем быстрее
+# идёт и тем дальше решается броситься.
+const KING_HUNT_FROM  : float = 1.60    # с какой паузы без атаки начинает гнать
+const KING_HUNT_FULL  : float = 4.50    # ...и когда разгоняется до предела
+const KING_HUNT_SPEED : float = 2.05    # во столько раз быстрее на пределе
+const KING_HUNT_REACH : float = 1.75    # и во столько раз дальше бросается
+
+var _no_hit_t : float = 0.0   # сколько он не доставал до игрока
+
+# Насколько он уже разошёлся в погоне: 0 — только что бил, 1 — гоняет давно.
+func _hunt() -> float:
+	return clampf((_no_hit_t - KING_HUNT_FROM)
+		/ maxf(0.1, KING_HUNT_FULL - KING_HUNT_FROM), 0.0, 1.0)
+
+var _strafe_dir : float = 1.0
+var _strafe_t   : float = 0.0
+var _feint      : bool  = false
+var _king_hits  : int   = 0
+
+# Насколько он зол: 0 на полных рейках, 1 на последней.
+func _king_rage() -> float:
+	return clampf(float(KING_HP - king_hp) / float(maxi(1, KING_HP - 1)), 0.0, 1.0)
+
+# Заряд перед рывком короче с каждой потерянной рейкой: телеграф остаётся, но
+# времени на уход всё меньше.
+func _charge_time() -> float:
+	if current_wave != "king":
+		return CHARGE_T
+	return lerpf(CHARGE_T, KING_CHARGE_MIN, _king_rage())
+
+func _read_chance() -> float:
+	return KING_READ_BASE + KING_READ_GROW * _king_rage()
+
+func _walk_king(delta: float, to: Vector2) -> void:
+	_no_hit_t += delta
+	var d   : float   = to.length()
+	var dir : Vector2 = to.normalized() if d > 1.0 else Vector2.RIGHT
+	match _foe_state:
+		"stalk":
+			# Полоса дистанции плюс обход. Сторона обхода меняется сама: обходя
+			# всё время в одну, он читался бы как едущий по кругу, а не как
+			# ищущий, с какой стороны зайти.
+			_strafe_t += delta
+			if _strafe_t >= KING_STRAFE_T:
+				_strafe_t   = 0.0
+				_strafe_dir = -_strafe_dir
+			var move : Vector2 = dir.orthogonal() * _strafe_dir * KING_STRAFE
+			if d > _king_far():
+				move += dir
+			elif d < _king_near():
+				move -= dir
+			if move.length() > 0.01:
+				_foe_pos += move.normalized() \
+					* KING_WALK * lerpf(1.0, KING_HUNT_SPEED, _hunt()) * delta
+			_foe_sprite.position = _foe_pos + Vector2(0.0, sin(_foe_pos.x * 0.06) * 5.0)
+			# Бросается тем раньше и тем издалека, чем дольше его водят.
+			var from_d : float = _king_far() * lerpf(1.15, KING_HUNT_REACH, _hunt())
+			var wait   : float = king_gap() * lerpf(1.0, 0.45, _hunt())
+			if _foe_attacks and _foe_state_t >= wait and d <= from_d:
+				_enter_charge()
+		"charge":
+			# Финт обрывается ОТСКОКОМ, а не просто отменой: отменённый на месте
+			# заряд неотличим от лага, а отскок читается как «передумал».
+			if _feint and _foe_state_t >= KING_FEINT_T:
+				_enter_backstep()
+			elif not _feint and _foe_state_t >= _charge_time():
+				_enter_dash()
+			_foe_sprite.position = _foe_pos
+		"dash":
+			var d2 : Vector2 = _dash_to - _foe_pos
+			_foe_pos += d2.normalized() * DASH_SPEED * delta
+			if d2.length() <= DASH_SPEED * delta or _foe_state_t >= DASH_MAX_T:
+				_enter_recover()
+			_foe_sprite.position = _foe_pos
+		"parry":
+			# Стоит в глухой: пока держит, твой удар в него не проходит.
+			if _foe_state_t >= KING_PARRY_T:
+				_enter_stalk()
+			_foe_sprite.position = _foe_pos
+		"backstep":
+			_foe_pos -= dir * KING_BACKSTEP_V * delta
+			if _foe_state_t >= KING_BACKSTEP_T:
+				_enter_stalk()
+			_foe_sprite.position = _foe_pos
+		"recover":
+			if _foe_state_t >= king_gap():
+				_enter_stalk()
+			_foe_sprite.position = _foe_pos
+		_:
+			_enter_stalk()
+			_foe_sprite.position = _foe_pos
+	_foe_pos = _clamp_to_arena(_foe_pos, ARENA_MARGIN * 0.5)
+	if is_instance_valid(_foe_sprite):
+		_foe_sprite.flip_h = to.x > 0.0
+
+func _enter_stalk() -> void:
+	_foe_state   = "stalk"
+	_foe_state_t = 0.0
+	if is_instance_valid(_foe_sprite) and current_wave == "king":
+		_foe_sprite.texture = F_IDLE
+
+func _enter_parry() -> void:
+	_foe_state   = "parry"
+	_foe_state_t = 0.0
+	if is_instance_valid(_foe_sprite):
+		_foe_sprite.texture = F_FROWN
+
+func _enter_backstep() -> void:
+	_foe_state   = "backstep"
+	_foe_state_t = 0.0
+	_feint       = false
+	if is_instance_valid(_foe_sprite):
+		_foe_sprite.texture = F_IDLE
+
+# ЧИТАЕТ ЗАМАХ. Зовётся из `punch()` — то есть в момент, когда игрок только
+# начал бить, а кулак ещё идёт по дуге. Отвечать на попадание было бы поздно, а
+# отвечать на замах, который и так не дотягивается, — нечестно: он реагировал бы
+# на движение пальца, а не на удар.
+func _king_reads() -> void:
+	if current_wave != "king" or not is_instance_valid(_foe_sprite):
+		return
+	# ОТДЫШКА — ЭТО ОТДЫШКА. Читать в ней он не может, и это не поблажка, а весь
+	# смысл его броска: он рискует, ты наказываешь. Читай он и здесь — наказывать
+	# было бы негде, и бой превратился бы в лотерею «дадут ли ударить».
+	if _foe_state == "dash" or _foe_state == "parry" \
+			or _foe_state == "backstep" or _foe_state == "recover":
+		return
+	if not _hero_can_reach():
+		return
+	if randf() > _read_chance():
+		return
+	# Два ответа, и они разные по цене. Блок оставляет его вплотную и даёт ему
+	# ответный удар; отскок безопаснее для него, но отпускает игрока.
+	if randf() < 0.55:
+		_enter_parry()
+	else:
+		_enter_backstep()
+
+# Парировал: удар не прошёл, и он тут же отвечает.
+func _parried() -> void:
+	blocks += 1
+	_caption("ПАРИРОВАЛ!", Color(1.00, 0.78, 0.55))
+	_sfx(SFX_BLOCK, -4.0)
+	SCREEN_SHAKE.play(_game_root, 7.0, 5)
+	_p_cd = PUNCH_CD
+	# Расходятся МЕНЬШЕ, чем на обычном блоке: ответ обязан доставать, иначе
+	# парирование не наказывает, а просто отменяет размен.
+	_knock_apart(KNOCK_FOE * 0.35, KNOCK_HERO * 0.35)
+	get_tree().create_timer(KING_COUNTER_T).timeout.connect(foe_punch, CONNECT_ONE_SHOT)
+
 func _enter_charge() -> void:
 	_foe_state   = "charge"
 	_foe_state_t = 0.0
+	# Финтит только король, и решается это ЗДЕСЬ, на входе: решай он в середине
+	# заряда — телеграф был бы честным ровно до момента, когда врать выгодно.
+	_feint = current_wave == "king" and randf() < KING_FEINT
 	# Целится НЕ В САМОГО ИГРОКА, а на длину вытянутой руки перед ним. Раньше
 	# точкой рывка была ровно позиция головы, и не ушедший игрок обнаруживал
 	# пирата в своей собственной точке — две головы в одной.
@@ -998,14 +1222,20 @@ func _enter_dash() -> void:
 	_foe_state   = "dash"
 	_foe_state_t = 0.0
 	# Рывок И ЕСТЬ удар: замах выпускается в начале броска, и достанет он ровно
-	# если рывок довёл его на длину руки.
-	foe_punch()
+	# если рывок довёл его на длину руки — И ЕСЛИ ИГРОК ОСТАЛСЯ НА ЛИНИИ.
+	foe_punch(_dash_to)
 
 func _enter_recover() -> void:
 	_foe_state   = "recover"
 	_foe_state_t = 0.0
 	if current_wave == "king" and is_instance_valid(_foe_sprite):
 		_foe_sprite.texture = F_IDLE
+		# ДОБИВАЮЩИЙ ДЖЕБ. Рывок кончился вплотную — значит у него есть вторая
+		# рука, и уходить надо СРАЗУ, а не досматривать, чем кончилось. Без него
+		# конец рывка был безопасным окном, в котором игрок бил бесплатно.
+		if randf() < KING_JAB and _foe_can_reach():
+			get_tree().create_timer(KING_JAB_T).timeout\
+				.connect(foe_punch, CONNECT_ONE_SHOT)
 
 func _hero_pos() -> Vector2:
 	if is_instance_valid(_normaldo):
@@ -1121,6 +1351,8 @@ func punch() -> void:
 	_p_swing = { "t": 0.0, "resolved": false, "dir": dir }
 	_spawn_swing_fist(from, dir, F_PLAYER_FIST, PLAYER_FIST_FACES)
 	_sfx(SFX_SWING, -6.0)
+	# Король ЧИТАЕТ замах — здесь, пока кулак только пошёл по дуге.
+	_king_reads()
 
 # Тап бьёт, свайп ведёт голову. Свайп сюда даже не заходит: движением занимается
 # сам Нормальдо своим обычным управлением, а босс только держит его в круге.
@@ -1163,11 +1395,15 @@ func _input(event: InputEvent) -> void:
 	_last_tap_pos = at
 
 # Удар противника. Публичный: им пользуются волны и тест.
-func foe_punch() -> void:
+# `aim` — куда бьёт. Задан — бьёт ПО ЭТОЙ ЛИНИИ: так бьёт рывок, и целится он в
+# точку, которую запомнил в начале заряда. Целься он в живого игрока — заряд
+# телеграфировал бы одно, а удар приходил бы по другому, и уходить было бы
+# некуда.
+func foe_punch(aim: Vector2 = Vector2.INF) -> void:
 	if not _running or not _e_swing.is_empty() or not is_instance_valid(_foe_sprite):
 		return
 	var from := _foe_pos
-	var dir  : Vector2 = (_hero_pos() - from)
+	var dir  : Vector2 = ((aim if aim.is_finite() else _hero_pos()) - from)
 	dir = dir.normalized() if dir.length() > 1.0 else Vector2.LEFT
 	_e_swing = { "t": 0.0, "resolved": false, "dir": dir }
 	_spawn_swing_fist(from, dir, F_FIST, FOE_FIST_FACES)
@@ -1235,7 +1471,7 @@ const KNOCK_HERO : float = 30.0
 func _min_gap() -> float:
 	return HEAD_R + _foe_r() + 10.0
 
-func _knock_apart(k_foe: float, k_hero: float) -> void:
+func _knock_apart(k_foe: float, k_hero: float, stagger: bool = true) -> void:
 	var axis : Vector2 = _foe_pos - _hero_pos()
 	axis = axis.normalized() if axis.length() > 1.0 else Vector2.RIGHT
 	_foe_pos = _clamp_to_arena(_foe_pos + axis * k_foe, ARENA_MARGIN * 0.5)
@@ -1243,8 +1479,12 @@ func _knock_apart(k_foe: float, k_hero: float) -> void:
 		_normaldo.position = _clamp_to_arena(
 			_normaldo.position - axis * k_hero, ARENA_MARGIN)
 	# И разгон сбивается: размен в разгоне — это размен, а не проезд насквозь.
+	# Но у КОРОЛЯ есть стойкость: сбивает его каждый второй удар, остальные он
+	# проходит насквозь и доводит свой. Пока сбивало каждое попадание, размен с
+	# ним был бесплатным — бей, и он никогда не дойдёт.
 	if _foe_state == "dash" or _foe_state == "charge":
-		_enter_recover()
+		if stagger:
+			_enter_recover()
 
 # Каждый кадр: разъехаться, если сошлись ближе допустимого.
 func _keep_apart() -> void:
@@ -1263,6 +1503,21 @@ func _face_foe() -> void:
 	if is_instance_valid(_normaldo) and _normaldo.has_method("face_towards"):
 		_normaldo.call("face_towards", _foe_pos.x)
 
+# ── УДАР ИДЁТ ПО ЛИНИИ, А НЕ В ТОЧКУ ─────────────────────────────────────────
+# Дистанции мало: замах — это дуга в одну сторону, и человек, отошедший вбок,
+# из-под неё выходит. Без этого уход с линии не работал вовсе: пират целился в
+# ту точку, где игрок оказывался НА МОМЕНТ БРОСКА, и уйти от рывка было нельзя
+# никак — заряд телеграфировал линию, а бил он всё равно по тебе.
+const SWING_CONE : float = 0.55   # раствор, в котором замах ещё достаёт, радианы
+
+func _in_cone(swing: Dictionary, from_p: Vector2, to_p: Vector2) -> bool:
+	if not swing.has("dir"):
+		return true
+	var now : Vector2 = to_p - from_p
+	if now.length() < 1.0:
+		return true
+	return absf((swing["dir"] as Vector2).angle_to(now.normalized())) <= SWING_CONE
+
 # Мой кулак достаёт до него.
 func _hero_can_reach() -> bool:
 	return _fight_dist() <= SWING_REACH + FIST_R + _foe_r()
@@ -1270,6 +1525,13 @@ func _hero_can_reach() -> bool:
 # Его кулак достаёт до меня.
 func _foe_can_reach() -> bool:
 	return _fight_dist() <= SWING_REACH + FIST_R + HEAD_R
+
+# Доходит ли замах: и по дистанции, и по стороне.
+func _hero_lands() -> bool:
+	return _hero_can_reach() and _in_cone(_p_swing, _hero_pos(), _foe_pos)
+
+func _foe_lands() -> bool:
+	return _foe_can_reach() and _in_cone(_e_swing, _foe_pos, _hero_pos())
 
 # Один кадр разбора. ПОРЯДОК ЗДЕСЬ И ЕСТЬ ПРАВИЛО: сперва ничья, потом
 # попадания. Проверь попадания первыми — и размен, в котором оба достали в один
@@ -1285,18 +1547,22 @@ func _resolve(delta: float) -> void:
 	# ни один не проходит. Дотягиваться должны ОБА: размен, в котором один стоит
 	# вне досягаемости, — это не ничья, это два промаха.
 	if _swing_live(_p_swing) and _swing_live(_e_swing) \
-			and _hero_can_reach() and _foe_can_reach() \
+			and _hero_lands() and _foe_lands() \
 			and (_swing_ripe(_p_swing) or _swing_ripe(_e_swing)):
 		_block()
 		return
 
 	if _swing_ripe(_p_swing):
 		_p_swing["resolved"] = true
-		if _hero_can_reach():
-			_land_on_foe()
+		if _hero_lands():
+			# Прочитал и встал в блок — удар не проходит, и он отвечает.
+			if _foe_state == "parry":
+				_parried()
+			else:
+				_land_on_foe()
 	if _swing_ripe(_e_swing):
 		_e_swing["resolved"] = true
-		if _foe_can_reach():
+		if _foe_lands():
 			_land_on_hero()
 
 	# Замах кончился — руку убрали. Дальше кулак живёт своим твином и гаснет сам.
@@ -1336,12 +1602,17 @@ func _land_on_foe() -> void:
 	# Тем же красным мигает и Нормальдо (`_flash_hit`) — язык один на обоих.
 	_flash_red(_foe_sprite)
 	# Разводит ОБОИХ: он отлетает дальше, но и бьющего отдачей отбрасывает.
-	_knock_apart(KNOCK_FOE, KNOCK_HERO * 0.6)
+	var stagger := true
+	if current_wave == "king":
+		_king_hits += 1
+		stagger = (_king_hits % KING_POISE) == 0
+	_knock_apart(KNOCK_FOE, KNOCK_HERO * 0.6, stagger)
 	_sfx(SFX_HIT, -2.0)
 	SCREEN_SHAKE.play(_game_root, 11.0, 7)
 
 func _land_on_hero() -> void:
 	hits_taken += 1
+	_no_hit_t = 0.0   # достал — и погоня начинается заново
 	# И здесь тоже разводит обоих — иначе пират, достав в рывке, оставался стоять
 	# ровно там же, где стоит игрок.
 	_knock_apart(KNOCK_FOE * 0.6, KNOCK_HERO)

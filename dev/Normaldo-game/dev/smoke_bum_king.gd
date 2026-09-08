@@ -21,7 +21,7 @@ const BUM_KING := preload("res://scripts/bum_king.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 79
+const EXPECTED_CHECKS : int = 89
 
 # Пауза, за которую кулак успевает дорасти до полного размера: треть замаха
 # плюс запас на кадр. Меряем руки только после неё.
@@ -563,6 +563,144 @@ func _initialize() -> void:
 			break
 		await process_frame
 	_check(saw_dash, "и бросается на тебя, а не стоит столбом")
+
+	# ── УМ КОРОЛЯ ───────────────────────────────────────────────────────────
+	# Он был лёгким не из-за чисел, а из-за рисунка: приходил по прямой и стоял
+	# в заряде, то есть сам подходил под кулак и ждал. Проверяется поэтому не
+	# «стало сложнее», а каждое из решений, которые у него появились.
+	print("── Ум короля ──")
+	n.position = c_arena
+	boss.set("hero_hp", 3)
+
+	# КРУЖИТ. За полторы секунды обхода направление на него обязано смениться:
+	# идущий по прямой держит угол, а этот заходит то с одной стороны, то с
+	# другой — стоять и ждать его на длине руки больше нельзя.
+	# Ставим его В СЕРЕДИНУ его полосы: оказавшись ближе, он сперва разрывает
+	# дистанцию, и почти всё смещение уходит по радиусу, а не по кругу.
+	var band_mid : float = float(boss.call("_king_near")) + float(boss.KING_BAND) * 0.5
+	boss.set("_foe_pos", c_arena + Vector2(band_mid, 0.0))
+	boss.call("_enter_stalk")
+	var axis0 : Vector2 = (Vector2(boss.get("_foe_pos")) - n.position).normalized()
+	var near_seen : float = 1e9
+	# Меряется НАИБОЛЬШЕЕ боковое смещение за окно, и в пикселях, а не в градусах.
+	# Во-первых, сторону обхода он меняет сам и к концу окна может вернуться почти
+	# туда же — по концам это выглядело бы как «стоял на месте». Во-вторых, угол
+	# здесь обманывает: арена низкая, а держится он далеко, и на его дистанции
+	# даже полный уход вбок — это доли радиана.
+	var swing_max : float = 0.0
+	var t_orb := Time.get_ticks_msec()
+	while float(Time.get_ticks_msec() - t_orb) < 2000.0 and is_instance_valid(boss):
+		if String(boss.get("_foe_state")) == "stalk":
+			near_seen = minf(near_seen,
+				n.position.distance_to(boss.get("_foe_pos")))
+			var off : Vector2 = Vector2(boss.get("_foe_pos")) - n.position
+			swing_max = maxf(swing_max, absf(off.dot(axis0.orthogonal())))
+		boss.set("hero_hp", 3)
+		await process_frame
+	_check(swing_max > 40.0,
+		"кружит вокруг, а не идёт по прямой: уходил вбок на %.0f px" % swing_max)
+	# И ДЕРЖИТ ПОЛОСУ: вплотную не липнет, драться в упор не даёт.
+	_check(near_seen >= float(boss.call("_king_near")) * 0.7,
+		"и держится ДАЛЬШЕ твоей руки: ближе всего подошёл на %.0f px при полосе от %.0f"
+			% [near_seen, float(boss.call("_king_near"))])
+
+	# ЧИТАЕТ ЗАМАХ. Двадцать четыре удара в упор — хоть на один он обязан
+	# ответить блоком или уходом. Ноль ответов значит, что чтение отвалилось.
+	var reads := 0
+	for i in 24:
+		boss.call("_enter_stalk")
+		boss.set("_foe_pos", n.position + Vector2(150.0, 0.0))
+		boss.set("_p_cd", 0.0)
+		boss.set("_p_swing", {})
+		boss.call("punch")
+		await process_frame
+		var st2 : String = String(boss.get("_foe_state"))
+		if st2 == "parry" or st2 == "backstep":
+			reads += 1
+		boss.set("hero_hp", 3)
+	_check(reads > 0, "читает замах: ответил на %d из 24" % reads)
+	boss.set("_p_swing", {})
+	boss.set("_e_swing", {})
+
+	# ФИНТИТ. Часть зарядов — обман, и решается это на входе в заряд, а не в
+	# середине: решай он посреди, телеграф был бы честным ровно до того момента,
+	# когда врать выгодно.
+	var feints := 0
+	for i in 24:
+		boss.call("_enter_charge")
+		if bool(boss.get("_feint")):
+			feints += 1
+	_check(feints > 0, "финтит: обманных зарядов %d из 24" % feints)
+	# И финт кончается ОТСКОКОМ, а не рывком.
+	boss.set("_foe_state", "charge")
+	boss.set("_foe_state_t", 0.0)
+	boss.set("_feint", true)
+	boss.set("_foe_pos", n.position + Vector2(200.0, 0.0))
+	await _wait(0.5)
+	_check(String(boss.get("_foe_state")) != "dash",
+		"и финт кончается не рывком: %s" % [String(boss.get("_foe_state"))])
+
+	# БЬЁТ ПО ЛИНИИ, А НЕ В ТОЧКУ. Ушёл вбок — его удар прошёл мимо. Раньше он
+	# целился туда, где игрок оказывался НА МОМЕНТ БРОСКА, и уйти от рывка было
+	# нельзя никак: заряд обещал линию, а удар приходил по тебе.
+	boss.call("_enter_stalk")
+	boss.set("_e_swing", {})
+	boss.set("_foe_pos", n.position + Vector2(150.0, 0.0))
+	var t_line : int = int(boss.get("hits_taken"))
+	boss.set("hero_hp", 3)
+	boss.call("foe_punch", n.position)          # бьёт в точку, где игрок стоит
+	n.position = n.position + Vector2(0.0, 120.0)   # ...а игрок ушёл вбок
+	await _wait(0.6)
+	_check(int(boss.get("hits_taken")) == t_line,
+		"ушёл с линии — его удар мимо: получил %d"
+			% (int(boss.get("hits_taken")) - t_line))
+	# А оставшись на линии — получаешь.
+	boss.set("_e_swing", {})
+	boss.set("_foe_pos", n.position + Vector2(150.0, 0.0))
+	boss.call("foe_punch", n.position)
+	await _wait(0.6)
+	# Здесь важно «дошло», а не «ровно один»: пока идёт замер, свой ход делает и
+	# сам бой — джеб после отдышки прилетает вторым, и точное число ловило бы не
+	# правило, а совпадение.
+	_check(int(boss.get("hits_taken")) >= t_line + 1,
+		"а на линии — получаешь: %d" % (int(boss.get("hits_taken")) - t_line))
+
+	# ОТДЫШКА ЧЕСТНАЯ: в ней он не читает. Это не поблажка, а весь смысл его
+	# броска — он рискует, ты наказываешь. Читай он и здесь, наказывать было бы
+	# негде, и бой стал бы лотереей «дадут ли ударить».
+	var read_in_rec := 0
+	for i in 24:
+		boss.set("_foe_state", "recover")
+		boss.set("_foe_state_t", 0.0)
+		boss.set("_foe_pos", n.position + Vector2(150.0, 0.0))
+		boss.set("_p_cd", 0.0)
+		boss.set("_p_swing", {})
+		boss.call("punch")
+		if String(boss.get("_foe_state")) != "recover":
+			read_in_rec += 1
+		boss.set("hero_hp", 3)
+	_check(read_in_rec == 0,
+		"в отдышке он НЕ читает: ответил %d раз из 24" % read_in_rec)
+	boss.set("_p_swing", {})
+	boss.set("_e_swing", {})
+
+	# СТОЙКОСТЬ. Сбивает его каждый второй удар: пока сбивало каждое попадание,
+	# размен с ним был бесплатным — бей, и его заряд не доходит никогда.
+	boss.set("_king_hits", 0)
+	boss.set("king_hp", 5)
+	boss.set("_foe_state", "charge")
+	boss.set("_foe_state_t", 0.0)
+	boss.set("_foe_pos", n.position + Vector2(150.0, 0.0))
+	boss.call("_land_on_foe")
+	_check(String(boss.get("_foe_state")) == "charge",
+		"первое попадание заряд НЕ сбивает: %s" % [String(boss.get("_foe_state"))])
+	boss.set("_foe_state", "charge")
+	boss.set("_foe_state_t", 0.0)
+	boss.set("_foe_pos", n.position + Vector2(150.0, 0.0))
+	boss.call("_land_on_foe")
+	_check(String(boss.get("_foe_state")) == "recover",
+		"а второе — сбивает: %s" % [String(boss.get("_foe_state"))])
+	boss.set("king_hp", int(boss.KING_HP))
 
 	# ── Одно попадание — одна рейка ─────────────────────────────────────────
 	print("── Рейки ──")
