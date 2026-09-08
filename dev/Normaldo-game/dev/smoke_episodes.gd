@@ -190,15 +190,34 @@ func _test_hardcore_entry() -> void:
 # которого не квартира. Ломается это молча в обе стороны: не показался — игрок
 # видит подмену фона под собой; показался там, где менять нечего, — полторы
 # секунды пустого ожидания перед первым эпизодом.
+# Насколько переход закрыл экран, от 0 до 1. У шторки это заливка по шейдеру, у
+# облака денег — непрозрачность подложки: у знака доллара внутри дырки, и
+# сплошность держит именно она, а не плотность кучи.
+func _transition_cover(t: Node) -> float:
+	var r = t.get("_rect")
+	if r != null and is_instance_valid(r) and r.material is ShaderMaterial:
+		return float((r.material as ShaderMaterial).get_shader_parameter("factor"))
+	for c in t.get_children():
+		if c is ColorRect:
+			return (c as ColorRect).color.a
+	return 0.0
+
 func _test_curtain() -> void:
 	_check(not _hud.call("_needs_curtain", 1), "перед первым эпизодом занавеса нет")
 	_check(not _hud.call("_needs_curtain", 0), "и перед бесконечным тоже — он начинается с первого уровня")
 	_check(bool(_hud.call("_needs_curtain", 2)) and bool(_hud.call("_needs_curtain", 3)),
 		"а перед вторым и третьим — есть")
 
-	# Занавес обязан ЗАКРЫТЬСЯ ПОЛНОСТЬЮ и только потом отдать смену фона: в
-	# этом весь его смысл. Если бы он звал `on_covered` раньше, подмену было бы
-	# видно сквозь незакрытую шторку.
+	# Занавес обязан ЗАКРЫТЬ ЭКРАН ПОЛНОСТЬЮ и только потом отдать смену фона: в
+	# этом весь его смысл. Позвал бы `on_covered` раньше — подмену было бы видно
+	# сквозь незакрытый переход.
+	#
+	# ЗАМЕРЯЕТСЯ ЭТО ПО-РАЗНОМУ У РАЗНЫХ СТИЛЕЙ, и первая версия проверки этого
+	# не знала: она читала `factor` шейдера шторки, а при включённом облаке денег
+	# шторки нет вовсе — `_rect` не создаётся, замер оставался нулевым, и тест
+	# падал на рабочем переходе. Стилей два и оба живые (`LevelTransition.STYLE`),
+	# значит и мерить надо то, чем каждый из них закрывает экран: шторка —
+	# заливкой по шейдеру, облако — своей подложкой.
 	var covered : Array = [false]
 	var seen_alpha : Array = [0.0]
 	var t = load("res://scripts/level_transition.gd").new()
@@ -208,12 +227,10 @@ func _test_curtain() -> void:
 	while not covered[0] and Time.get_ticks_msec() - t0 < 6000:
 		get_root().get_tree().paused = false
 		await process_frame
-		var r = t.get("_rect")
-		if r != null and is_instance_valid(r):
-			seen_alpha[0] = float((r.material as ShaderMaterial).get_shader_parameter("factor"))
+		seen_alpha[0] = maxf(seen_alpha[0], _transition_cover(t))
 	_check(covered[0], "занавес отдал смену фона")
 	_check(seen_alpha[0] >= 0.999,
-		"и отдал её ЗАКРЫТЫМ: шторка на %.2f из 1.00" % seen_alpha[0])
+		"и отдал её ЗАКРЫТЫМ: экран закрыт на %.2f из 1.00" % seen_alpha[0])
 	if is_instance_valid(t):
 		t.queue_free()
 	await process_frame
