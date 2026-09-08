@@ -52,12 +52,12 @@ func _initialize() -> void:
 	sp.call("_setpiece_pizza_wall", speed, lanes, vp.x)
 
 	# Первый кадр — на выходе стены: колонна уже в кадре, пицца только выезжает.
-	var lead : float = float(sp.call("_pizza_wall_lead", speed, vp.x))
+	var lead : float = float(sp.PIZZA_WALL_LEAD)
 	await _run(lead + 0.35)
 	await _save(out, "pizza_wall_start")
 
 	# Второй — на встрече: стена вплотную к колонне, примерно на трети экрана.
-	var meet : float = lead / (float(sp.PIZZA_WALL_SPEED_MULT) - 1.0)
+	var meet : float = lead / (float(sp.call("_pizza_wall_mult", speed, vp.x)) - 1.0)
 	await _run(meet - 0.35)
 	await _save(out, "pizza_wall_meet")
 	quit(0)

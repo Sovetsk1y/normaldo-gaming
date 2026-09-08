@@ -316,8 +316,8 @@ func _run_boss() -> void:
 			_spawner.set_process(true)
 		if is_instance_valid(bg) and bg.has_method("start_scrolling"):
 			bg.start_scrolling()
-		if is_instance_valid(_normaldo) and _normaldo.has_method("enable_input"):
-			_normaldo.enable_input()
+		if is_instance_valid(_normaldo) and _normaldo.has_method("resume_input"):
+			_normaldo.resume_input()
 		queue_free()
 		return
 	defeated.emit()
@@ -354,8 +354,8 @@ func _intro() -> void:
 	await _show_banner()
 	if not _alive():
 		return
-	if is_instance_valid(_normaldo) and _normaldo.has_method("enable_input"):
-		_normaldo.enable_input()
+	if is_instance_valid(_normaldo) and _normaldo.has_method("resume_input"):
+		_normaldo.resume_input()
 	_set_pose(F_GUN, W_FIGHT)
 
 # Реплика босса. У Ноги Ниндзя она про то, что он уничтожит пиццу; крокодилу

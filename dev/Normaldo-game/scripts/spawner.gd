@@ -1471,10 +1471,13 @@ func _run_set_piece(id: String, speed: float, lanes: Array, vp_w: float) -> void
 # общем пуле, так что чужим не выглядит.
 const SLOWING_KINDS : Array = ["banana", "beer", "cocktail"]
 
-# Насколько пицца быстрее колонны. Ровно вдвое — как в оригинале: меньше и стена
-# не догоняет вовсе, больше и она проскакивает экран раньше, чем игрок успевает
-# перестроиться.
+# Насколько пицца быстрее колонны. Вдвое — как в оригинале; это НИЖНЯЯ граница,
+# выше её поднимает расчёт под паузу (см. `_pizza_wall_mult`). Потолок стоит
+# затем, что с какой-то скорости стена перестаёт быть стеной: пять колонок
+# проскакивают экран раньше, чем игрок успевает переставить голову, и приз
+# превращается в мелькание.
 const PIZZA_WALL_SPEED_MULT : float = 2.0
+const PIZZA_WALL_MULT_MAX   : float = 3.2
 const PIZZA_WALL_COLS_MIN   : int   = 5
 const PIZZA_WALL_COLS_MAX   : int   = 8
 
@@ -1491,16 +1494,37 @@ const PIZZA_WALL_MEET_X : float = 0.35
 # расстояние между колонной и стеной, и без него встреча уезжает на сотню px.
 const PIZZA_WALL_SPAWN_OFF : float = 80.0
 
-# Фора колонны в СЕКУНДАХ. Стена выходит из той же точки вдогонку, поэтому на
-# момент её выхода расстояние между ними равно `фора × speed`, а сближаются они
-# со скоростью `(mult − 1) × speed`. Отсюда колонна на момент встречи стоит в
-#   X0 − speed × фора × mult / (mult − 1),
-# и фора — обратная этому величина.
-func _pizza_wall_lead(speed: float, vp_w: float) -> float:
+# ПАУЗА МЕЖДУ КОЛОННОЙ И СТЕНОЙ, в секундах. Константа именно здесь, а скорость
+# стены выводится из неё — раньше было наоборот, и вот чем это кончилось.
+#
+# Фора считалась из точки встречи: `(x0 − meet) × k / speed`. Расстояние там
+# постоянное, поэтому ПАУЗА ПАДАЛА С РОСТОМ СКОРОСТИ — на старте бесконечного
+# (200 px/с) выходило 1.76 с, а на кампанийных 360 чуть меньше секунды, и на
+# хардкорных 430 — 0.82 с. То есть ровно там, где времени на манёвр меньше
+# всего, стена и наступала колонне на пятки: игрок ещё разбирается, куда
+# уходить от замедления, а пицца уже здесь.
+#
+# Пауза одна на любую скорость и есть то, что игрок чувствует: сначала выбери
+# линию, потом смотри, чем это обернулось.
+const PIZZA_WALL_LEAD : float = 1.7
+
+# Множитель скорости стены — ПОД ЭТУ ПАУЗУ, чтобы догон всё-таки случился в
+# кадре. На момент выхода стены колонна стоит в `X_c = x0 − speed × пауза`, до
+# точки встречи ей ехать `(X_c − meet) / speed`, и за это время стена обязана
+# отыграть `speed × пауза`. Отсюда множитель.
+#
+# Он зажат с обеих сторон, и потолок иногда срабатывает: на 360 px/с честный
+# ответ около семи, а с потолком 3.2 встреча съезжает примерно к 0.16 ширины
+# вместо 0.35 — левее задуманного, но всё ещё на экране и всё ещё видно как
+# погоню. Быстрее делать нельзя: стена перестала бы читаться стеной.
+func _pizza_wall_mult(speed: float, vp_w: float) -> float:
 	var x0   : float = vp_w + PIZZA_WALL_SPAWN_OFF
 	var meet : float = PIZZA_WALL_MEET_X * vp_w
-	var k    : float = (PIZZA_WALL_SPEED_MULT - 1.0) / PIZZA_WALL_SPEED_MULT
-	return maxf(0.2, (x0 - meet) * k / maxf(1.0, speed))
+	var head : float = x0 - speed * PIZZA_WALL_LEAD   # где колонна к выходу стены
+	if head <= meet:
+		return PIZZA_WALL_MULT_MAX
+	return clampf(1.0 + PIZZA_WALL_LEAD * speed / (head - meet),
+		PIZZA_WALL_SPEED_MULT, PIZZA_WALL_MULT_MAX)
 
 func _level_slowing_kinds() -> Array:
 	var pool := _hazard_pool()
@@ -1520,11 +1544,11 @@ func _setpiece_pizza_wall(speed: float, lanes: Array, vp_w: float) -> void:
 	for y in lanes:
 		_spawn_level_hazard(kind, y, vp_w, speed)
 
-	await get_tree().create_timer(_pizza_wall_lead(speed, vp_w)).timeout
+	await get_tree().create_timer(PIZZA_WALL_LEAD).timeout
 	if _frozen:
 		return
 
-	var fast := speed * PIZZA_WALL_SPEED_MULT
+	var fast := speed * _pizza_wall_mult(speed, vp_w)
 	var gap  := _col_gap(fast)
 	var cols := randi_range(PIZZA_WALL_COLS_MIN, PIZZA_WALL_COLS_MAX)
 	for c in cols:

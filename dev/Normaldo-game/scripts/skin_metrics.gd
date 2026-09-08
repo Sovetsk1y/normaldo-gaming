@@ -116,19 +116,86 @@ const POSE_OFF : Dictionary = {
 func pose_off(skin_id: String, variant: String, fat_state: int) -> Vector2:
 	var row : Dictionary = POSE_OFF.get(skin_id, {})
 	var offs : Array = row.get(variant, [])
+	var hand : Vector2 = pose_nudge_for(skin_id, fat_state, variant)
 	if offs.is_empty():
-		return offset_for(skin_id, fat_state)
-	return offs[clampi(fat_state, 0, offs.size() - 1)] + nudge_for(skin_id, fat_state)
+		return offset_for(skin_id, fat_state) + hand
+	return offs[clampi(fat_state, 0, offs.size() - 1)] \
+		+ nudge_for(skin_id, fat_state) + hand
 
+# Есть ли у кадра СВОЯ посадка. Ручная правка считается наравне с замером: без
+# этого поправленный руками кадр садился бы «как обычный», то есть правка молча
+# не применялась бы к скину, которого нет в POSE_OFF.
 func has_pose_off(skin_id: String, variant: String) -> bool:
-	return not (POSE_OFF.get(skin_id, {}) as Dictionary).get(variant, []).is_empty()
+	if not (POSE_OFF.get(skin_id, {}) as Dictionary).get(variant, []).is_empty():
+		return true
+	return pose_nudge_for(skin_id, 0, variant) != Vector2.ZERO \
+		or pose_nudge_for(skin_id, 1, variant) != Vector2.ZERO \
+		or pose_nudge_for(skin_id, 2, variant) != Vector2.ZERO \
+		or pose_nudge_for(skin_id, 3, variant) != Vector2.ZERO
 
 func pose_k(skin_id: String, variant: String, fat_state: int) -> float:
 	var row : Dictionary = POSE_K.get(skin_id, {})
 	var ks  : Array = row.get(variant, [])
-	if ks.is_empty():
-		return 1.0
-	return float(ks[clampi(fat_state, 0, ks.size() - 1)])
+	var base : float = 1.0
+	if not ks.is_empty():
+		base = float(ks[clampi(fat_state, 0, ks.size() - 1)])
+	return base * pose_tweak_for(skin_id, fat_state, variant)
+
+# ── Ручная доводка КАДРА ПОЕДАНИЯ (и прочих вариантов) ───────────────────────
+# У покоя ручной слой был с самого начала (`tweak` / `nudge`), а у кадра «ест»
+# — нет: он целиком держался на автозамере. Замер приводит головы к одному
+# размеру геометрически, но у поедания рот открыт, голова наклонена и силуэт
+# другой — воспринимается он не так, как покой, и подгонять это надо глазами,
+# на том же кадре, где смотрят покой.
+#
+# Живёт в той же строке жира в `dev/skin_layout.json`, рядом с посадкой вещей, и
+# так же переживает пересчёт замера через `measure_heads.py`:
+#   "pose": { "_eat": { "tweak": 1.05, "nudge": [0.01, -0.02] } }
+#
+# `tweak` — множитель ПОВЕРХ замеренного POSE_K, `nudge` — сдвиг поверх
+# POSE_OFF. Именно поверх, а не вместо: перерисовали спрайт, пересчитали замер —
+# ручная поправка остаётся поправкой, а не превращается в абсолютное значение,
+# снятое со старой картинки.
+func _pose_row(skin_id: String, fat_state: int, variant: String) -> Dictionary:
+	var pose : Dictionary = _layout_row(skin_id, fat_state).get("pose", {})
+	return pose.get(variant, {})
+
+func pose_tweak_for(skin_id: String, fat_state: int, variant: String) -> float:
+	return float(_pose_row(skin_id, fat_state, variant).get("tweak", 1.0))
+
+func pose_nudge_for(skin_id: String, fat_state: int, variant: String) -> Vector2:
+	var n = _pose_row(skin_id, fat_state, variant).get("nudge", null)
+	if n is Array and (n as Array).size() >= 2:
+		return Vector2(float(n[0]), float(n[1]))
+	return Vector2.ZERO
+
+func pose_set(skin_id: String, fat_state: int, variant: String,
+		tweak: float, nudge: Vector2) -> void:
+	var cur := _fat_row_for_write(skin_id, fat_state)
+	var pose : Dictionary = cur.get("pose", {})
+	pose[variant] = {
+		"tweak": snappedf(tweak, 0.001),
+		"nudge": [snappedf(nudge.x, 0.0001), snappedf(nudge.y, 0.0001)],
+	}
+	cur["pose"] = pose
+
+func pose_clear(skin_id: String, fat_state: int, variant: String) -> void:
+	var pose : Dictionary = _layout_row(skin_id, fat_state).get("pose", {})
+	pose.erase(variant)
+
+# Строка жира, готовая К ЗАПИСИ: заводит скин и четвёрку жиров, если их ещё нет,
+# и возвращает саму строку, а не копию. Одно место на всех, кто пишет в ручной
+# слой, — раньше эти восемь строк стояли в `layout_set` и `worn_set` дважды.
+func _fat_row_for_write(skin_id: String, fat_state: int) -> Dictionary:
+	if not _layout.has(skin_id):
+		_layout[skin_id] = { "fat": [] }
+	var row : Dictionary = _layout[skin_id]
+	var fats : Array = row.get("fat", [])
+	while fats.size() < 4:
+		fats.append({ "tweak": 1.0, "nudge": [0.0, 0.0] })
+	row["fat"] = fats
+	_layout[skin_id] = row
+	return fats[clampi(fat_state, 0, 3)]
 
 # ── Ручная доводка ПОВЕРХ замера ──────────────────────────────────────────────
 # Замер приводит головы к одному размеру геометрически. Воспринимаемый размер —
@@ -203,47 +270,25 @@ func worn_for(skin_id: String, fat_state: int, kind: String) -> Dictionary:
 # Своя копия в лаборатории означала бы вторую реализацию `sprite_scale`, то есть
 # инструмент, показывающий не то, что покажет игра.
 func layout_set(skin_id: String, fat_state: int, tweak: float, nudge: Vector2) -> void:
-	if not _layout.has(skin_id):
-		_layout[skin_id] = { "fat": [] }
-	var row : Dictionary = _layout[skin_id]
-	var fats : Array = row.get("fat", [])
-	while fats.size() < 4:
-		fats.append({ "tweak": 1.0, "nudge": [0.0, 0.0] })
-	var i : int = clampi(fat_state, 0, 3)
-	# Посадка вещей живёт в той же строке жира и правится ОТДЕЛЬНОЙ кнопкой:
-	# затирать её здесь значило бы сбрасывать шляпу при каждом движении скина.
-	var keep : Dictionary = (fats[i] as Dictionary).get("worn", {})
-	fats[i] = {
-		"tweak": snappedf(tweak, 0.001),
-		"nudge": [snappedf(nudge.x, 0.0001), snappedf(nudge.y, 0.0001)],
-	}
-	if not keep.is_empty():
-		fats[i]["worn"] = keep
-	row["fat"] = fats
-	_layout[skin_id] = row
+	var cur := _fat_row_for_write(skin_id, fat_state)
+	# ПОСАДКА ВЕЩЕЙ И ДОВОДКА КАДРОВ живут в той же строке жира и правятся своими
+	# кнопками: затирать их здесь значило бы сбрасывать шляпу и правку поедания
+	# при каждом движении размера скина.
+	cur["tweak"] = snappedf(tweak, 0.001)
+	cur["nudge"] = [snappedf(nudge.x, 0.0001), snappedf(nudge.y, 0.0001)]
 
 # Снимок на случай отмены. Глубокая копия: вложенные словари жиров иначе уедут
 # вместе с правкой, и «отмена» вернула бы то же самое.
 # Посадка вещи. Пишется отдельно от размера и сдвига по той же причине, по
 # которой отдельно и правится: это разные величины, и трогают их порознь.
 func worn_set(skin_id: String, fat_state: int, kind: String, vals: Dictionary) -> void:
-	if not _layout.has(skin_id):
-		_layout[skin_id] = { "fat": [] }
-	var row : Dictionary = _layout[skin_id]
-	var fats : Array = row.get("fat", [])
-	while fats.size() < 4:
-		fats.append({ "tweak": 1.0, "nudge": [0.0, 0.0] })
-	var i : int = clampi(fat_state, 0, 3)
-	var cur : Dictionary = fats[i]
+	var cur := _fat_row_for_write(skin_id, fat_state)
 	var worn : Dictionary = cur.get("worn", {})
 	var clean : Dictionary = {}
 	for key in vals:
 		clean[key] = snappedf(float(vals[key]), 0.0001)
 	worn[kind] = clean
 	cur["worn"] = worn
-	fats[i] = cur
-	row["fat"] = fats
-	_layout[skin_id] = row
 
 func worn_clear(skin_id: String, fat_state: int, kind: String) -> void:
 	var worn : Dictionary = _layout_row(skin_id, fat_state).get("worn", {})

@@ -42,7 +42,7 @@ func _const(node: Node, name: String):
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 31
+const EXPECTED_CHECKS : int = 40
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -65,7 +65,81 @@ func _initialize() -> void:
 	_test_worn()
 	print("── Ширина вещи ──")
 	await _test_worn_width()
+	print("── Кадр поедания ──")
+	await _test_pose()
 	_finish()
+
+# ── Кадр поедания ────────────────────────────────────────────────────────────
+# У каждого жира ДВА кадра, покой и «ест», а правился только покой: поедание
+# держалось на одном автозамере, который на нём и промахивается чаще всего —
+# рот открыт, голова наклонена, силуэт другой.
+#
+# Проверяется здесь не «кнопка есть», а три вещи, каждая из которых ломается
+# молча:
+#   1. Правка кадра идёт В СВОЙ слой и не трогает покой.
+#   2. Игра берёт ту же поправку — иначе лаборатория показывает не то, что
+#      увидит игрок, и подгонять по ней бессмысленно.
+#   3. Правка размера скина НЕ ЗАТИРАЕТ её: обе живут в одной строке жира.
+func _test_pose() -> void:
+	var lab : Node = await _open_lab()
+	if lab == null:
+		_check(false, "лаборатория открылась")
+		return
+	var snap : Dictionary = _met.call("layout_snapshot")
+	var id : String = "viking"
+	lab.set("_skin", _reg.call("get_skin_index", id))
+	lab.call("_set_fat", 1)
+
+	var idle_tex : Texture2D = lab.call("_tex")
+	lab.call("_cycle_pose")
+	_check(String(lab.get("_pose")) == "_eat", "переключились на кадр поедания")
+	var eat_tex : Texture2D = lab.call("_tex")
+	_check(eat_tex != null and eat_tex != idle_tex,
+		"и картинка сменилась на кадр «ест»")
+
+	# Правка идёт В СВОЙ СЛОЙ. Общий на два кадра означал бы, что подгонка
+	# поедания уводит покой — а его к этому моменту уже выставили.
+	var idle_before : float = float(_met.call("tweak_for", id, 1))
+	lab.call("_bump_tweak", 0.05)
+	_check(absf(float(_met.call("pose_tweak_for", id, 1, "_eat")) - 1.05) < 0.001,
+		"правка ушла в слой кадра: ×%.3f"
+			% float(_met.call("pose_tweak_for", id, 1, "_eat")))
+	_check(is_equal_approx(float(_met.call("tweak_for", id, 1)), idle_before),
+		"а покой не тронут: ×%.3f" % float(_met.call("tweak_for", id, 1)))
+
+	# ИГРА БЕРЁТ ЭТУ ЖЕ ПОПРАВКУ. `pose_k` — то, чем `normaldo._show_head`
+	# масштабирует кадр; если бы ручной слой жил мимо неё, лаборатория
+	# показывала бы не то, что увидит игрок.
+	var k_raw : float = float(_met.POSE_K.get(id, {}).get("_eat", [1.0, 1.0, 1.0, 1.0])[1])
+	_check(absf(float(_met.call("pose_k", id, "_eat", 1)) - k_raw * 1.05) < 0.001,
+		"и игра масштабирует кадр с её учётом: ×%.3f против замеренных ×%.3f"
+			% [float(_met.call("pose_k", id, "_eat", 1)), k_raw])
+
+	# Сдвиг — так же: поверх замеренного, а не вместо.
+	var off_raw : Vector2 = _met.POSE_OFF.get(id, {}).get("_eat",
+		[Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO])[1]
+	_met.call("pose_set", id, 1, "_eat", 1.05, Vector2(0.01, -0.02))
+	var got : Vector2 = _met.call("pose_off", id, "_eat", 1)
+	_check(got.distance_to(off_raw + Vector2(0.01, -0.02)) < 0.0005,
+		"и сдвиг кадра ложится поверх замеренного: %s" % [got])
+
+	# РАЗМЕР СКИНА НЕ ЗАТИРАЕТ ПРАВКУ КАДРА. Обе лежат в одной строке жира, и
+	# первая версия записи сносила соседей целиком.
+	_met.call("layout_set", id, 1, 1.3, Vector2(0.02, 0.02))
+	_check(absf(float(_met.call("pose_tweak_for", id, 1, "_eat")) - 1.05) < 0.001,
+		"правка размера скина её не сносит: ×%.3f"
+			% float(_met.call("pose_tweak_for", id, 1, "_eat")))
+
+	# СБРОС снимает строку кадра, а не пишет в неё единицы: единицы пережили бы
+	# следующий пересчёт замера и остались бы в файле навсегда.
+	lab.call("_reset_current")
+	_check(is_equal_approx(float(_met.call("pose_tweak_for", id, 1, "_eat")), 1.0)
+			and _met.call("pose_nudge_for", id, 1, "_eat") == Vector2.ZERO,
+		"сброс снимает правку кадра начисто")
+
+	lab.call("_cycle_pose")
+	_check(String(lab.get("_pose")).is_empty(), "и переключатель возвращается к покою")
+	_met.call("layout_restore", snap)
 
 # ── Геометрия ────────────────────────────────────────────────────────────────
 

@@ -33,6 +33,10 @@ func _initialize() -> void:
 	var worn : String = argv[3] if argv.size() > 3 else ""
 	while String(lab.get("_worn")) != worn:
 		lab.call("_cycle_worn")
+	# Кадр: покой или поедание. Пятым аргументом, чтобы не ломать четыре прежних.
+	var pose : String = argv[4] if argv.size() > 4 else ""
+	while String(lab.get("_pose")) != pose:
+		lab.call("_cycle_pose")
 	for _i in 20:
 		get_root().get_tree().paused = false
 		await process_frame

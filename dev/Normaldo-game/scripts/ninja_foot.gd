@@ -119,6 +119,14 @@ func _run_boss() -> void:
 	# Boss fight intro banner
 	await _show_boss_banner()
 
+	# УПРАВЛЕНИЕ ВОЗВРАЩАЕТСЯ ЗДЕСЬ. Реплика забирает его у себя в начале, чтобы
+	# игрок не таскал голову поверх титра, — и до сих пор не возвращала: на весь
+	# бой Нормальдо оставался неподвижным, а сюрикены летели в него как в мишень.
+	# У крокодила и хозяина клуба возврат стоит ровно в этом месте, после титра;
+	# ниндзя единственный, кто его не делал.
+	if is_instance_valid(_normaldo) and _normaldo.has_method("resume_input"):
+		_normaldo.resume_input()
+
 	# Slide boss back off-screen right
 	var tw_out := create_tween()
 	tw_out.tween_property(self, "position:x", vp.size.x + BOSS_INTRO_W, 0.5) \

@@ -6217,6 +6217,7 @@ func _start_game() -> void:
 		_build_dev_bum_wave_btn()
 		_build_dev_bum_barrel_btn()
 		_build_dev_pizza_wall_btn()
+		_build_dev_money_bag_btn()
 		_build_dev_immortal_btn()
 		_build_dev_phase_btn()
 	# Cue the run-start daily quest reminders (skips finished/claimed slots).
@@ -6561,6 +6562,13 @@ func _build_dev_bum_barrel_btn() -> void:
 # доиграть до поздней фазы и надеяться.
 func _build_dev_pizza_wall_btn() -> void:
 	_dev_spawner_btn(6, PIZZA_TEXTURE, "dev_send_pizza_wall", "СТЕНА")
+
+# Мешок денег. Он редкий по устройству — примерно один спавн ресурсов из
+# тридцати, — и вдобавок весь его смысл в том, что происходит ПОСЛЕ тапа: мешок
+# растёт, растёт и выплата. Правится это подбором чисел, а подбирать числа,
+# дожидаясь мешка из потока, нельзя.
+func _build_dev_money_bag_btn() -> void:
+	_dev_spawner_btn(7, MONEYBAG_TEXTURE, "dev_spawn_money_bag", "МЕШОК")
 
 # Общая сборка дев-кнопки в нижнем ряду: место в ряду, иконка, подпись, метод
 # спавнера.
@@ -8366,8 +8374,9 @@ func _build_go_quest_row(pos: Vector2, size: Vector2, slot: int, _pm: int) -> vo
 		bar_w -= bw + 6.0
 		var bp := pos + Vector2(8.0 + bar_w + 6.0, size.y - 21.0)
 		var bs := Vector2(bw, 18.0)
-		UiKit.panel(self, bp, bs, Color(0.09, 0.24, 0.10, 0.96), 6,
-			Color(0.50, 1.00, 0.55, 0.95), 1).process_mode = _pm
+		var bbg : Panel = UiKit.panel(self, bp, bs, Color(0.09, 0.24, 0.10, 0.96), 6,
+			Color(0.50, 1.00, 0.55, 0.95), 1)
+		bbg.process_mode = _pm
 		var bl := Label.new()
 		bl.add_theme_font_override("font", UI_FONT)
 		bl.add_theme_font_size_override("font_size", 10)
@@ -8385,7 +8394,12 @@ func _build_go_quest_row(pos: Vector2, size: Vector2, slot: int, _pm: int) -> vo
 		btn.process_mode = _pm
 		btn.pressed.connect(_on_go_claim_daily.bind(slot, bp + bs * 0.5))
 		UiKit.place(self, btn, bp, bs)
-		_go_quest_claim[slot] = [btn, bl]
+		# ВСЕ ТРИ УЗЛА, а не только те, что нажимаются. Кнопка это фон, подпись и
+		# сама область нажатия — три отдельных узла; в списке на удаление лежали
+		# двое, и после «ЗАБРАТЬ!» на экране оставалась зелёная плашка без текста
+		# и без действия. Читается как сломанная кнопка, а не как забранная
+		# награда.
+		_go_quest_claim[slot] = [btn, bl, bbg]
 	_go_quest_bar[slot] = _go_bar(pos + Vector2(8.0, size.y - 19.0), bar_w, 14.0,
 		frac, col, line, _pm)
 

@@ -203,6 +203,33 @@ func get_avatar_texture(skin_id: String, fat_state: int) -> Texture2D:
 		return _CLASSIC_AVATAR_TEX[idx]
 	return tex
 
+# Кадр ВАРИАНТА — «ест» и прочие позы. Нужен лаборатории: она правит посадку
+# этих кадров и обязана показывать ровно то, что покажет игра.
+#
+# Забег грузит их сам, в `normaldo._load_skin`, и держит массивами на весь
+# забег — там это оправданно: кадр меняется по нескольку раз в секунду. Здесь
+# наоборот, разовый показ, и держать ради него вторую копию массивов незачем.
+const _CLASSIC_EAT_TEX : Array = [
+	preload("res://assets/normaldo/normaldo1_eat.png"),
+	preload("res://assets/normaldo/normaldo2_eat.png"),
+	preload("res://assets/normaldo/normaldo3_eat.png"),
+	preload("res://assets/normaldo/normaldo4_eat.png"),
+]
+
+func get_pose_texture(skin_id: String, fat_state: int, variant: String) -> Texture2D:
+	var idx := clampi(fat_state, 0, 3)
+	if variant.is_empty():
+		return get_avatar_texture(skin_id, idx)
+	var tex_dir : String = get_skin(skin_id).get("tex_dir", "")
+	if tex_dir.is_empty():
+		return _CLASSIC_EAT_TEX[idx] if variant == "_eat" \
+			else _CLASSIC_AVATAR_TEX[idx]
+	var p : String = "%sstate%d%s.png" % [tex_dir, idx + 1, variant]
+	if not ResourceLoader.exists(p):
+		return get_avatar_texture(skin_id, idx)
+	var tex = load(p)
+	return tex if tex != null else get_avatar_texture(skin_id, idx)
+
 func get_skin(id: String) -> Dictionary:
 	for s in SKINS:
 		if s["id"] == id:

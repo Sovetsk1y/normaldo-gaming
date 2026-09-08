@@ -449,8 +449,8 @@ func _release_hero() -> void:
 		return
 	if _normaldo.has_method("set_spells_blocked"):
 		_normaldo.call("set_spells_blocked", false)
-	if _normaldo.has_method("enable_input"):
-		_normaldo.call("enable_input")
+	if _normaldo.has_method("resume_input"):
+		_normaldo.call("resume_input")
 
 # ── Интро ────────────────────────────────────────────────────────────────────
 const SPEECH : String = "Моя набережная, парень.\nПокажи, что у тебя в руках."

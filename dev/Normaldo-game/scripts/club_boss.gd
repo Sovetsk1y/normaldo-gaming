@@ -285,8 +285,8 @@ func _run_boss() -> void:
 			_spawner.set_process(true)
 		if is_instance_valid(bg) and bg.has_method("start_scrolling"):
 			bg.start_scrolling()
-		if is_instance_valid(_normaldo) and _normaldo.has_method("enable_input"):
-			_normaldo.enable_input()
+		if is_instance_valid(_normaldo) and _normaldo.has_method("resume_input"):
+			_normaldo.resume_input()
 		queue_free()
 		return
 	defeated.emit()
@@ -325,8 +325,8 @@ func _intro() -> void:
 	await _show_banner()
 	if not _alive():
 		return
-	if is_instance_valid(_normaldo) and _normaldo.has_method("enable_input"):
-		_normaldo.enable_input()
+	if is_instance_valid(_normaldo) and _normaldo.has_method("resume_input"):
+		_normaldo.resume_input()
 
 # Реплика босса. У крокодила она про меткость, у этого — про то, что он никого
 # не бьёт сам: он тут хозяин, и у него для этого есть люди.
@@ -1100,8 +1100,8 @@ func _finale() -> void:
 	await tw_out.finished
 	if not _alive():
 		return
-	if is_instance_valid(_normaldo) and _normaldo.has_method("enable_input"):
-		_normaldo.enable_input()
+	if is_instance_valid(_normaldo) and _normaldo.has_method("resume_input"):
+		_normaldo.resume_input()
 	await get_tree().create_timer(0.3).timeout
 
 const CAR_PX : float = 300.0

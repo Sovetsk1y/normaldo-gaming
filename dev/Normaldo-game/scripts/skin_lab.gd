@@ -228,7 +228,40 @@ func _skin_id() -> String:
 # Текстура берётся ТЕМ ЖЕ способом, что и везде в игре: у классики своя
 # раскладка файлов, и свой путь к ней в лаборатории разъехался бы с игрой.
 func _tex() -> Texture2D:
-	return SkinRegistry.get_avatar_texture(_skin_id(), _fat)
+	return SkinRegistry.get_pose_texture(_skin_id(), _fat, _pose)
+
+# ── Кадр: покой или поедание ─────────────────────────────────────────────────
+# Жиров четыре, и у каждого ДВА кадра: покой и «ест». Правился всегда только
+# покой — кадр поедания держался на одном автозамере. А он там и промахивается
+# чаще всего: рот открыт, голова наклонена, силуэт другой, и приведённая
+# геометрически голова смотрится то мелкой, то съехавшей. Заметно это ровно в
+# тот момент, когда игрок ест, то есть постоянно.
+#
+# Переключатель, а не отдельный экран: покой и поедание сравнивают ОДИН ПРОТИВ
+# ДРУГОГО, на том же месте, тем же взглядом — разъехались они или нет, видно
+# только так.
+var _pose     : String = ""
+var _pose_lbl : Label  = null
+const POSE_ORDER : Array = ["", "_eat"]
+const POSE_TITLE : Dictionary = { "": "КАДР: ПОКОЙ", "_eat": "КАДР: ЕСТ" }
+
+func _cycle_pose() -> void:
+	var i : int = POSE_ORDER.find(_pose)
+	_pose = String(POSE_ORDER[(i + 1) % POSE_ORDER.size()])
+	if is_instance_valid(_pose_lbl):
+		_pose_lbl.text = String(POSE_TITLE[_pose])
+	_refresh()
+
+# Размер и сдвиг ТЕКУЩЕГО кадра — покоя или поедания. Всё, что правит скин
+# (кнопки, перетаскивание, сброс), ходит через эту пару, а не читает слой
+# напрямую: иначе каждое из этих мест пришлось бы учить про позы отдельно.
+func _cur_tweak(id: String) -> float:
+	return SkinMetrics.tweak_for(id, _fat) if _pose.is_empty() \
+		else SkinMetrics.pose_tweak_for(id, _fat, _pose)
+
+func _cur_nudge(id: String) -> Vector2:
+	return SkinMetrics.nudge_for(id, _fat) if _pose.is_empty() \
+		else SkinMetrics.pose_nudge_for(id, _fat, _pose)
 
 # ── Сборка ───────────────────────────────────────────────────────────────────
 
@@ -333,6 +366,15 @@ func _build_controls(vp: Vector2) -> void:
 			func(): _set_fat(i)))
 		_skin_only.append(_last_chip_btn)
 		_fat_lbl.append(_last_chip_label)
+
+	# Кадр (покой / ест) — В РЯДУ ЖИРОВ, сразу за ними: жир и кадр вместе и
+	# задают, что сейчас на экране, и щёлкают их по очереди, сравнивая.
+	_skin_only.append(_chip(Vector2(210.0, y - 30.0), Vector2(112.0, 26.0), "",
+		_cycle_pose))
+	_skin_only.append(_last_chip_btn)
+	_pose_lbl = _last_chip_label
+	_pose_lbl.text = String(POSE_TITLE[_pose])
+	_skin_only.append(_pose_lbl)
 
 	_chip(Vector2(390.0, y), Vector2(96.0, 26.0), "РАЗМЕТКА", _toggle_marks)
 	_skin_only.append(_chip(Vector2(390.0, y - 30.0), Vector2(96.0, 26.0), "", _cycle_worn))
@@ -464,13 +506,13 @@ func _drag_by(delta: Vector2) -> void:
 	if not _worn.is_empty():
 		_drag_worn(id, tex, delta)
 		return
-	var k : float = SkinMetrics.sprite_scale(id, _fat, tex.get_size())
+	var k : float = _shown_scale(id, tex)
 	var sz : Vector2 = tex.get_size()
 	if k <= 0.0 or sz.x <= 0.0 or sz.y <= 0.0:
 		return
-	var n : Vector2 = SkinMetrics.nudge_for(id, _fat)
+	var n : Vector2 = _cur_nudge(id)
 	n -= Vector2(delta.x / (sz.x * k), delta.y / (sz.y * k))
-	_apply(id, SkinMetrics.tweak_for(id, _fat), n)
+	_apply(id, _cur_tweak(id), n)
 
 # Вертикаль у шляпы и маски задаётся ПО-РАЗНОМУ, и свести их к одному нельзя:
 # шляпа садится от макушки (`sink` растёт вниз), маска — по доле кадра (`y`).
@@ -558,11 +600,14 @@ func _bump_tweak(d: float) -> void:
 		return
 	# Нижняя граница 0.10, а не 0: на нуле скин исчезает, и вернуть его можно
 	# только СБРОСОМ — а игрок к тому моменту уже не понимает, что произошло.
-	var t : float = clampf(SkinMetrics.tweak_for(id, _fat) + d, 0.10, 4.0)
-	_apply(id, t, SkinMetrics.nudge_for(id, _fat))
+	var t : float = clampf(_cur_tweak(id) + d, 0.10, 4.0)
+	_apply(id, t, _cur_nudge(id))
 
 func _apply(id: String, tweak: float, nudge: Vector2) -> void:
-	SkinMetrics.layout_set(id, _fat, tweak, nudge)
+	if _pose.is_empty():
+		SkinMetrics.layout_set(id, _fat, tweak, nudge)
+	else:
+		SkinMetrics.pose_set(id, _fat, _pose, tweak, nudge)
 	_dirty = true
 	_refresh()
 
@@ -575,6 +620,16 @@ func _reset_current() -> void:
 		_dirty = true
 		_refresh()
 		_set_status("посадка вещи сброшена к общей: %s, жир %d" % [_skin_id(), _fat + 1])
+		return
+	if not _pose.is_empty():
+		# Сброс ПОЗЫ — это удаление строки, а не запись единиц: единицы остались
+		# бы в файле как «правка, равная замеру», и следующий пересчёт
+		# `measure_heads.py` они бы не отменили, а тихо пережили.
+		SkinMetrics.pose_clear(_skin_id(), _fat, _pose)
+		_dirty = true
+		_refresh()
+		_set_status("правка кадра «%s» снята: %s, жир %d"
+			% [String(POSE_TITLE[_pose]), _skin_id(), _fat + 1])
 		return
 	_apply(_skin_id(), 1.0, Vector2.ZERO)
 	_set_status("сброшено к замеру: %s, жир %d" % [_skin_id(), _fat + 1])
@@ -668,7 +723,7 @@ func _refresh() -> void:
 	# копия формулы разошлась бы с игрой на первой же правке, и лаборатория
 	# показывала бы не то, что видит игрок.
 	if tex != null:
-		var s : float = SkinMetrics.sprite_scale(id, _fat, tex.get_size())
+		var s : float = _shown_scale(id, tex)
 		_sprite.texture  = tex
 		_sprite.scale    = Vector2(s, s)
 		_sprite.position = _hero_pos + _sprite_offset(id, tex, s)
@@ -680,11 +735,24 @@ func _refresh() -> void:
 		_head_ruler_lbl.text = "голова %d" % int(hd.x * tex.get_size().x
 			* SkinMetrics.sprite_scale(id, _fat, tex.get_size()))
 
+# Масштаб кадра НА ЭКРАНЕ — та же арифметика, что в `normaldo._show_head`:
+# базовый масштаб скина, помноженный на поправку кадра. У покоя поправки нет
+# (POSE_K для пустого варианта не спрашивают), у поедания она и есть то, что
+# здесь правится.
+func _shown_scale(id: String, tex: Texture2D) -> float:
+	var s : float = SkinMetrics.sprite_scale(id, _fat, tex.get_size())
+	if _pose.is_empty():
+		return s
+	return s * SkinMetrics.pose_k(id, _pose, _fat)
+
 func _sprite_offset(id: String, tex: Texture2D, s: float) -> Vector2:
-	if id == "classic":
+	# Классика садится по замеренному в пикселях сдвигу — но только в покое: у
+	# её кадра поедания своя рамка, и по ней считается так же, как у всех.
+	if id == "classic" and _pose.is_empty():
 		return CLASSIC_NUDGE_PX
 	var sz : Vector2 = tex.get_size()
-	var off := SkinMetrics.offset_for(id, _fat)
+	var off : Vector2 = SkinMetrics.offset_for(id, _fat) if _pose.is_empty() \
+		else SkinMetrics.pose_off(id, _pose, _fat)
 	return Vector2(-off.x * sz.x * s, -off.y * sz.y * s)
 
 # Правая панель. Показывает не «что нарисовано», а ЧИСЛА, по которым это
@@ -790,7 +858,8 @@ func _refresh_info(id: String, tex: Texture2D) -> void:
 
 	var rows : Array = [
 		["СКИН", "%s · жир %d" % [id, _fat + 1]],
-		["кадр", "%d×%d" % [int(sz.x), int(sz.y)]],
+		["кадр", "%s · %d×%d"
+			% [("покой" if _pose.is_empty() else "ест"), int(sz.x), int(sz.y)]],
 		["", ""],
 		["замер", "×%.3f" % base],
 		["коробка", "×%.3f" % clamp_k],
@@ -808,6 +877,23 @@ func _refresh_info(id: String, tex: Texture2D) -> void:
 	# замерено» от «я это подвинул»: числа в панели одинаковые в обоих случаях.
 	if not is_equal_approx(tweak, 1.0) or nudge != Vector2.ZERO:
 		rows[5][1] = String(rows[5][1]) + "  *"
+	# В КАДРЕ ПОЕДАНИЯ панель показывает ЕГО числа, а не числа покоя: правятся
+	# сейчас они, и видеть в строке «ручная» чужое значение — верный способ
+	# крутить кнопку, глядя не туда.
+	if not _pose.is_empty():
+		var pk : float   = SkinMetrics.pose_k(id, _pose, _fat)
+		var pt : float   = SkinMetrics.pose_tweak_for(id, _fat, _pose)
+		var pn : Vector2 = SkinMetrics.pose_nudge_for(id, _fat, _pose)
+		rows[3][0] = "замер кадра"
+		rows[3][1] = "×%.3f" % (pk / maxf(0.0001, pt))
+		rows[5][1] = "×%.3f%s" % [pt, ("  *" if not is_equal_approx(pt, 1.0)
+			or pn != Vector2.ZERO else "")]
+		rows[6][1] = "×%.3f" % (final * pk)
+		rows[10][1] = "%.4f / %.4f" % [pn.x, pn.y]
+		# Голова и туша замерены по кадру покоя; на поедании это чужие числа, и
+		# показывать их как свои нельзя.
+		rows[8][1] = "по кадру покоя"
+		rows[9][1] = "по кадру покоя"
 	for i in mini(_info.size(), rows.size()):
 		var l : Label = _info[i]
 		var r : Array = rows[i]
@@ -934,17 +1020,22 @@ func draw_marks(c: CanvasItem) -> void:
 	_rect(c, _hero_pos, SkinMetrics.MAX_SPREAD, CLR_SPREAD)
 	_rect(c, _hero_pos, SkinMetrics.MAX_BODY,  CLR_BODY)
 
-	# Габариты САМОГО скина в этих же координатах — видно, упёрся он в коробку
-	# или в ней ещё есть место.
-	var box : Vector2 = SkinMetrics.box_for(id, _fat)
-	_rect(c, _hero_pos, Vector2(box.x * sz.x * k, box.y * sz.y * k),
-		Color(CLR_BODY.r, CLR_BODY.g, CLR_BODY.b, 0.30))
-
-	# Голова: рамка вокруг того, что замер считает лицом. Она обязана сидеть на
-	# хитбоксе — ради этого и заведён сдвиг.
 	var head : Vector2 = SkinMetrics.head_size_for(id, _fat)
 	var head_px := Vector2(head.x * sz.x * k, head.y * sz.y * k)
-	_rect(c, _hero_pos, head_px, Color(0.55, 0.80, 1.00, 0.55))
+	# РАМКИ ГОЛОВЫ И ТУШИ ЗАМЕРЕНЫ ПО КАДРУ ПОКОЯ, и на кадре поедания их не
+	# рисуем вовсе. Рот открыт, голова наклонена, рамка у этого кадра своя — а
+	# нарисованная поверх чужая рамка не «примерно верна», она врёт ровно в том
+	# месте, ради которого сюда и пришли. Хитбокс и линейка эталона остаются:
+	# по ним поедание и подгоняют.
+	if _pose.is_empty():
+		# Габариты САМОГО скина в этих же координатах — видно, упёрся он в
+		# коробку или в ней ещё есть место.
+		var box : Vector2 = SkinMetrics.box_for(id, _fat)
+		_rect(c, _hero_pos, Vector2(box.x * sz.x * k, box.y * sz.y * k),
+			Color(CLR_BODY.r, CLR_BODY.g, CLR_BODY.b, 0.30))
+		# Голова: рамка вокруг того, что замер считает лицом. Она обязана сидеть
+		# на хитбоксе — ради этого и заведён сдвиг.
+		_rect(c, _hero_pos, head_px, Color(0.55, 0.80, 1.00, 0.55))
 
 	# Хитбокс — последним и ярче всех: это единственная линия, по которой скин
 	# на самом деле бьётся о предметы.
