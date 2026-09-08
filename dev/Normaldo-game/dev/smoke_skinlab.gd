@@ -555,11 +555,13 @@ func _test_lab_chip_gated() -> void:
 	var xp_body : String = src.substr(xp_i, maxi(0, lab_i - xp_i)) if xp_i >= 0 and lab_i > xp_i else ""
 	_check(not xp_body.contains("_show_skin_lab"),
 		"и чип «ОПЫТ» её не тащит за собой")
-	# А вызывается он под флагом.
+	# А вызывается он под флагом ИНСТРУМЕНТАРИЯ: лаборатория — инструмент, и
+	# место ей в одном ряду со сбросами и долларами, а не рядом с опытом (тот
+	# исключение — им проверяют лестницу скинов забегами).
 	var call_i : int = src.find("_build_menu_dev_lab_btn(vp)")
-	var gate_i : int = src.rfind("if DevFlags.ENABLED", call_i)
+	var gate_i : int = src.rfind("if DevFlags.ENABLED and DevFlags.TOOLBOX", call_i)
 	_check(gate_i > 0 and call_i - gate_i < 600,
-		"и стоит он под DevFlags.ENABLED")
+		"и стоит он под DevFlags.ENABLED and DevFlags.TOOLBOX")
 	game.queue_free()
 	await process_frame
 

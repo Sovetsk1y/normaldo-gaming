@@ -1380,9 +1380,11 @@ func _show_menu() -> void:
 		# иначе можно только забегами. Сбросы и доллары — под общим рубильником
 		# инструментария.
 		_build_menu_dev_xp_btn(vp)
-		# Лаборатория скинов — только под флагом, и гейт стоит ЗДЕСЬ, на виду.
-		_build_menu_dev_lab_btn(vp)
 	if DevFlags.ENABLED and DevFlags.TOOLBOX:
+		# Лаборатория скинов — ИНСТРУМЕНТ, и живёт она под тем же рубильником,
+		# что сбросы и доллары. Опыт выше — исключение из этого ряда, а не
+		# правило: он нужен, чтобы проверить лестницу скинов забегами.
+		_build_menu_dev_lab_btn(vp)
 		_build_menu_dev_reset_skins_btn(vp)
 		_build_menu_dev_reset_quests_btn(vp)
 		_build_menu_dev_reset_endless_btn(vp)
