@@ -1237,8 +1237,17 @@ func _show_metric_tooltip(_metric: int) -> void:
 # про чужого, — прожитое, забеги, достижения. Своя строка открывает ту же
 # карточку, что и чужая: врать «вот и всё, что о тебе известно» она не должна,
 # поэтому в ней стоит кнопка на полный профиль.
-const CARD_W : float = 380.0
-const CARD_H : float = 214.0
+# КАРТОЧКА ПОКАЗЫВАЕТ ТО ЖЕ, ЧТО СВОЙ ПРОФИЛЬ. Раньше в ней были имя, аватар,
+# место и рекорды недели — то есть почти то же, что уже написано в строке
+# таблицы, по которой тапнули. На вопрос «а кто это» так не отвечают.
+#
+# Теперь три группы, и те же самые, что игрок видит про себя в настройках:
+# прожитое, рекорды недели, достижения. Считает их одно место
+# (`LeaderboardClient.profile_stats`), а ездят они на сервер вместе с
+# результатом забега — отдельного похода по сети ради шести чисел нет.
+const CARD_W : float = 430.0
+const CARD_H : float = 292.0
+const CARD_COL_W : float = 196.0
 
 var _card_node : Node2D = null
 
@@ -1298,17 +1307,33 @@ func _show_player_card(r: Dictionary) -> void:
 		Vector2(x + 14.0 + AV + 12.0, y + 60.0), Vector2(CARD_W - AV - 40.0, 20.0),
 		_card_node)
 
+	# ДВА СТОЛБЦА: слева прожитое и достижения, справа рекорды недели. В одну
+	# колонку девять строк не помещаются на экране в 430 px высотой, а резать их
+	# значит вернуться к «почти то же, что в строке».
+	var col_r : float = x + 14.0 + CARD_COL_W + 12.0
 	_label("РЕКОРДЫ НЕДЕЛИ", 11, Color(0.55, 0.85, 1.00, 0.95),
-		Vector2(x + 14.0, y + 90.0), Vector2(CARD_W - 28.0, 18.0), _card_node)
-
-	# Место под список — заполняется, когда (и если) ответит сервер.
+		Vector2(col_r, y + 90.0), Vector2(CARD_COL_W, 18.0), _card_node)
 	_card_body = Control.new()
-	_card_body.position     = Vector2(x + 14.0, y + 110.0)
-	_card_body.size         = Vector2(CARD_W - 28.0, 70.0)
+	_card_body.position     = Vector2(col_r, y + 110.0)
+	_card_body.size         = Vector2(CARD_COL_W, 120.0)
 	_card_body.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_card_node.add_child(_card_body)
 	_card_hint = _label("Спрашиваем сервер…", 11, Color(0.70, 0.70, 0.66),
-		Vector2(0.0, 0.0), Vector2(CARD_W - 28.0, 18.0), _card_body)
+		Vector2(0.0, 0.0), Vector2(CARD_COL_W, 18.0), _card_body)
+
+	# Левый столбец. Своё показываем СРАЗУ и из своих данных: они полные и уже
+	# здесь, а ждать ради них сервер значит показывать себе меньше, чем знаешь.
+	_card_stats = Control.new()
+	_card_stats.position     = Vector2(x + 14.0, y + 90.0)
+	_card_stats.size         = Vector2(CARD_COL_W, 170.0)
+	_card_stats.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_card_node.add_child(_card_stats)
+	_card_is_me = is_me
+	if is_me:
+		_fill_card_stats(LeaderboardClient.profile_stats())
+	else:
+		_label("Спрашиваем сервер…", 11, Color(0.70, 0.70, 0.66),
+			Vector2(0.0, 0.0), Vector2(CARD_COL_W, 18.0), _card_stats)
 
 	if is_me:
 		var btn := Button.new()
@@ -1330,8 +1355,69 @@ func _show_player_card(r: Dictionary) -> void:
 
 	_fill_card_from_server(String(r.get("user_id", "")))
 
-var _card_body : Control = null
-var _card_hint : Label   = null
+var _card_body  : Control = null
+var _card_hint  : Label   = null
+var _card_stats : Control = null
+# Чья карточка открыта. СВОИ цифры уже показаны из своих данных, и ответ сервера
+# их трогать не должен — ни хорошим, ни плохим. Без этой памяти отказ сервера
+# («нет сети») затирал собственную статистику словами «про него пока не знаем»:
+# ровно это и поймал первый же снимок карточки.
+var _card_is_me : bool = false
+
+# Левый столбец карточки: прожитое и достижения. Ровно те же строки и в том же
+# порядке, что в своём профиле (`settings_screen._profile_stats`) — иначе «своё»
+# и «чужое» читались бы как разные наборы фактов об одном и том же.
+func _fill_card_stats(st: Dictionary) -> void:
+	if not is_instance_valid(_card_stats):
+		return
+	for c in _card_stats.get_children():
+		c.queue_free()
+	if st.is_empty():
+		# Пусто — значит человек не заходил с тех пор, как игра начала это
+		# рассказывать. Честнее сказать это, чем показать девять нулей.
+		_label("Про него пока не знаем", 11, Color(0.70, 0.70, 0.66),
+			Vector2(0.0, 0.0), Vector2(CARD_COL_W, 18.0), _card_stats)
+		return
+	var yy : float = 0.0
+	yy = _card_stat_group(yy, "ПРОЖИТОЕ", [
+		["Съедено пиццы", _num(int(st.get("total_pizzas", 0)))],
+		["Забегов",       _num(int(st.get("total_runs", 0)))],
+		["Лучший забег",  _num(int(st.get("best_run", 0)))],
+	])
+	yy += 6.0
+	_card_stat_group(yy, "ДОСТИЖЕНИЯ", [
+		["Эпизодов", "%d / %d" % [int(st.get("episodes_done", 0)),
+			maxi(1, int(st.get("episodes_total", 0)))]],
+		["Скинов",   "%d / %d" % [int(st.get("skins_owned", 0)),
+			maxi(1, int(st.get("skins_total", 0)))]],
+		["Книга",    "%d / %d" % [int(st.get("story_done", 0)),
+			maxi(1, int(st.get("story_total", 0)))]],
+	])
+
+func _card_stat_group(y0: float, title: String, rows: Array) -> float:
+	var yy := y0
+	_label(title, 11, Color(0.55, 0.85, 1.00, 0.95),
+		Vector2(0.0, yy), Vector2(CARD_COL_W, 18.0), _card_stats)
+	yy += 20.0
+	for r in rows:
+		_label(String(r[0]), 11, Color(0.86, 0.86, 0.78),
+			Vector2(0.0, yy), Vector2(CARD_COL_W - 70.0, 16.0), _card_stats)
+		var v := _label(String(r[1]), 11, CLR_GOLD,
+			Vector2(CARD_COL_W - 70.0, yy), Vector2(70.0, 16.0), _card_stats)
+		v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		yy += 17.0
+	return yy
+
+# Пробел разряда: «12 480» читается с одного взгляда, «12480» — нет.
+func _num(v: int) -> String:
+	var t := str(maxi(v, 0))
+	var out := ""
+	var n := t.length()
+	for i in n:
+		if i > 0 and (n - i) % 3 == 0:
+			out += " "
+		out += t[i]
+	return out
 
 func _fill_card_from_server(user_id: String) -> void:
 	if user_id.is_empty():
@@ -1344,7 +1430,14 @@ func _fill_card_from_server(user_id: String) -> void:
 		return
 	if not bool(resp.get("ok", false)):
 		_card_say("Остальное пока не спросить")
+		if not _card_is_me:
+			_fill_card_stats({})
 		return
+	# Прожитое и достижения — из того же ответа. Для себя они уже показаны из
+	# своих данных, и переписывать их серверными незачем: серверные отстают на
+	# один забег (они уезжают вместе с результатом).
+	if not _card_is_me:
+		_fill_card_stats(resp.get("data", {}).get("stats", {}))
 	var best : Dictionary = resp.get("data", {}).get("mode_best", {})
 	if best.is_empty():
 		_card_say("В других режимах на этой неделе не бегал")
@@ -1359,9 +1452,9 @@ func _fill_card_from_server(user_id: String) -> void:
 		if not best.has(key):
 			continue
 		_label(LeaderboardModes.mode_label(int(m)), 11, Color(0.86, 0.86, 0.78),
-			Vector2(0.0, row_y), Vector2(160.0, 16.0), _card_body)
-		var v := _label("%d" % int(best[key]), 11, CLR_GOLD,
-			Vector2(160.0, row_y), Vector2(80.0, 16.0), _card_body)
+			Vector2(0.0, row_y), Vector2(CARD_COL_W - 70.0, 16.0), _card_body)
+		var v := _label(_num(int(best[key])), 11, CLR_GOLD,
+			Vector2(CARD_COL_W - 70.0, row_y), Vector2(70.0, 16.0), _card_body)
 		v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		row_y += 17.0
 

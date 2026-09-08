@@ -398,7 +398,7 @@ func _test_player_card(hud: Node, mock: Node) -> void:
 
 	scr.call("_show_player_card", want)
 	await process_frame
-	var card : Node = scr.get("_card_node")
+	var card = scr.get("_card_node")
 	_check(is_instance_valid(card), "карточка открылась")
 	if not is_instance_valid(card):
 		await _close(scr)
@@ -411,6 +411,44 @@ func _test_player_card(hud: Node, mock: Node) -> void:
 		"и его счёт")
 	_check(_has(txt, "%d место" % int(want.get("rank", 0))),
 		"и его место")
+
+	# ── КАРТОЧКА ОТВЕЧАЕТ НА «А КТО ЭТО» ────────────────────────────────────
+	# Раньше в ней были имя, аватар, место и рекорды недели — почти то же, что
+	# уже написано в строке, по которой тапнули. Теперь те же три группы, что
+	# игрок видит про себя: прожитое, рекорды недели, достижения.
+	#
+	# Чужие цифры приходят с сервера, и в тесте сети нет — значит карточка
+	# обязана СКАЗАТЬ, что не знает, а не показать девять нулей. Ответа надо
+	# ДОЖДАТЬСЯ: сразу после открытия там честное «спрашиваем сервер».
+	var t_ask := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t_ask < 4000:
+		await process_frame
+		if not _has(_texts(scr.get("_card_node"), []), "Спрашиваем сервер…"):
+			break
+	var txt2 : Array = _texts(scr.get("_card_node"), [])
+	_check(_has(txt2, "Про него пока не знаем") or _has(txt2, "ПРОЖИТОЕ"),
+		"о чужом либо цифры, либо честное «не знаем»: %s" % [txt2])
+
+	# А ПРО СЕБЯ — СРАЗУ И ЦЕЛИКОМ: свои данные уже здесь, ждать ради них
+	# сервер значит показывать себе меньше, чем знаешь.
+	var mine : Dictionary = want.duplicate(true)
+	mine["is_player"] = true
+	scr.call("_show_player_card", mine)
+	await process_frame
+	var my_txt : Array = _texts(scr.get("_card_node"), [])
+	_check(_has(my_txt, "ПРОЖИТОЕ") and _has(my_txt, "ДОСТИЖЕНИЯ"),
+		"в своей карточке прожитое и достижения: %s" % [my_txt])
+	var qm : Node = get_root().get_node_or_null("QuestManager")
+	var eps : int = int(qm.call("campaign_episodes"))
+	var eps_ok := false
+	for t in my_txt:
+		if String(t).ends_with("/ %d" % eps):
+			eps_ok = true
+	_check(eps_ok, "и эпизоды считаются по длине кампании (%d): %s" % [eps, my_txt])
+	_check(_has(my_txt, "ВЕСЬ МОЙ ПРОФИЛЬ"), "и дорога в полный профиль осталась")
+	scr.call("_show_player_card", want)
+	await process_frame
+	card = scr.get("_card_node")
 
 	# Строки списка НАЖИМАЮТСЯ. Без этого карточка есть, а дороги к ней нет.
 	#

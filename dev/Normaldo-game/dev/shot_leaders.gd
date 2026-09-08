@@ -37,6 +37,19 @@ func _initialize() -> void:
 	hud.add_child(screen)
 	for _i in 120:
 		await process_frame
+	# Кадр КАРТОЧКИ, если попросили: она отвечает на «а кто это», и проверять её
+	# надо глазами — три группы в двух столбцах либо помещаются, либо нет.
+	if OS.get_cmdline_user_args().size() > 3 \
+			and String(OS.get_cmdline_user_args()[3]) == "card":
+		# Строка СВОЯ и выдуманная: без сети таблица не приходит вовсе, а кадр
+		# нужен про вёрстку карточки, а не про то, что сервер ответил.
+		screen.call("_show_player_card", {
+			"rank": 2, "score": 1840, "name": "НОРМАЛЬДО-3D53",
+			"avatar_skin": "classic", "avatar_fat": 0,
+			"user_id": "me", "is_player": true,
+		})
+		for _i in 30:
+			await process_frame
 	await RenderingServer.frame_post_draw
 	var img := get_root().get_texture().get_image()
 	img.save_png("%s/%s.png" % [out, name])

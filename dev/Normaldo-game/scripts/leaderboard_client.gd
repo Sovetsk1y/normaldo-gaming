@@ -155,6 +155,7 @@ func submit_score(mode: int, score: int, run_seconds: float) -> Dictionary:
 		"run_seconds": run_seconds,
 		"avatar_skin": avatar_skin,
 		"avatar_fat":  avatar_fat,
+		"stats":       profile_stats(),
 	})
 	if resp.ok:
 		var data : Dictionary = resp.data
@@ -168,6 +169,32 @@ func submit_score(mode: int, score: int, run_seconds: float) -> Dictionary:
 		SaveData._save()
 	_last_submit = 1 if resp.ok else 0
 	return resp
+
+# ── НАКОПЛЕННОЕ ЗА ВСЁ ВРЕМЯ ─────────────────────────────────────────────────
+# Едет вместе с результатом забега, потому что другого повода сходить на сервер
+# у игры нет: отдельный запрос ради шести чисел — это лишний поход по сети ровно
+# затем, чтобы кто-то другой однажды открыл твою карточку.
+#
+# Ровно то же самое показывает игроку его собственный профиль (см.
+# `settings_screen._profile_stats`), и считается оно ЗДЕСЬ ОДИН РАЗ: своя копия
+# в двух местах разошлась бы на первой же правке — а расхождение это «у себя
+# вижу одно, у соседа другое», то есть недоверие к обоим числам.
+func profile_stats() -> Dictionary:
+	var story_done := 0
+	for done in QuestManager.story_claimed:
+		if bool(done):
+			story_done += 1
+	return {
+		"total_pizzas":   int(SaveData.total_pizzas),
+		"total_runs":     int(SaveData.total_runs()),
+		"best_run":       int(SaveData.best_run()),
+		"episodes_done":  int(SaveData.episodes_done),
+		"episodes_total": int(QuestManager.campaign_episodes()),
+		"skins_owned":    (SaveData.owned_skins as Array).size(),
+		"skins_total":    SkinRegistry.SKINS.size(),
+		"story_done":     story_done,
+		"story_total":    QuestManager.STORY_QUESTS.size(),
+	}
 
 func fetch_leaderboard(mode: int, limit: int = 100) -> Dictionary:
 	if not is_ready():

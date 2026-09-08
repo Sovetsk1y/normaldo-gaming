@@ -39,6 +39,38 @@ function requireMode(raw: unknown, fallback: Mode = "endless"): Mode {
   return m as Mode;
 }
 
+// ─── Профильная статистика ───────────────────────────────────────────────────
+// Что игрок накопил за всё время: съедено, забегов, лучший забег, пройдено
+// эпизодов, открыто скинов, взято наград книги. Приходит вместе с результатом
+// забега и лежит в документе игрока, чтобы `getProfile` мог рассказать про
+// ЛЮБОГО то же, что игрок видит про себя.
+//
+// Поля перечислены ПОИМЁННО и каждое зажато: это числа, присланные клиентом, —
+// то есть цифры, которым верить нельзя. Границы здесь не про честность (её
+// таким способом не добиться), а про то, чтобы в документе не оказалось
+// бесконечности, минуса или строки на мегабайт.
+const STAT_LIMITS: Record<string, number> = {
+  total_pizzas:   100_000_000,
+  total_runs:     1_000_000,
+  best_run:       1_000_000,
+  episodes_done:  99,
+  episodes_total: 99,
+  skins_owned:    999,
+  skins_total:    999,
+  story_done:     999,
+  story_total:    999,
+};
+
+function readStats(raw: unknown): Record<string, number> {
+  const src = (raw ?? {}) as Record<string, unknown>;
+  const out: Record<string, number> = {};
+  for (const [key, max] of Object.entries(STAT_LIMITS)) {
+    const v = Number(src[key] ?? 0);
+    out[key] = Number.isFinite(v) ? Math.max(0, Math.min(max, Math.floor(v))) : 0;
+  }
+  return out;
+}
+
 const MAX_PIZZAS_PER_SECOND = 4.0;
 const SCORE_BUFFER          = 50;
 const MAX_RUN_SECONDS       = 3600;
@@ -203,6 +235,7 @@ export const submitScore = onCall(async (request) => {
   const avatarFat = Number.isFinite(avatarFatRaw)
     ? Math.max(0, Math.min(3, Math.floor(avatarFatRaw)))
     : 0;
+  const stats = readStats(request.data?.stats);
 
   if (!Number.isFinite(score) || score < 0 || score > 100_000) {
     throw new HttpsError("invalid-argument", "score out of range");
@@ -249,6 +282,7 @@ export const submitScore = onCall(async (request) => {
     tx.update(userRef, {
       week_id:        weekId,
       mode_best:      modeBest,
+      stats,
       last_submit_at: now,
       updated_at:     admin.firestore.FieldValue.serverTimestamp(),
     });
@@ -311,12 +345,22 @@ export const getProfile = onCall(async (request) => {
       modeBest[m] = v;
     }
   }
+  // Накопленное за всё время — то же, что игрок видит в своём профиле. Без него
+  // чужая карточка отвечала на «а кто это» одной строкой рекордов недели, то
+  // есть тем же, что уже написано в таблице.
+  //
+  // Статистики может НЕ БЫТЬ: она появилась позже самих профилей, и у того, кто
+  // с тех пор не играл, её в документе нет. Пустой словарь здесь честнее нулей —
+  // «не знаем» и «всё по нулям» это разные вещи, и карточка их различает.
+  const rawStats = (snap.get("stats") ?? null) as Record<string, unknown> | null;
+  const stats = rawStats ? readStats(rawStats) : {};
   return {
     user_id:      userId,
     display_name: snap.get("display_name") ?? "",
     avatar_skin:  snap.get("avatar_skin") ?? "classic",
     avatar_fat:   snap.get("avatar_fat") ?? 0,
     mode_best:    modeBest,
+    stats,
   };
 });
 

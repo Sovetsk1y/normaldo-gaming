@@ -278,6 +278,19 @@ func _test_profile_account(hud: Node, save: Node) -> void:
 	_check(_count(txt, "ТЕСТ-ИМЯ") == 1, "имя показано в профиле: %s" % [txt])
 	_check(_count(txt, "ИЗМЕНИТЬ ИМЯ") == 1, "кнопка смены имени на месте")
 
+	# ЧИСЛО ЭПИЗОДОВ — ОТ КАМПАНИИ, а не написанное числом. Здесь стояла тройка
+	# с тех времён, когда эпизодов было три: после расширения до пяти профиль
+	# сообщал «2 / 3» при пяти эпизодах — то есть врал о том, сколько осталось.
+	var qm : Node = get_root().get_node_or_null("QuestManager")
+	var want_eps : int = int(qm.call("campaign_episodes"))
+	var eps_line := ""
+	for t in txt:
+		if String(t).contains("/") and String(t).strip_edges().ends_with(str(want_eps)):
+			eps_line = String(t)
+	_check(_count(txt, "Эпизодов пройдено") == 1, "строка про эпизоды на месте")
+	_check(not eps_line.is_empty(),
+		"и знаменатель у неё — длина кампании (%d): %s" % [want_eps, txt])
+
 	# Имя поменялось снаружи (диалог сохранил) — страница обязана обновиться.
 	save.display_name = "ДРУГОЕ-ИМЯ"
 	save.data_changed.emit()

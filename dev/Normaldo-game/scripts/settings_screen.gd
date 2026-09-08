@@ -696,7 +696,11 @@ func _profile_stats(w: float, y0: float) -> float:
 		if bool(done):
 			story_done += 1
 	y = _stat_group(w, y, "ДОСТИЖЕНИЯ", [
-		["Эпизодов пройдено", "%d / %d" % [SaveData.episodes_done, 3]],
+		# ЧИСЛО ЭПИЗОДОВ СПРАШИВАЕТСЯ У КАМПАНИИ, а не пишется здесь. Тройка тут
+		# и стояла — с тех времён, когда эпизодов было три, — и после
+		# расширения до пяти профиль сообщал «2 / 3» при пяти эпизодах.
+		["Эпизодов пройдено", "%d / %d" % [SaveData.episodes_done,
+			QuestManager.campaign_episodes()]],
 		["Скинов открыто",    "%d / %d" % [(SaveData.owned_skins as Array).size(),
 			SkinRegistry.SKINS.size()]],
 		["Наград книги",      "%d / %d" % [story_done, QuestManager.STORY_QUESTS.size()]],
