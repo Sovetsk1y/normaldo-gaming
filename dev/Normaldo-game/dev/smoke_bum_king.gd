@@ -21,7 +21,11 @@ const BUM_KING := preload("res://scripts/bum_king.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 55
+const EXPECTED_CHECKS : int = 58
+
+# Пауза, за которую кулак успевает дорасти до полного размера: треть замаха
+# плюс запас на кадр. Меряем руки только после неё.
+const SWING_TIME_GROW : float = 0.14
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -167,6 +171,65 @@ func _initialize() -> void:
 	await process_frame
 	_check(int(boss.get("punches")) == p_before + 1,
 		"а дабл-тап бьёт: ударов %d" % (int(boss.get("punches")) - p_before))
+
+	# ── КУЛАКИ: ОДИН РАЗМЕР И ВЕРНАЯ СТОРОНА ────────────────────────────────
+	# Обе ошибки тихие и обе были.
+	#
+	# РАЗМЕР считался по КАДРУ текстуры, а не по рисунку в нём. У кулака пирата
+	# кадр 500×500 при рисунке в 275 по ширине, у зелёного рисунок занимает почти
+	# весь кадр — и одно и то же число давало руки, отличающиеся вдвое: игрок бил
+	# лапой, а бомж кулачком.
+	#
+	# СТОРОНА: кулак Нормальдо нарисован костяшками ВПРАВО, кулак пирата — ВЛЕВО,
+	# а зеркалили обоих по одному правилу «бьёт влево — отрази». Пират получал
+	# свой кулак отражённым и бил тыльной стороной.
+	print("── Кулаки ──")
+	boss.set("_running", true)
+	boss.set("_p_swing", {})
+	boss.set("_e_swing", {})
+	boss.set("_p_cd", 0.0)
+	# Кулаки от прежних ударов живут в кадре ещё четверть секунды. Если их не
+	# убрать, в «размен» попадёт чужой замах из прошлой сцены — и мерить будем
+	# не то. Первая версия проверки именно на это и попалась.
+	for old in _fists_of(boss):
+		old.free()
+	# Пират бьёт только когда он есть: без спрайта противника `foe_punch()`
+	# выходит сразу, и в кадре остаётся один кулак вместо размена.
+	boss.call("_spawn_foe", boss.CROWD_TEX[1], boss.FOE_PX, Color.WHITE)
+	# Замер — не бой: размен успевает разрешиться и попал бы в счётчики, а по ним
+	# ниже проверяются волны. Запоминаем и возвращаем как было.
+	var c_hit  : int = int(boss.get("hits_dealt"))
+	var c_take : int = int(boss.get("hits_taken"))
+	var c_blk  : int = int(boss.get("blocks"))
+	n.position = c_arena
+	boss.set("_foe_pos", n.position + Vector2(120.0, 0.0))
+	boss.call("punch")
+	boss.call("foe_punch")
+	# Рука ВЫРАСТАЕТ за первую треть замаха. Меряем после того, как выросла:
+	# на середине роста две руки честно разного размера, и это не ошибка.
+	await _wait(SWING_TIME_GROW)
+	var fists : Array = _fists_of(boss)
+	_check(fists.size() == 2, "в размене два кулака: %d" % fists.size())
+	if fists.size() == 2:
+		var w0 : float = _fist_px(fists[0])
+		var w1 : float = _fist_px(fists[1])
+		_check(absf(w0 - w1) <= maxf(w0, w1) * 0.12,
+			"и они ОДНОГО размера: %.0f против %.0f px" % [w0, w1])
+		# Игрок бьёт вправо своим «вправо» — зеркалить нечего; пират бьёт влево
+		# своим «влево» — тоже. Отражённым в этом размене не должен быть ни один.
+		var mirrored : Array = []
+		for f in fists:
+			if (f as Sprite2D).flip_h:
+				mirrored.append((f as Sprite2D).texture.resource_path.get_file())
+		_check(mirrored.is_empty(),
+			"и ни один не отражён: бьют своей стороной, %s" % [mirrored])
+	boss.set("_p_swing", {})
+	boss.set("_e_swing", {})
+	# Подставного противника убираем: дальше волны ставят своего.
+	boss.call("_clear_foe")
+	boss.set("hits_dealt", c_hit)
+	boss.set("hits_taken", c_take)
+	boss.set("blocks",     c_blk)
 
 	# ── Волна 1: серый ПРЕСЛЕДУЕТ и не бьёт ─────────────────────────────────
 	print("── Волна 1: серый ──")
@@ -409,6 +472,19 @@ func _initialize() -> void:
 	_check(not bool(n.get("spells_blocked")), "спелл разблокирован обратно")
 
 	_finish()
+
+# Кулаки в кадре: спрайты на слое кулаков.
+func _fists_of(boss: Node) -> Array:
+	var out : Array = []
+	for c in boss.get_children():
+		if c is Sprite2D and (c as Sprite2D).z_index == int(boss.FIST_Z):
+			out.append(c)
+	return out
+
+# Ширина РИСУНКА кулака на экране — по ней и сравниваются руки. По кадру
+# сравнивать нельзя: он у этих двух текстур разный, и именно это и было ошибкой.
+func _fist_px(f: Sprite2D) -> float:
+	return float(ItemSizing.content_rect(f.texture).size.x) * absf(f.scale.x)
 
 # Пицца в финале: спрайт с текстурой пиццы, лежащий поверх всех.
 func _pizza_of(boss: Node) -> Sprite2D:

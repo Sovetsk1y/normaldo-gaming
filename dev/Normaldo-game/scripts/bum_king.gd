@@ -46,9 +46,48 @@ const F_FIST  := preload("res://assets/bosses/bum_king/fist.png")
 #
 # А вот цвет — свой. У викинга кулак серый, и на арене выходило два серых
 # бойца, различимых только по тому, кто где стоит. Зелёный тот же, что у головы
-# Нормальдо; перекрашивает заливку `dev/tools/bake_green_fist.py`, чёрные линии
-# и голубой контур он не трогает — они и делают кулак кулаком.
+# Нормальдо, и нарисован автором: перекраска заливки скриптом была временной
+# подменой, пока картинки не было.
 const F_PLAYER_FIST := preload("res://assets/skills/fist_green.png")
+
+# Куда смотрят сами рисунки кулаков: зелёный нарисован бьющим ВПРАВО, кулак
+# пирата — ВЛЕВО. Хранится явно, потому что по картинке этого из кода не видно, а
+# ошибка тихая: кулак просто оказывается отражённым и бьёт тыльной стороной.
+const PLAYER_FIST_FACES : int =  1
+const FOE_FIST_FACES    : int = -1
+
+# ── Звуки ────────────────────────────────────────────────────────────────────
+# Все взяты ИЗ УЖЕ ИМЕЮЩИХСЯ, а не записаны заново: перчатка — тот же удар, что
+# у боксёрской перчатки в потоке, `hit` — то же попадание, что везде в забеге,
+# `homeless_die` — те же бомжи. Бой обязан звучать как эта игра, а не как
+# отдельный аттракцион со своим звуковым словарём.
+#
+# Бой без звука читался как немой: замах уходил беззвучно, попадание отличалось
+# от промаха только полоской, а блок — вообще ничем.
+const SFX_SWING  := preload("res://assets/audio/boxing_glove.mp3")
+const SFX_HIT    := preload("res://assets/audio/hit.mp3")
+const SFX_BLOCK  := preload("res://assets/audio/crash.mp3")
+const SFX_DOWN   : Array = [
+	preload("res://assets/audio/homeless_die1.mp3"),
+	preload("res://assets/audio/homeless_die2.mp3"),
+	preload("res://assets/audio/homeless_die3.mp3"),
+]
+const SFX_PIZZA  := preload("res://assets/audio/super_pizza.mp3")
+const BOSS_MUSIC := preload("res://assets/audio/boss_fight.mp3")
+
+var _music : AudioStreamPlayer = null
+
+# Разовый звук. Игрок AudioStreamPlayer живёт ровно столько, сколько звучит:
+# держать пул на четыре звука в бою, который идёт полминуты, незачем.
+func _sfx(stream: AudioStream, volume_db: float = 0.0) -> void:
+	if stream == null or not is_instance_valid(_game_root):
+		return
+	var p := AudioStreamPlayer.new()
+	p.stream    = stream
+	p.volume_db = volume_db
+	_game_root.add_child(p)
+	p.play()
+	p.finished.connect(p.queue_free)
 
 # Толпа — те же два бомжа, что стоят в потоке и в мини-игре. Толпа обязана
 # читаться как «те самые бомжи», а не как новый народ.
@@ -302,6 +341,16 @@ func _run_boss() -> void:
 	var hud := _game_root.get_node_or_null("HUD")
 	if hud != null and hud.has_method("hide_run_hud_for_boss"):
 		hud.call("hide_run_hud_for_boss", true)
+
+	# Музыка боя — та же, что у ниндзя и крокодила: у боя свой звук, и играть его
+	# под обычную тему уровня значит не отличать драку от пробежки.
+	_music = AudioStreamPlayer.new()
+	var ms := BOSS_MUSIC.duplicate() as AudioStreamMP3
+	ms.loop           = true
+	_music.stream     = ms
+	_music.volume_db  = -14.0
+	add_child(_music)
+	_music.play()
 
 	_build_crowd()
 	_lock_hero()
@@ -771,6 +820,8 @@ func _drop_foe() -> void:
 		return
 	var s := _foe_sprite
 	_foe_sprite = null
+	# Падает СО СВОИМ голосом — тем же, каким бомжи падают в потоке.
+	_sfx(SFX_DOWN[randi() % SFX_DOWN.size()], -3.0)
 	var tw := s.create_tween()
 	tw.tween_property(s, "position:y", s.position.y + 260.0, 0.45)\
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
@@ -786,13 +837,28 @@ func _drop_foe() -> void:
 # в игре второй язык удара: у викинга замах, у босса — перестрелка кулаками.
 # Во-вторых, он превращал дистанцию в ничто — важно было только, кто раньше
 # нажал, а подходить или отходить не имело смысла вовсе.
+# `faces` — куда смотрит САМА КАРТИНКА: +1 нарисована бьющей вправо, −1 влево.
+#
+# Это не мелочь и не украшение. Кулак Нормальдо нарисован костяшками ВПРАВО,
+# кулак пирата — ВЛЕВО, а код зеркалил обоих по одному правилу «бьёт влево —
+# отрази». Для игрока выходило верно, а пират получал свой кулак отражённым:
+# он бил тыльной стороной, костяшками назад. Со стороны это читается не как
+# «другой замах», а как перевёрнутая картинка.
+#
+# Поэтому отражение считается от собственной ориентации рисунка: отражаем ровно
+# тогда, когда бьют не в ту сторону, в какую он нарисован.
 func _spawn_swing_fist(from: Vector2, dir: Vector2, tex: Texture2D,
-		mirror: bool) -> void:
+		faces: int) -> void:
 	var s := Sprite2D.new()
 	s.texture        = tex
 	s.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	s.scale          = Vector2.ONE * (FIST_PX / maxf(1.0, tex.get_size().x))
-	s.flip_h         = mirror
+	# Масштаб по РИСУНКУ, а не по кадру. У кулака пирата кадр 500×500, а рисунок
+	# занимает в нём 275 по ширине; у зелёного рисунок занимает почти весь кадр.
+	# При масштабе по кадру одно и то же число давало руки, отличающиеся вдвое:
+	# у бомжа выходил кулачок вдвое меньше того, которым бьёт игрок.
+	var art : float = float(maxi(1, ItemSizing.content_rect(tex).size.x))
+	s.scale          = Vector2.ONE * (FIST_PX / art)
+	s.flip_h         = (dir.x < 0.0) != (faces < 0)
 	s.z_index        = FIST_Z
 	s.position       = from + dir * (HEAD_R + 10.0)
 	add_child(s)
@@ -826,7 +892,8 @@ func punch() -> void:
 	var dir  : Vector2 = (_foe_pos - from)
 	dir = dir.normalized() if dir.length() > 1.0 else Vector2.RIGHT
 	_p_swing = { "t": 0.0, "resolved": false, "dir": dir }
-	_spawn_swing_fist(from, dir, F_PLAYER_FIST, dir.x < 0.0)
+	_spawn_swing_fist(from, dir, F_PLAYER_FIST, PLAYER_FIST_FACES)
+	_sfx(SFX_SWING, -6.0)
 
 # Тап бьёт, свайп ведёт голову. Свайп сюда даже не заходит: движением занимается
 # сам Нормальдо своим обычным управлением, а босс только держит его в круге.
@@ -876,7 +943,10 @@ func foe_punch() -> void:
 	var dir  : Vector2 = (_hero_pos() - from)
 	dir = dir.normalized() if dir.length() > 1.0 else Vector2.LEFT
 	_e_swing = { "t": 0.0, "resolved": false, "dir": dir }
-	_spawn_swing_fist(from, dir, F_FIST, dir.x < 0.0)
+	_spawn_swing_fist(from, dir, F_FIST, FOE_FIST_FACES)
+	# Чужой замах ТИШЕ своего: свой — это действие игрока, чужой — фон, и равная
+	# громкость превращала бы размен в кашу из двух одинаковых шлепков.
+	_sfx(SFX_SWING, -11.0)
 
 func _process(delta: float) -> void:
 	if _p_cd > 0.0:
@@ -949,6 +1019,7 @@ func _block() -> void:
 	_e_swing["resolved"] = true
 	_p_cd = PUNCH_CD
 	_caption("БЛОК!", Color(1.00, 0.92, 0.55))
+	_sfx(SFX_BLOCK, -4.0)
 	SCREEN_SHAKE.play(_game_root, 7.0, 5)
 
 func _land_on_foe() -> void:
@@ -965,6 +1036,7 @@ func _land_on_foe() -> void:
 	_foe_pos = _clamp_to_arena(_foe_pos, ARENA_MARGIN * 0.5)
 	if _foe_state == "dash" or _foe_state == "charge":
 		_enter_recover()
+	_sfx(SFX_HIT, -2.0)
 	SCREEN_SHAKE.play(_game_root, 11.0, 7)
 
 func _land_on_hero() -> void:
@@ -1161,6 +1233,7 @@ func _victory() -> void:
 	if not _alive():
 		return
 	SCREEN_SHAKE.play(_game_root, 12.0, 8)
+	_sfx(SFX_DOWN[0], 0.0)
 	HAPTICS.buzz(HAPTICS.HEAVY)
 
 	# ── И ЕМУ НА ГОЛОВУ ПАДАЕТ ПИЦЦА ─────────────────────────────────────────
@@ -1183,6 +1256,7 @@ func _victory() -> void:
 	await drop.finished
 	if not _alive():
 		return
+	_sfx(SFX_PIZZA, -4.0)
 	SCREEN_SHAKE.play(_game_root, 7.0, 5)
 	await get_tree().create_timer(0.45).timeout
 	if not _alive():
@@ -1281,6 +1355,12 @@ func _finish() -> void:
 	if hud != null and hud.has_method("hide_run_hud_for_boss"):
 		hud.call("hide_run_hud_for_boss", false)
 	var bg := _game_root.get_node_or_null("Background")
+	# Музыка боя ГАСНЕТ, а не обрывается: оборванная на полутакте слышна как сбой.
+	# И гасить надо до того, как вернётся игровая, иначе секунду играют обе.
+	if is_instance_valid(_music) and _music.playing:
+		var fade := create_tween()
+		fade.tween_property(_music, "volume_db", -40.0, 0.6)
+		fade.tween_callback(_music.stop)
 	var game_music := _game_root.get_node_or_null("Music")
 	if is_instance_valid(game_music) and game_music.has_method("start"):
 		game_music.call("start")
