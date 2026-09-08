@@ -980,16 +980,20 @@ func _add_player_row(r: Dictionary, cy: float, alt: bool) -> void:
 	# результат, это тычет в него: «а кто это». До этой правки не происходило
 	# ничего, и строка читалась как картинка, а не как человек.
 	#
-	# Кнопка добавляется ПОСЛЕДНЕЙ, поверх всей строки: подписи и иконки под ней
-	# игнорируют мышь (`MOUSE_FILTER_IGNORE`), так что перехватывать ей нечего.
-	var row_btn := Button.new()
-	row_btn.flat       = true
-	row_btn.focus_mode = Control.FOCUS_NONE
-	row_btn.size       = Vector2(w - 4.0, ROW_H - 3.0)
-	row_btn.position   = Vector2(2.0, cy + 1.0)
+	# Зона тапа добавляется ПОСЛЕДНЕЙ, поверх всей строки: подписи и иконки под
+	# ней игнорируют мышь (`MOUSE_FILTER_IGNORE`), так что перехватывать ей
+	# нечего.
+	#
+	# И это `UiKit.tap_zone`, А НЕ КНОПКА. Строка живёт внутри ScrollContainer, а
+	# кнопка срабатывает на ОТПУСКАНИИ и забирает касание себе — то самое
+	# касание, которым список листают. На телефоне выходило: список либо не
+	# скроллится, либо скроллится, но тап по строке не доходит вовсе, и карточка
+	# не открывается. Ровно эта ошибка уже разбиралась в проекте, и лечение у
+	# неё готовое: зона на `MOUSE_FILTER_PASS`, тап засчитывается только если
+	# палец сдвинулся меньше порога, всё остальное достаётся ленте.
 	var row_copy : Dictionary = r.duplicate(true)
-	row_btn.pressed.connect(func(): _show_player_card(row_copy))
-	_content.add_child(row_btn)
+	UiKit.tap_zone(_content, Vector2(2.0, cy + 1.0), Vector2(w - 4.0, ROW_H - 3.0),
+		func(): _show_player_card(row_copy))
 
 func _reward_str(reward: Dictionary) -> String:
 	var d := int(reward.get("dollars", 0))

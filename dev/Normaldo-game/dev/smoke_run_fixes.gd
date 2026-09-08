@@ -21,7 +21,7 @@ const BOSS_SPEECH := preload("res://scripts/boss_speech.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 18
+const EXPECTED_CHECKS : int = 21
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -125,6 +125,43 @@ func _initialize() -> void:
 			"а не на ней: часы на y=%.0f, голова на y=%.0f"
 				% [(clock as Node2D).global_position.y, n.global_position.y])
 
+	# ЧАСЫ ПОКАЗЫВАЮТ НЕ ОДНО СОСТОЯНИЕ, А НЕСКОЛЬКО, и подняты обязаны быть все.
+	# Поднято было замедление мира, а перевёрнутое управление — гриб, компас,
+	# шаман — осталось на лице: та же картинка, тот же размер, та же беда, и
+	# висит она по нескольку секунд.
+	#
+	# Перечень берётся из САМОЙ ТАБЛИЦЫ `StatusFx.ART`, а не выписан здесь
+	# руками: заведут четвёртое состояние с часами — оно попадёт под проверку
+	# само, а список в тесте разошёлся бы с игрой молча.
+	n.call("_status_off", "hourglass")
+	var clock_states : Array = []
+	for st in StatusFx.ART.keys():
+		if String(StatusFx.ART[st]) == "clock":
+			clock_states.append(String(st))
+	_check(clock_states.size() >= 2,
+		"состояний с часами несколько: %s" % [clock_states])
+
+	# ПЕРЕВЁРНУТОЕ УПРАВЛЕНИЕ — тем же входом, каким его включает гриб. Позвать
+	# `_status_on` руками значило бы проверить собственный вызов, а не игру.
+	n.call("apply_invert", 4.0)
+	await process_frame
+	var inv = (n.get("_status_fx") as Dictionary).get("invert")
+	_check(inv != null and float((inv as Node).get_meta("dy", 0.0)) < -20.0,
+		"гриб вешает часы НАД головой: сдвиг %.0f px"
+			% (float((inv as Node).get_meta("dy", 0.0)) if inv != null else 0.0))
+
+	# И ПО ИСХОДНИКУ: каждый вызов, вешающий часы, поднимает их. Живая проверка
+	# выше ловит два известных состояния; эта поймает третье, когда его заведут,
+	# — иначе новое состояние с той же картинкой снова село бы на лицо, и узнали
+	# бы об этом опять глазами.
+	var flat : Array = []
+	for st in clock_states:
+		if _status_call_without_lift(String(st)):
+			flat.append(st)
+	_check(flat.is_empty(),
+		"и в коде подняты ВСЕ состояния с часами, а не только замедление: %s"
+			% [flat])
+
 	# ── Палец на экране разворачивает вперёд ────────────────────────────────
 	print("── Взгляд по касанию ──")
 	n.call("enable_input")
@@ -173,6 +210,22 @@ func _initialize() -> void:
 		"и после титра оно возвращается: через %.1f c" % back_at)
 
 	_finish()
+
+# Есть ли в `normaldo.gd` вызов `_status_on("<состояние>"`, который НЕ поднимает
+# значок. Подъём узнаётся по `CLOCK_DY`: это единственная константа подъёма
+# часов, и вызов без неё — вызов на лицо.
+func _status_call_without_lift(state: String) -> bool:
+	var f := FileAccess.open("res://scripts/normaldo.gd", FileAccess.READ)
+	if f == null:
+		return false
+	var needle : String = '_status_on("%s"' % state
+	while not f.eof_reached():
+		var line := f.get_line().strip_edges()
+		if line.begins_with("#"):
+			continue
+		if line.contains(needle) and not line.contains("CLOCK_DY"):
+			return true
+	return false
 
 func _speech_box(root: Node) -> Control:
 	for c in root.get_children():

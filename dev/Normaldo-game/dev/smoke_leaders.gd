@@ -385,12 +385,42 @@ func _test_player_card(hud: Node, mock: Node) -> void:
 		"и его место")
 
 	# Строки списка НАЖИМАЮТСЯ. Без этого карточка есть, а дороги к ней нет.
+	#
+	# Меряется это ТАПОМ, а не наличием кнопки. Первая версия проверки считала
+	# `Button` в списке и была зелёной ровно тогда, когда на телефоне ничего не
+	# работало: строки лежат в ScrollContainer, а кнопка срабатывает на
+	# отпускании и забирает касание себе — то самое, которым список листают.
+	# Проверка «кнопка есть» подтверждала худший из вариантов.
 	var content : Node = scr.get("_content")
-	var btns := 0
+	var zones : Array = []
 	for c in content.get_children():
 		if c is Button:
-			btns += 1
-	_check(btns > 0, "по строкам списка можно тапнуть: кнопок %d" % btns)
+			_check(false, "в списке НЕ ДОЛЖНО быть кнопок: они ломают прокрутку")
+			break
+	for c in content.get_children():
+		if c is Control and (c as Control).mouse_filter == Control.MOUSE_FILTER_PASS:
+			zones.append(c)
+	_check(not zones.is_empty(),
+		"по строкам списка можно тапнуть: зон %d" % zones.size())
+
+	# И ТАП ПО ЗОНЕ ОТКРЫВАЕТ КАРТОЧКУ. Всё выше — про устройство; это про то,
+	# что оно работает.
+	if not zones.is_empty():
+		if is_instance_valid(card):
+			card.queue_free()
+			await process_frame
+		var zone : Control = zones[zones.size() - 1]
+		var down := InputEventScreenTouch.new()
+		down.pressed  = true
+		down.position = zone.global_position + zone.size * 0.5
+		zone.gui_input.emit(down)
+		var up := InputEventScreenTouch.new()
+		up.pressed  = false
+		up.position = down.position
+		zone.gui_input.emit(up)
+		await process_frame
+		_check(scr.get("_card_node") != null,
+			"и тап по строке открывает карточку")
 
 	# Сеть не отвечает — карточка обязана СКАЗАТЬ об этом, а не крутить вечно.
 	var t0 := Time.get_ticks_msec()
