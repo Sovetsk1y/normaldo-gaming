@@ -67,9 +67,29 @@ func _initialize() -> void:
 	# полным ХП и стоит до конца ожидания. Ровно так этот кадр и снялся в первый
 	# раз: вместо короля на нём позировал рыжий бомж.
 	await _skip_to_king(boss, 14.0)
-	await _run(1.0)
+	# Третий — ЗОВ: пират ещё стоит в кольце, толпа кричит «ПИРАТА В БОЙ!». Волна
+	# «king» начинается именно с него, а не с появления бойца.
+	await _run(0.5)
+	await _save(out, "bum_king_call")
+
+	# Четвёртый — он сам на арене. Ждать надо ВЫХОДА, а не времени: между началом
+	# волны и его появлением стоит зов толпы, и кадр по таймеру ловил бы пустую
+	# арену с облачками.
+	await _await_king_out(boss, 8.0)
+	await _run(1.2)
 	await _save(out, "bum_king_boss")
 	quit(0)
+
+func _await_king_out(boss: Node, limit: float) -> void:
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < int(limit * 1000.0):
+		if not is_instance_valid(boss):
+			return
+		var foe = boss.get("_foe_sprite")
+		if is_instance_valid(foe) and foe.texture == boss.F_IDLE:
+			return
+		get_root().get_tree().paused = false
+		await process_frame
 
 func _skip_to_king(boss: Node, limit: float) -> void:
 	var t0 := Time.get_ticks_msec()

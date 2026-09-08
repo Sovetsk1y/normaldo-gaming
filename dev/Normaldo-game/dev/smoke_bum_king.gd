@@ -21,7 +21,7 @@ const BUM_KING := preload("res://scripts/bum_king.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 58
+const EXPECTED_CHECKS : int = 69
 
 # Пауза, за которую кулак успевает дорасти до полного размера: треть замаха
 # плюс запас на кадр. Меряем руки только после неё.
@@ -143,7 +143,11 @@ func _initialize() -> void:
 	print("── Полосы ХП ──")
 	var hs : Array = boss.get("_hero_segs")
 	var bs : Array = boss.get("_boss_segs")
-	_check(bs.size() == 5, "у босса пять реек: %d" % bs.size())
+	# СКОЛЬКО У ВЫШЕДШЕГО ХП — СТОЛЬКО И СЕГМЕНТОВ. До волн и на волнах рядовых
+	# полоса ОДНА: пять сегментов, из которых четыре погашены весь бой, читались
+	# как «бомжа надо бить пять раз». Пять появляются вместе с пиратом — это
+	# проверяется ниже, на его волне.
+	_check(bs.size() == 1, "у рядового ОДНА рейка: %d" % bs.size())
 	_check(hs.size() == 3, "а у игрока три: %d" % hs.size())
 	_check((hs[0] as Panel).position.x < (bs[0] as Panel).position.x,
 		"своя полоса СЛЕВА, чужая справа: %.0f против %.0f"
@@ -223,6 +227,17 @@ func _initialize() -> void:
 				mirrored.append((f as Sprite2D).texture.resource_path.get_file())
 		_check(mirrored.is_empty(),
 			"и ни один не отражён: бьют своей стороной, %s" % [mirrored])
+		# ЧЕЙ КУЛАК СВЕРХУ — ТОТ И БИЛ ВТОРЫМ. Бил вторым пират (`foe_punch`
+		# вызван после `punch`), значит наверху обязан быть ЕГО кулак: в блоке
+		# две руки сходятся в одной точке, и на равном слое встреча не читается.
+		var top : Sprite2D = fists[0]
+		for f in fists:
+			if (f as Sprite2D).z_index > top.z_index:
+				top = f
+		_check(top.z_index == int(boss.FIST_Z_TOP)
+				and top.texture == boss.F_FIST,
+			"сверху кулак того, кто ударил ВТОРЫМ: %s на слое %d"
+				% [top.texture.resource_path.get_file(), top.z_index])
 	boss.set("_p_swing", {})
 	boss.set("_e_swing", {})
 	# Подставного противника убираем: дальше волны ставят своего.
@@ -244,6 +259,16 @@ func _initialize() -> void:
 		"и подпись над его рейками — его: «%s»" % [foe_lbl.text if foe_lbl != null else ""])
 	_check(int(boss.get("foe_hp")) == int(boss.FOE_HP),
 		"одна рейка: %d" % int(boss.get("foe_hp")))
+	# И НА ЭКРАНЕ ОНА ОДНА, а не одна из пяти. Пять сегментов, четыре из которых
+	# погашены, читались как «его надо бить пять раз».
+	_check((boss.get("_boss_segs") as Array).size() == 1,
+		"и полоса у него из одного сегмента: %d"
+			% (boss.get("_boss_segs") as Array).size())
+	# ПИРАТ ВСЁ ЭТО ВРЕМЯ СТОИТ В ТОЛПЕ — его зовут из кольца, а не подвозят
+	# из-за края экрана, когда придёт очередь.
+	var king_in_crowd : Sprite2D = boss.get("_king_crowd")
+	_check(is_instance_valid(king_in_crowd) and king_in_crowd.texture == boss.F_IDLE,
+		"а пират ждёт своей очереди В ТОЛПЕ")
 
 	# ПРЕСЛЕДУЕТ ПО ВСЕМУ КРУГУ, а не едет по одной горизонтали. Ставим героя в
 	# сторону и смотрим, что противник пошёл ЗА НИМ, в том числе по вертикали:
@@ -251,6 +276,15 @@ func _initialize() -> void:
 	# отойти вбок.
 	n.set("_dev_immortal", true)
 	n.position = c_arena + Vector2(-r_arena.x * 0.5, r_arena.y * 0.6)
+	# Сперва он ВХОДИТ — идёт от края к кругу, и это не преследование: пока он
+	# входит, круг его не держит и цель у него другая. Меряем погоню после входа.
+	var t_in := Time.get_ticks_msec()
+	while String(boss.get("_foe_state")) == "enter" \
+			and float(Time.get_ticks_msec() - t_in) < 6000.0:
+		await process_frame
+	_check(String(boss.get("_foe_state")) != "enter",
+		"вошёл в круг своим ходом за %.1f c"
+			% (float(Time.get_ticks_msec() - t_in) / 1000.0))
 	var p0 : Vector2 = boss.get("_foe_pos")
 	await _wait(1.2)
 	var p1 : Vector2 = boss.get("_foe_pos")
@@ -283,6 +317,24 @@ func _initialize() -> void:
 	await _wait(0.6)
 	_check(int(boss.get("hits_dealt")) == d0 + 1,
 		"а с дистанции удара доходит: %d" % (int(boss.get("hits_dealt")) - d0))
+	# ПОЛУЧИЛ — МИГНУЛ КРАСНЫМ. Попадание обязано быть видно на том, кто его
+	# получил: рейка стоит в верху экрана, куда в размене не смотрят. Бьём ещё
+	# раз и следим за спрайтом с этого момента — вспышка коротка, и по следам
+	# прошлого удара её уже не поймать.
+	boss.set("_p_cd", 0.0)
+	boss.call("punch")
+	var hurt : Sprite2D = boss.get("_foe_sprite")
+	var reddened := false
+	var t_red := Time.get_ticks_msec()
+	while is_instance_valid(hurt) and float(Time.get_ticks_msec() - t_red) < 600.0:
+		if hurt.modulate.r > hurt.modulate.g + 0.2:
+			reddened = true
+			break
+		await process_frame
+	_check(reddened, "и получивший МИГАЕТ КРАСНЫМ")
+	# Дать замаху доиграть: пока он в кадре, следующий удар не начнётся, и
+	# проверка перезарядки ниже мерила бы не перезарядку, а этот хвост.
+	await _wait(0.4)
 	_check(int(boss.get("hits_taken")) == 0,
 		"а серый не ответил ни разу: %d" % int(boss.get("hits_taken")))
 	_check(int(boss.get("blocks")) == 0, "и блока на обучении не было")
@@ -387,6 +439,37 @@ func _initialize() -> void:
 		"третья волна — сам босс, через %.1f c" % w)
 	_check(int(boss.get("king_hp")) == int(boss.KING_HP),
 		"и у него полные %d ХП" % int(boss.get("king_hp")))
+	# И ТОЛЬКО ТЕПЕРЬ ПОЛОСА СТАНОВИТСЯ НА ПЯТЬ. До него на ней стояла одна рейка
+	# рядового: длина полосы и говорит, кто вышел.
+	_check((boss.get("_boss_segs") as Array).size() == int(boss.KING_HP),
+		"и полоса выросла до пяти сегментов: %d"
+			% (boss.get("_boss_segs") as Array).size())
+	var king_lbl : Label = boss.get("_foe_name")
+	_check(is_instance_valid(king_lbl) and king_lbl.text.contains("ПИРАТ"),
+		"и подписана его именем: «%s»" % [king_lbl.text if king_lbl != null else ""])
+	# ВЫХОДИТ ОН НЕ СРАЗУ: сперва толпа его зовёт, и только потом он шагает из
+	# кольца. Мгновенный выход означал бы, что зов не успел прочитаться.
+	var king_ring : Sprite2D = boss.get("_king_crowd")
+	var ring_at : Vector2 = king_ring.position if is_instance_valid(king_ring) \
+		else Vector2.ZERO
+	var t_out := Time.get_ticks_msec()
+	while is_instance_valid(boss.get("_king_crowd")) \
+			and float(Time.get_ticks_msec() - t_out) / 1000.0 < 6.0:
+		await process_frame
+	var called : float = float(Time.get_ticks_msec() - t_out) / 1000.0
+	_check(called >= float(boss.KING_CALL_TIME) * 0.5,
+		"толпа зовёт его %.1f c, и только потом он выходит" % called)
+	# ВЫШЕЛ ОН ИЗ ТОЛПЫ, а не из-за края экрана: копии в кольце больше нет, а сам
+	# он стоит там, где она стояла, — внутри экрана, а не за ним.
+	_check(not is_instance_valid(boss.get("_king_crowd")),
+		"из толпы он ВЫШЕЛ: копии в кольце не осталось")
+	_check(ring_at.distance_to(boss.get("_foe_pos")) < 40.0,
+		"и появился РОВНО ТАМ, где стоял в кольце: %.0f px от места"
+			% ring_at.distance_to(boss.get("_foe_pos")))
+	var king_at : Vector2 = boss.get("_foe_pos")
+	_check(king_at.x < vp.x,
+		"и вышел он ИЗНУТРИ экрана, а не из-за края: x = %.0f при ширине %.0f"
+			% [king_at.x, vp.x])
 	# И ОН ЕДИНСТВЕННЫЙ, КТО НАПАДАЕТ САМ: рядовые только преследуют и отвечают.
 	_check(bool(boss.get("_foe_attacks")), "и он нападает сам")
 
@@ -477,7 +560,8 @@ func _initialize() -> void:
 func _fists_of(boss: Node) -> Array:
 	var out : Array = []
 	for c in boss.get_children():
-		if c is Sprite2D and (c as Sprite2D).z_index == int(boss.FIST_Z):
+		if c is Sprite2D and (c as Sprite2D).z_index >= int(boss.FIST_Z) \
+				and (c as Sprite2D).z_index <= int(boss.FIST_Z_TOP):
 			out.append(c)
 	return out
 
@@ -489,7 +573,7 @@ func _fist_px(f: Sprite2D) -> float:
 # Пицца в финале: спрайт с текстурой пиццы, лежащий поверх всех.
 func _pizza_of(boss: Node) -> Sprite2D:
 	for c in boss.get_children():
-		if c is Sprite2D and (c as Sprite2D).z_index >= 46:
+		if c is Sprite2D and (c as Sprite2D).z_index == int(boss.PIZZA_Z):
 			return c
 	return null
 
