@@ -3,17 +3,17 @@ extends SceneTree
 # Headless-проверка босса «Старый пират» (король бомжей).
 #   godot --headless --path . --script res://dev/smoke_bum_king.gd
 #
-# Этот бой не про уворот, а про то, чтобы НЕ УДАРИТЬ, и вся его начинка —
-# правила размена. Ломаются они тихо:
+# Бой про ДИСТАНЦИЮ: двигаться можно как обычно, но круг тесный, кулак достаёт
+# ровно на длину руки, а противник идёт за тобой сам. Ломается это тихо:
 #
-#   1. БЛОК ПЕРЕСТАЁТ БЫТЬ БЛОКОМ. Кулаки встретились в один кадр, а разбор
-#      выдал попадание — потому что проверка попаданий стоит выше ничьей.
-#      На экране это выглядит как «иногда блокирует, иногда нет».
-#   2. ВОЛНЫ УЧАТ НЕ ТОМУ. Серый ударил на обучении, рыжий начал первым, порядок
-#      «сначала блок, потом попадание» перевернулся — и каждое из этих трёх
-#      учит игрока обратному тому, ради чего волна и заведена.
-#   3. АРЕНА ОТПУСКАЕТ. Нормальдо снова ходит или кастует спелл, и бой
-#      превращается в обычный уворот.
+#   1. БЛОК ПЕРЕСТАЁТ БЫТЬ БЛОКОМ. Замахи сошлись в один кадр, а разбор выдал
+#      попадание — потому что проверка попаданий стоит выше ничьей. На экране
+#      это выглядит как «иногда блокирует, иногда нет».
+#   2. ДИСТАНЦИЯ ПЕРЕСТАЁТ ЗНАЧИТЬ. Удар начинает доходить с любого расстояния —
+#      и весь бой сводится к тому, кто раньше нажал.
+#   3. ВОЛНЫ УЧАТ НЕ ТОМУ. Серый ударил на обучении, рыжий начал первым, порядок
+#      «сначала блок, потом попадание» перевернулся.
+#   4. КРУГ ОТПУСКАЕТ. Нормальдо уходит в толпу, и бой рассыпается.
 #
 # См. scripts/bum_king.gd, /Концепция/Босс — Старый пират.md
 
@@ -21,7 +21,7 @@ const BUM_KING := preload("res://scripts/bum_king.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 40
+const EXPECTED_CHECKS : int = 50
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -42,10 +42,6 @@ func _initialize() -> void:
 	await process_frame
 
 	# ── Раскладка эпизодов ──────────────────────────────────────────────────
-	# Третий эпизод держал крокодила ВТОРЫМ ЗАХОДОМ — тот же бой два эпизода
-	# подряд, помеченный `boss_tmp`. Проверяется и то, что босс встал на место,
-	# и то, что метка «взаймы» с него снята: забыть её — значит оставить эпизод
-	# в списке недоделанных навсегда.
 	print("── Место в кампании ──")
 	var lv : Array = sp.CAMPAIGN_LEVELS
 	_check(String((lv[2] as Dictionary)["boss"]) == "bum_king",
@@ -54,7 +50,7 @@ func _initialize() -> void:
 	_check(String((lv[1] as Dictionary)["boss"]) == "croc",
 		"крокодил остался на втором")
 
-	# ── Бой ─────────────────────────────────────────────────────────────────
+	# ── Арена ───────────────────────────────────────────────────────────────
 	print("── Арена ──")
 	var boss : Node2D = Node2D.new()
 	boss.set_script(BUM_KING)
@@ -64,12 +60,17 @@ func _initialize() -> void:
 
 	var vp : Vector2 = get_root().get_visible_rect().size
 	var crowd : Array = boss.get("_crowd")
-	# ТОЛПА ПЛОТНАЯ. Одно кольцо из двадцати шести читалось как хоровод с
-	# просветами: сквозь него было видно стену, и «уходить некуда» держалось
-	# только на словах.
-	_check(crowd.size() >= 70, "толпа плотная: %d бомжей" % crowd.size())
-	# И РАЗНОШЁРСТНАЯ: серые с рыжими вперемешку и примерно поровну. Толпа из
-	# одного цвета читается как копии одного человека.
+	# ТОЛПА ПЛОТНАЯ И МНОГОЛЮДНАЯ: сквозь редкое кольцо видно стену, и «уходить
+	# некуда» держится только на словах.
+	_check(crowd.size() >= 100, "толпа плотная: %d бомжей" % crowd.size())
+	# И РОСТОМ КАК В ПОТОКЕ. Бомж в забеге — около 66 px на экране; мельче — и
+	# толпа читается не как «те самые бомжи», а как их уменьшенные копии.
+	var px_min : float = 1e9
+	for c in crowd:
+		var s : Sprite2D = c
+		px_min = minf(px_min, s.texture.get_size().y * s.scale.y)
+	_check(px_min >= 50.0, "и ростом не мельче потока: самый мелкий %.0f px" % px_min)
+	# РАЗНОШЁРСТНАЯ: серые с рыжими вперемешку и примерно поровну.
 	var grey := 0
 	var ging := 0
 	for c in crowd:
@@ -77,8 +78,7 @@ func _initialize() -> void:
 		else: ging += 1
 	_check(mini(grey, ging) * 2 >= maxi(grey, ging),
 		"серых и рыжих поровну: %d / %d" % [grey, ging])
-	# ОВАЛОМ, а не дугой: арена обязана закрывать все стороны, иначе «уходить
-	# некуда» перестаёт быть правдой — и игрок первым делом пойдёт в дырку.
+	# ОВАЛОМ, а не дугой: круг обязан быть закрыт со всех сторон.
 	var left := false; var right := false; var up := false; var down := false
 	for c in crowd:
 		var p : Vector2 = (c as Node2D).position
@@ -90,37 +90,40 @@ func _initialize() -> void:
 		"и закрывает арену со всех сторон: л%s п%s в%s н%s"
 			% [left, right, up, down])
 
-	# А ВНУТРЬ НЕ ЛЕЗЕТ. Плотная толпа первым делом встала поверх Нормальдо и его
-	# противника — кольца считаются от центра экрана, а бой идёт ровно там же, — и
-	# кадр читался не как «толпа вокруг», а как каша.
-	var inside : Array = []
-	var arena : Rect2 = boss.call("_arena_rect")
+	# А ВНУТРЬ КРУГА НЕ ЛЕЗЕТ: там дерутся.
+	var c_arena : Vector2 = boss.call("_arena_center")
+	var r_arena : Vector2 = boss.call("_arena_radii")
+	var inside := 0
 	for c in crowd:
-		if arena.has_point((c as Node2D).position):
-			inside.append((c as Node2D).position)
-	_check(inside.is_empty(),
-		"и не лезет в сцену боя: внутри %d" % inside.size())
+		if _in_ellipse((c as Node2D).position, c_arena, r_arena):
+			inside += 1
+	_check(inside == 0, "и не лезет в круг боя: внутри %d" % inside)
 
 	_check(bool(n.get("spells_blocked")),
 		"спелл заперт: единственный жест боя занят ударом")
 
-	# АРЕНА ВЫТАЛКИВАЕТ, а не отключает управление. Свайп обязан что-то сделать:
-	# молча проглоченный он читается как «игра не поняла». И обязан ВЕРНУТЬ на
-	# место — уехавший и оставшийся там Нормальдо это уже движение, то есть тот
-	# самый уворот, которого в этом бою нет.
-	var home : Vector2 = n.position
-	boss.call("_nudge_hero", Vector2(0.0, -1.0))
-	await _wait(0.05)
-	_check(n.position.distance_to(home) > 1.0,
-		"свайп сдвигает: на %.0f px" % n.position.distance_to(home))
-	await _wait(0.6)
-	_check(n.position.distance_to(home) < 2.0,
-		"и пружина возвращает обратно: %.1f px" % n.position.distance_to(home))
+	# ── КРУГ ДЕРЖИТ, НО НЕ ПРИКОВЫВАЕТ ──────────────────────────────────────
+	# Управление обычное, то самое, которым играли весь забег. Отнимается ровно
+	# одно — право уйти с арены. Раньше Нормальдо был приклеен к точке и свайп
+	# отдавал пружиной: замысел держался, но всё выученное за забег на время боя
+	# выключалось.
+	print("── Движение в круге ──")
+	_check(bool(n.call("is_input_enabled")),
+		"управление у игрока НЕ отобрано")
+	# Внутри круга ходит свободно: сдвинули — там и остался.
+	var spot : Vector2 = c_arena + Vector2(r_arena.x * 0.4, -r_arena.y * 0.4)
+	n.position = spot
+	await _wait(0.2)
+	_check(n.position.distance_to(spot) < 4.0,
+		"внутри круга ходит свободно: остался в %.0f px от цели"
+			% n.position.distance_to(spot))
+	# А за круг не пускает — не запретом ввода, а зажимом позиции.
+	n.position = Vector2(vp.x * 0.97, vp.y * 0.06)
+	await _wait(0.2)
+	_check(_in_ellipse(n.position, c_arena, r_arena),
+		"а за круг не выпускает: вернулся в %s" % [n.position.round()])
 
 	# ── ИНТЕРФЕЙС ЗАБЕГА СПРЯТАН ────────────────────────────────────────────
-	# Жира в этом бою нет — у игрока свои три рейки, — а счётчики над ареной с
-	# отключённым потоком показывают неподвижные числа. Кнопка паузы остаётся:
-	# выйти из боя игрок обязан уметь в любую секунду.
 	print("── Чистый экран ──")
 	var hud : Node = game.get_node_or_null("HUD")
 	var hidden : Array = hud.get("_boss_hidden")
@@ -129,57 +132,84 @@ func _initialize() -> void:
 	_check(is_instance_valid(pause_btn) and pause_btn.visible,
 		"а кнопка паузы осталась")
 
-	# ── Волна 1: серый не бьёт ВООБЩЕ ───────────────────────────────────────
+	# ── Полосы ХП ───────────────────────────────────────────────────────────
+	# СЕГМЕНТАМИ: сегмент = удар. И СВОЯ СЛЕВА, ЧУЖАЯ СПРАВА — как стоят сами
+	# бойцы. Раньше было наоборот, и в горячий момент рейки читались задом
+	# наперёд: игрок смотрел, как «у него убавилось», а убавилось у него самого.
+	print("── Полосы ХП ──")
+	var hs : Array = boss.get("_hero_segs")
+	var bs : Array = boss.get("_boss_segs")
+	_check(bs.size() == 5, "у босса пять реек: %d" % bs.size())
+	_check(hs.size() == 3, "а у игрока три: %d" % hs.size())
+	_check((hs[0] as Panel).position.x < (bs[0] as Panel).position.x,
+		"своя полоса СЛЕВА, чужая справа: %.0f против %.0f"
+			% [(hs[0] as Panel).position.x, (bs[0] as Panel).position.x])
+	# И ПОДПИСАНЫ. Две одинаковые полоски по краям экрана ничем не отличаются,
+	# кроме цвета, а цвет в драке разбирать некогда.
+	var hero_lbl : Label = boss.get("_hero_name")
+	_check(is_instance_valid(hero_lbl) and not hero_lbl.text.strip_edges().is_empty(),
+		"своя подписана: «%s»" % [hero_lbl.text if hero_lbl != null else ""])
+
+	# ── Волна 1: серый ПРЕСЛЕДУЕТ и не бьёт ─────────────────────────────────
 	print("── Волна 1: серый ──")
-	# Ждём выхода волны: до неё идёт реплика босса.
 	var waited := await _await_wave(boss, "grey", 12.0)
 	_check(String(boss.get("current_wave")) == "grey",
 		"волна серого пошла через %.1f c" % waited)
-	# ПЕРВЫМ ВЫХОДИТ СЕРЫЙ. homeless2 — серый, homeless1 — рыжий; поменяй их
-	# местами, и обучение пойдёт задом наперёд, не сломав ничего видимого.
 	var foe : Sprite2D = boss.get("_foe_sprite")
 	_check(is_instance_valid(foe) and foe.texture == boss.CROWD_TEX[1],
 		"и это СЕРЫЙ бомж, а не рыжий")
+	var foe_lbl : Label = boss.get("_foe_name")
+	_check(is_instance_valid(foe_lbl) and foe_lbl.text.contains("СЕР"),
+		"и подпись над его рейками — его: «%s»" % [foe_lbl.text if foe_lbl != null else ""])
+	_check(int(boss.get("foe_hp")) == int(boss.FOE_HP),
+		"одна рейка: %d" % int(boss.get("foe_hp")))
 
-	# ОН ПОДХОДИТ, а не появляется на месте. Проверяется движение: выйдя из-за
-	# края и встав, он читался бы как «его поставили».
-	var fx0 : float = float(boss.get("_foe_x"))
-	await _wait(0.35)
-	_check(float(boss.get("_foe_x")) < fx0 - 20.0,
-		"и идёт на тебя: %.0f → %.0f" % [fx0, float(boss.get("_foe_x"))])
-	# Но НЕ ВПЛОТНУЮ: встаёт на дистанции удара. Подошедший вплотную закрыл бы
-	# собой и Нормальдо, и оба кулака.
-	await _wait(2.0)
-	_check(float(boss.get("_foe_x")) > float(boss.get("_hero_x")) + 120.0,
-		"и тормозит на дистанции удара: %.0f при герое %.0f"
-			% [float(boss.get("_foe_x")), float(boss.get("_hero_x"))])
+	# ПРЕСЛЕДУЕТ ПО ВСЕМУ КРУГУ, а не едет по одной горизонтали. Ставим героя в
+	# сторону и смотрим, что противник пошёл ЗА НИМ, в том числе по вертикали:
+	# едущий по прямой враг свободному игроку не соперник — от него достаточно
+	# отойти вбок.
+	n.set("_dev_immortal", true)
+	n.position = c_arena + Vector2(-r_arena.x * 0.5, r_arena.y * 0.6)
+	var p0 : Vector2 = boss.get("_foe_pos")
+	await _wait(1.2)
+	var p1 : Vector2 = boss.get("_foe_pos")
+	_check(p1.distance_to(n.position) < p0.distance_to(n.position) - 20.0,
+		"идёт за тобой: %.0f → %.0f px до героя"
+			% [p0.distance_to(n.position), p1.distance_to(n.position)])
+	_check(absf(p1.y - p0.y) > 8.0,
+		"и по вертикали тоже, а не по одной линии: %.0f px" % absf(p1.y - p0.y))
 
-	# Серый — ЕДИНСТВЕННЫЙ, кто ничего не делает сам, и потому на нём и меряется
-	# разбор размена: любой другой противник в этот момент лупил бы по своему
-	# расписанию, и «только твой кулак» превращалось бы то в блок, то в размен.
-	# ХП ему поднято, чтобы он дожил до конца замеров: это тот же учебный
-	# манекен, только не разваливающийся с первого удара.
-	boss.set("foe_hp", 9)
-	n.set("_dev_immortal", true)   # меряем разбор, а не выживание
-
-	var took0 : int = int(boss.get("hits_taken"))
+	# ── ДИСТАНЦИЯ РЕШАЕТ ────────────────────────────────────────────────────
+	# Удар — замах на длину руки, а не летящий снаряд. Издалека он не достаёт, и
+	# это главное правило боя: подойти — это ход.
+	print("── Дистанция ──")
+	boss.set("foe_hp", 9)      # учебный манекен: меряем разбор, а не выживание
+	boss.set("_foe_state", "") # и стоящий смирно: преследование сейчас мешает
+	var far : Vector2 = c_arena + Vector2(r_arena.x * 0.9, 0.0)
+	n.position = c_arena - Vector2(r_arena.x * 0.9, 0.0)
+	boss.set("_foe_pos", far)
+	var d0 : int = int(boss.get("hits_dealt"))
 	boss.set("_p_cd", 0.0)
 	boss.call("punch")
-	await _wait(0.8)
-	_check(int(boss.get("hits_dealt")) >= 1,
-		"тап = удар, и он доходит: попаданий %d" % int(boss.get("hits_dealt")))
-	_check(int(boss.get("hits_taken")) == took0,
-		"а серый не ответил ни разу: %d" % (int(boss.get("hits_taken")) - took0))
+	await _wait(0.6)
+	_check(int(boss.get("hits_dealt")) == d0,
+		"издалека удар НЕ достаёт: попаданий %d" % (int(boss.get("hits_dealt")) - d0))
+
+	# А вплотную — доходит.
+	boss.set("_foe_pos", n.position + Vector2(90.0, 0.0))
+	boss.set("_p_cd", 0.0)
+	boss.call("punch")
+	await _wait(0.6)
+	_check(int(boss.get("hits_dealt")) == d0 + 1,
+		"а с дистанции удара доходит: %d" % (int(boss.get("hits_dealt")) - d0))
+	_check(int(boss.get("hits_taken")) == 0,
+		"а серый не ответил ни разу: %d" % int(boss.get("hits_taken")))
 	_check(int(boss.get("blocks")) == 0, "и блока на обучении не было")
 
 	# ── Перезарядка ─────────────────────────────────────────────────────────
-	# Без неё бой — мэшинг, а весь его смысл в паузе ПЕРЕД ударом. Меряется
-	# результат, а не флаг: три тапа подряд обязаны дать РОВНО ОДИН удар, а не
-	# «не больше одного» — второе прошло бы и на кулаке, который не летает вовсе.
+	# Меряется результат, а не флаг: три тапа подряд обязаны дать РОВНО ОДИН
+	# удар, а не «не больше одного» — второе прошло бы и на неработающем ударе.
 	print("── Перезарядка ──")
-	# И её ВИДНО. Перезарядка без индикатора — правило, которое игрок может
-	# только угадать: тапнул, ничего не вылетело, и непонятно, промахнулся ты по
-	# кнопке или кулак ещё не вернулся.
 	var fill : ColorRect = boss.get("_cd_fill")
 	_check(fill != null, "полоска перезарядки есть")
 	var before : int = int(boss.get("hits_dealt"))
@@ -192,8 +222,6 @@ func _initialize() -> void:
 		"три тапа подряд дают ровно один удар: %d"
 			% (int(boss.get("hits_dealt")) - before))
 	if fill != null:
-		# Полоска показывает СОСТОЯНИЕ, а не украшение: сразу после удара она
-		# пустая, через кулдаун — полная.
 		boss.set("_p_cd", float(boss.PUNCH_CD))
 		await _wait(0.05)
 		var short_w : float = fill.size.x
@@ -208,63 +236,65 @@ func _initialize() -> void:
 	boss.set("blocks", 0)
 	boss.set("hits_dealt", 0)
 	boss.set("hits_taken", 0)
+	boss.set("_foe_pos", n.position + Vector2(90.0, 0.0))
 
-	# 1. Кулак в кулак — БЛОК, и никто не попал. Оба вылетают в один кадр.
+	# 1. Замах в замах — БЛОК, и никто не попал.
 	boss.set("_p_cd", 0.0)
 	boss.call("punch")
 	boss.call("foe_punch")
 	await _wait(0.8)
 	_check(int(boss.get("blocks")) == 1,
-		"кулак в кулак — блок: %d" % int(boss.get("blocks")))
+		"замах в замах — блок: %d" % int(boss.get("blocks")))
 	_check(int(boss.get("hits_dealt")) == 0 and int(boss.get("hits_taken")) == 0,
 		"и НИКТО не попал: %d / %d"
 			% [int(boss.get("hits_dealt")), int(boss.get("hits_taken"))])
 
-	# 2. Только твой кулак — попал ты.
+	# 2. Только твой замах — попал ты.
 	boss.set("_p_cd", 0.0)
 	boss.call("punch")
 	await _wait(0.8)
 	_check(int(boss.get("hits_dealt")) == 1 and int(boss.get("hits_taken")) == 0,
-		"один твой кулак — попал ты: %d / %d"
+		"один твой замах — попал ты: %d / %d"
 			% [int(boss.get("hits_dealt")), int(boss.get("hits_taken"))])
 
 	# 3. Только его — получил ты.
 	boss.call("foe_punch")
 	await _wait(0.8)
 	_check(int(boss.get("hits_taken")) == 1,
-		"один его кулак — получил ты: %d" % int(boss.get("hits_taken")))
+		"один его замах — получил ты: %d" % int(boss.get("hits_taken")))
 
 	# ── Волна 2: рыжий отвечает, но не начинает ─────────────────────────────
 	print("── Волна 2: рыжий ──")
 	boss.set("foe_hp", 0)          # отпускаем манекен — идёт следующая волна
 	await _await_wave(boss, "ginger", 8.0)
 	_check(String(boss.get("current_wave")) == "ginger", "волна рыжего пошла")
-	boss.set("foe_hp", 9)
-	# Сам он не начинает НИКОГДА. Ждём заведомо дольше любой его паузы, ничего
-	# не делая: ответ — это реакция на удар, а удара нет.
+	_check(int(boss.get("foe_hp")) == int(boss.FOE_HP),
+		"и у него одна рейка: %d" % int(boss.get("foe_hp")))
+	boss.set("_foe_state", "")
+	boss.set("_foe_pos", n.position + Vector2(90.0, 0.0))
+	# Сам он не начинает НИКОГДА: ответ — это реакция на удар, а удара нет.
 	var quiet : int = int(boss.get("hits_taken"))
 	await _wait(2.2)
 	_check(int(boss.get("hits_taken")) == quiet,
 		"первым не бьёт: получили %d за 2.2 c простоя"
 			% (int(boss.get("hits_taken")) - quiet))
 
-	# ПЕРВЫЙ РАЗМЕН — БЛОК, ВТОРОЙ УДАР ДОБИВАЕТ. Отвечает он ровно один раз:
-	# второй ответ был бы ударом по игроку от рядового из обучающей волны, а
-	# бьёт в этом бою только король.
-	boss.set("foe_hp", 2)
+	# ПЕРВЫЙ РАЗМЕН — БЛОК, ВТОРОЙ УДАР ДОБИВАЕТ. Блок не тратит его рейку, он
+	# её откладывает; отвечает рыжий ровно один раз.
 	var b0 : int = int(boss.get("blocks"))
 	var t0 : int = int(boss.get("hits_taken"))
-	var d0 : int = int(boss.get("hits_dealt"))
+	var dd : int = int(boss.get("hits_dealt"))
 	boss.set("_p_cd", 0.0)
 	boss.call("punch")
 	await _wait(1.0)
 	_check(int(boss.get("blocks")) == b0 + 1,
 		"первый размен с рыжим — блок: %d" % (int(boss.get("blocks")) - b0))
+	boss.set("_foe_pos", n.position + Vector2(90.0, 0.0))
 	boss.set("_p_cd", 0.0)
 	boss.call("punch")
 	await _wait(1.4)
-	_check(int(boss.get("hits_dealt")) == d0 + 1,
-		"второй удар доходит: %d" % (int(boss.get("hits_dealt")) - d0))
+	_check(int(boss.get("hits_dealt")) == dd + 1,
+		"второй удар доходит: %d" % (int(boss.get("hits_dealt")) - dd))
 	_check(int(boss.get("hits_taken")) == t0,
 		"а сам он по игроку так и не попал: %d" % (int(boss.get("hits_taken")) - t0))
 
@@ -276,28 +306,35 @@ func _initialize() -> void:
 		"третья волна — сам босс, через %.1f c" % w)
 	_check(int(boss.get("king_hp")) == int(boss.KING_HP),
 		"и у него полные %d ХП" % int(boss.get("king_hp")))
+	# И ОН ЕДИНСТВЕННЫЙ, КТО НАПАДАЕТ САМ: рядовые только преследуют и отвечают.
+	_check(bool(boss.get("_foe_attacks")), "и он нападает сам")
 
-	# ЗЛЕЕ С КАЖДЫМ ХП. Проверяется не «есть переменная», а то, что пауза между
-	# его ударами вправду сокращается: пять одинаковых попаданий — это не пять
-	# ступеней сложности, а пять повторов.
+	# ЗЛЕЕ С КАЖДОЙ РЕЙКОЙ. Проверяется не «есть переменная», а то, что отдышка
+	# между бросками вправду сокращается.
 	var gap_full : float = float(boss.call("king_gap"))
 	boss.set("king_hp", 1)
 	var gap_low : float = float(boss.call("king_gap"))
 	_check(gap_low < gap_full * 0.7,
-		"с потерей ХП бьёт чаще: %.2f c против %.2f" % [gap_low, gap_full])
+		"с потерей ХП бросается чаще: %.2f c против %.2f" % [gap_low, gap_full])
+	boss.set("king_hp", int(boss.KING_HP))
 
-	# ── Полосы ──────────────────────────────────────────────────────────────
-	# СЕГМЕНТАМИ: сегмент = удар. Заливка на пяти хитах превратила бы каждый в
-	# незаметный шаг на 20 %.
-	print("── Полосы ХП ──")
-	_check((boss.get("_boss_segs") as Array).size() == 5,
-		"у босса пять реек: %d" % (boss.get("_boss_segs") as Array).size())
-	# ТРИ РЕЙКИ У ИГРОКА, И ОНИ СВОИ, а не его жир. Жир — валюта забега: войти в
-	# бой можно и со скинни, и с убером, то есть с одной жизнью или с четырьмя, а
-	# бой задуман одинаковым для всех.
-	_check((boss.get("_hero_segs") as Array).size() == 3,
-		"а у игрока три: %d" % (boss.get("_hero_segs") as Array).size())
+	# РЫВОК ЕСТЬ. Он и делает бой боем: подойти и уйти надо успеть между
+	# бросками, а стоящий столбом враг свободному игроку не соперник.
+	var saw_dash := false
+	var t_end := Time.get_ticks_msec() + 9000
+	while Time.get_ticks_msec() < t_end:
+		var st : String = String(boss.get("_foe_state"))
+		if st == "dash" or st == "charge":
+			saw_dash = true
+			break
+		await process_frame
+	_check(saw_dash, "и бросается на тебя, а не стоит столбом")
+
+	# ── Одно попадание — одна рейка ─────────────────────────────────────────
+	print("── Рейки ──")
 	boss.set("hero_hp", 3)
+	boss.set("_foe_state", "")
+	boss.set("_foe_pos", n.position + Vector2(90.0, 0.0))
 	var hp0 : int = int(boss.get("hero_hp"))
 	boss.call("foe_punch")
 	await _wait(0.8)
@@ -316,6 +353,10 @@ func _initialize() -> void:
 
 	_finish()
 
+func _in_ellipse(p: Vector2, c: Vector2, r: Vector2) -> bool:
+	var d := p - c
+	return (d.x * d.x) / maxf(1.0, r.x * r.x) + (d.y * d.y) / maxf(1.0, r.y * r.y) <= 1.0
+
 func _await_wave(boss: Node, want: String, limit: float) -> float:
 	var t0 := Time.get_ticks_msec()
 	while Time.get_ticks_msec() - t0 < int(limit * 1000.0):
@@ -329,10 +370,10 @@ func _await_wave(boss: Node, want: String, limit: float) -> float:
 func _await_free(boss: Node, limit: float) -> bool:
 	var t0 := Time.get_ticks_msec()
 	while Time.get_ticks_msec() - t0 < int(limit * 1000.0):
-		if not is_instance_valid(boss):
+		if not is_instance_valid(boss) or not boss.is_inside_tree():
 			return true
 		await process_frame
-	return not is_instance_valid(boss)
+	return false
 
 func _wait(sec: float) -> void:
 	var t0 := Time.get_ticks_msec()

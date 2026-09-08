@@ -5,19 +5,24 @@ extends Node2D
 #
 # ── Чем он отличается от всех прежних ────────────────────────────────────────
 # Крокодил, ниндзя и хозяин клуба спрашивали одно и то же: «успеешь ли уйти с
-# линии». Игрок двигался и уворачивался — ровно как весь забег до боя, только
-# быстрее.
+# линии». Игрок уворачивался — ровно как весь забег до боя, только быстрее.
 #
-# Этот спрашивает обратное: успеешь ли ты НЕ УДАРИТЬ. Нормальдо приклеен к
-# месту, толпа сомкнулась, уходить некуда, спелл не работает. Единственное
-# действие — кулак, и весь бой в том, когда его НЕ выпускать.
+# Этот спрашивает про ДИСТАНЦИЮ. Двигаться можно как обычно, но круг тесный,
+# кулак достаёт ровно на длину руки, а противник идёт за тобой сам. Подойти,
+# ударить и разорвать дистанцию до его броска — вот весь бой.
+#
+# Первая версия была другой: Нормальдо стоял приклеенным, свайп отдавал
+# пружиной, а весь бой сводился к тому, когда нажать. Замысел «успей НЕ
+# ударить» она держала, но ценой того, что всё выученное за забег на время боя
+# выключалось; движение вернули, а торг оставили — только теперь он про то,
+# когда подойти.
 #
 # ── Почему столкновения считаются вручную, а не физикой ──────────────────────
-# Кулаки — не предметы потока: они летят по одной горизонтали навстречу друг
-# другу и обязаны разрешаться ТРЕМЯ исходами (попал / получил / блок), причём
-# блок это когда «оба одновременно». Физика Godot решает такие ничьи порядком
-# сигналов area_entered, то есть случайно, — и блок то срабатывал бы, то нет.
-# Здесь же кадр считает пересечение отрезков сам, и ничья остаётся ничьёй.
+# Удар — не предмет потока: он обязан разрешаться ТРЕМЯ исходами (попал /
+# получил / блок), причём блок это когда «оба одновременно». Физика Godot
+# решает такие ничьи порядком сигналов area_entered, то есть случайно, — и блок
+# то срабатывал бы, то нет. Здесь кадр считает дистанцию сам, и ничья остаётся
+# ничьёй.
 #
 # Побочная выгода: бой целиком проверяется тестом без единого кадра рендера.
 
@@ -35,10 +40,15 @@ const F_IDLE  := preload("res://assets/bosses/bum_king/idle.png")
 const F_FROWN := preload("res://assets/bosses/bum_king/frown.png")
 const F_FIST  := preload("res://assets/bosses/bum_king/fist.png")
 
-# Кулак Нормальдо — ТОТ ЖЕ, что у Викинга. Зелёный, крупный, уже нарисован и уже
-# означает в этой игре «удар». Рисовать второй кулак значило бы завести второй
-# язык для одного и того же.
-const F_PLAYER_FIST := preload("res://assets/skills/viking/fist.png")
+# Кулак Нормальдо — ТОТ ЖЕ, что у Викинга, только ЗЕЛЁНЫЙ. Форма, размер и
+# обводка викинговские: этот кулак уже нарисован и уже означает в игре «удар»,
+# а второй такой же значил бы второй язык для одного и того же.
+#
+# А вот цвет — свой. У викинга кулак серый, и на арене выходило два серых
+# бойца, различимых только по тому, кто где стоит. Зелёный тот же, что у головы
+# Нормальдо; перекрашивает заливку `dev/tools/bake_green_fist.py`, чёрные линии
+# и голубой контур он не трогает — они и делают кулак кулаком.
+const F_PLAYER_FIST := preload("res://assets/skills/fist_green.png")
 
 # Толпа — те же два бомжа, что стоят в потоке и в мини-игре. Толпа обязана
 # читаться как «те самые бомжи», а не как новый народ.
@@ -58,11 +68,16 @@ const CROWD_TEX : Array = [
 # одного человека.
 const CROWD_RINGS  : Array = [
 	# [доля радиуса, сколько в кольце, множитель роста]
-	[1.00, 30, 1.15],   # внешнее — крупные, ближе к зрителю
-	[0.88, 26, 1.00],
-	[0.76, 22, 0.88],   # дальние — мельче, уходят в глубину
+	[1.00, 34, 1.15],   # внешнее — крупные, ближе к зрителю
+	[0.90, 30, 1.02],
+	[0.80, 26, 0.92],
+	[0.70, 22, 0.84],   # дальние — мельче, уходят в глубину
 ]
-const CROWD_PX     : float = 54.0    # рост рядового в толпе
+# РОСТ КАК В ПОТОКЕ. Бомж в забеге — это 328 px картинки в масштабе 0.2, то есть
+# около 66 на экране; в толпе стояло 54, и рядовые выглядели мельче тех же самых
+# бомжей, мимо которых игрок только что пролетел. Толпа обязана читаться как «те
+# самые», а не как их уменьшенные копии.
+const CROWD_PX     : float = 72.0    # рост рядового в толпе
 const CROWD_PAD_X  : float = 0.02    # отступ овала от краёв экрана, доли
 const CROWD_PAD_Y  : float = 0.04
 const CROWD_Z      : int   = 8       # за бойцами, но перед фоном
@@ -70,17 +85,20 @@ const CROWD_Z      : int   = 8       # за бойцами, но перед фо
 # с ним — толпой.
 const CROWD_JITTER : float = 16.0
 
-# ── СЦЕНА БОЯ — СВОБОДНА ─────────────────────────────────────────────────────
-# Плотная толпа первым делом залезла внутрь и встала поверх Нормальдо и его
-# противника: кольца считаются от центра экрана, а бой идёт ровно там же. На
-# кадре это читалось не как «толпа вокруг», а как «в кадре каша».
+# ── АРЕНА — КРУГ ВНУТРИ ТОЛПЫ ────────────────────────────────────────────────
+# Внутри толпы пусто, и в этом круге Нормальдо ДВИГАЕТСЯ КАК ОБЫЧНО. Раньше он
+# был приклеен к точке: свайп отдавал пружиной, а весь бой сводился к тому,
+# когда нажать. Это верно ровно для одной механики — «успей не ударить», — но
+# всё остальное, чему игрок учился весь забег, при этом выключалось.
 #
-# Поэтому вокруг линии боя держится пустая полоса, и всякий, кто попал в неё,
-# выталкивается ПО ВЕРТИКАЛИ наружу — вверх или вниз, куда ближе. По вертикали,
-# а не по радиусу: толпа обязана остаться замкнутой, а радиальный выброс
-# проделал бы в ней дыры ровно там, где стоят бойцы.
-const ARENA_HALF_H : float = 96.0    # полувысота свободной полосы
-const ARENA_PAD_X  : float = 110.0   # запас слева от героя и справа от врага
+# Теперь управление своё, обычное, и ограничение ровно одно: за круг не выйти.
+# Толпа стоит по эллипсу экрана, поэтому и круг эллиптический — вписанный в неё
+# с запасом, чтобы голова не залезала людям в лица.
+const ARENA_RX_K : float = 0.30   # доли ширины экрана
+const ARENA_RY_K : float = 0.26   # доли высоты
+# Запас от края круга до центра головы: без него голова наполовину въезжает в
+# толпу и читается как «застрял в людях».
+const ARENA_MARGIN : float = 26.0
 
 # Мелкие облачка над толпой. Это ГУЛ, а не реплики: короткие, без хвостов, по
 # одному в случайном месте раз в секунду с небольшим. Читать их не надо — надо
@@ -98,23 +116,46 @@ const SHOUT_LIFE  : float = 1.30
 # закрыли и бойцов, и рейки — подсказка стала помехой.
 const SHOUT_AT_ONCE : int = 2
 
-# Где стоят бойцы. Нормальдо в левой части овала, противник — в правой.
+# Откуда бойцы начинают. Нормальдо в левой части круга, противник входит справа.
 const HERO_X_RATIO : float = 0.30
 const FOE_X_RATIO  : float = 0.72
 const FIGHT_Y_RATIO: float = 0.52
 
-# ── Кулаки ───────────────────────────────────────────────────────────────────
-const FIST_PX     : float = 84.0
-const FIST_SPEED  : float = 900.0   # px/с, туда и обратно
-const FIST_Z      : int   = 45
+# ── Кулаки — КАК У ВИКИНГА ───────────────────────────────────────────────────
+# Удар не летящий снаряд, а ЗАМАХ: кулак вырастает у головы, проходит короткую
+# дугу вперёд и гаснет. Ровно так бьёт викинг (`normaldo._cast_melee`), и это
+# единственный удар, который в этой игре уже есть, — второй язык для того же
+# действия сделал бы бой боссовой поделкой рядом с остальным забегом.
+#
+# Летящий кулак был неправ ещё и по игре: он превращал драку в перестрелку на
+# одной линии, где всё решает, кто раньше нажал, а расстояние не значит ничего.
+# Замах достаёт ровно на длину руки — значит дистанция и есть игра.
+const FIST_PX        : float = 215.0   # как VIKING_FIST_PX: кулак крупнее головы
+const FIST_Z         : int   = 45
+const SWING_TIME     : float = 0.26    # длина замаха, как MELEE_SWEEP_TIME
+const SWING_HIT_AT   : float = 0.13    # когда считается попадание — середина дуги
+const SWING_ARC      : float = 0.85    # раствор дуги, радианы
+const SWING_REACH    : float = 132.0   # докуда достаёт кулак от центра головы
 
 # Перезарядка удара. Без неё бой — мэшинг, а весь его смысл в паузе ПЕРЕД
 # ударом: тапнув вхолостую, ты остаёшься без кулака ровно тогда, когда он нужен.
 const PUNCH_CD    : float = 0.85
 
-# Головы. Радиусы условные — драка идёт по одной горизонтали, и «попал» тут
-# значит «кулак доехал до головы», а не «пересеклись окружности».
+# Радиус головы — для расчёта дистанции удара: бьют не в точку, а в голову.
 const HEAD_R      : float = 34.0
+
+# ── Противник ПРЕСЛЕДУЕТ ─────────────────────────────────────────────────────
+# Тот же рисунок, что у хозяина клуба в его последнем акте (`club_boss`):
+# подходит → замирает на заряд → рывок → отдышка. Прежний противник ехал по
+# одной горизонтали и вставал столбом: пока Нормальдо был приклеен, этого
+# хватало, а свободному игроку такой враг не соперник — от него достаточно
+# отойти вбок.
+const FOE_WALK     : float = 150.0   # скорость подхода
+const FOE_KEEP     : float = 118.0   # на какой дистанции держится
+const CHARGE_T     : float = 0.55    # заряд перед рывком: столько есть на уход
+const DASH_SPEED   : float = 760.0
+const DASH_MAX_T   : float = 0.45
+const RECOVER_T    : float = 0.70
 
 const BOSS_PX     : float = 210.0
 const FOE_PX      : float = 120.0   # рядовой из волн 1–2
@@ -131,6 +172,9 @@ const BAR_MID_GAP : float = 46.0
 const BAR_Z       : int   = 90
 
 const KING_HP     : int = 5
+# У рядовых ПО ОДНОЙ рейке. У рыжего первый размен уходит в блок, и его единица
+# сгорает со второго удара — блок не отнимает жизнь, он её откладывает.
+const FOE_HP      : int = 1
 # ЖИЗНИ ИГРОКА В ЭТОМ БОЮ — СВОИ ТРИ, а не его жир. Жир — валюта забега: он
 # растёт от пиццы и падает от ударов, и войти в бой можно как со скинни, так и с
 # убером, то есть с одной жизнью или с четырьмя. Бой при этом задуман ровно
@@ -165,15 +209,21 @@ var hits_taken   : int    = 0
 var punches      : int    = 0
 
 var _foe_sprite  : Sprite2D = null
-var _foe_x       : float = 0.0
+var _foe_pos     : Vector2 = Vector2.ZERO   # живая позиция противника
 var _fight_y     : float = 0.0
 var _hero_x      : float = 0.0
+# Как противник себя ведёт: "" (стоит) | approach | charge | dash | recover.
+var _foe_state   : String = ""
+var _foe_state_t : float  = 0.0
+var _dash_to     : Vector2 = Vector2.ZERO
+# Бьёт ли он вообще. Серый не бьёт никогда, рыжий — только в ответ, король — сам.
+var _foe_attacks : bool = false
 
 # Кулак в полёте: null или словарь {node, x, dir, retract}. Словарь, а не узел с
 # полями: считает их всё равно `_process`, и держать состояние рядом с ним
 # короче и виднее.
-var _p_fist : Dictionary = {}
-var _e_fist : Dictionary = {}
+var _p_swing : Dictionary = {}   # замах игрока: {"t", "resolved"}
+var _e_swing : Dictionary = {}   # замах противника
 var _p_cd   : float = 0.0
 
 var _crowd  : Array = []
@@ -217,7 +267,7 @@ func _run_boss() -> void:
 	var vp := get_viewport_rect().size
 	_fight_y = vp.y * FIGHT_Y_RATIO
 	_hero_x  = vp.x * HERO_X_RATIO
-	_foe_x   = vp.x * FOE_X_RATIO
+	_foe_pos = Vector2(vp.x * FOE_X_RATIO, _fight_y)
 
 	# Поток замирает СЧЁТЧИКОМ, а не записью в поле: заморозка считается (см.
 	# spawner.pause_for_event), и запись мимо счётчика разошлась бы с ним.
@@ -302,26 +352,44 @@ func _build_crowd() -> void:
 			tw.tween_property(s2, "position:y", s2.position.y, t)\
 				.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 
-# Полоса боя — от героя до места, где встаёт противник, с запасом по краям.
-# Считается по живым координатам, а не по числам: сдвинь бойцов, и дыра в толпе
-# переедет за ними сама.
-func _arena_rect() -> Rect2:
-	var x0 : float = minf(_hero_x, get_viewport_rect().size.x * FOE_STOP_X_RATIO)
-	var x1 : float = maxf(_hero_x, get_viewport_rect().size.x * FOE_STOP_X_RATIO)
-	return Rect2(x0 - ARENA_PAD_X, _fight_y - ARENA_HALF_H,
-		(x1 - x0) + ARENA_PAD_X * 2.0, ARENA_HALF_H * 2.0)
+# ── Круг арены ───────────────────────────────────────────────────────────────
+# Центр — центр экрана, радиусы — доли экрана. Считается каждый раз, а не
+# запоминается: экран у телефонов разный, а константы здесь в долях.
+func _arena_center() -> Vector2:
+	return get_viewport_rect().size * 0.5
 
-func _push_out_of_arena(p: Vector2) -> Vector2:
-	var r := _arena_rect()
-	if not r.has_point(p):
+func _arena_radii() -> Vector2:
+	var vp := get_viewport_rect().size
+	return Vector2(vp.x * ARENA_RX_K, vp.y * ARENA_RY_K)
+
+# Зажать точку внутри круга. Эллипс, а не окружность: экран альбомный, и круглая
+# арена оставила бы половину ширины толпе.
+func _clamp_to_arena(p: Vector2, margin: float = ARENA_MARGIN) -> Vector2:
+	var c := _arena_center()
+	var r := _arena_radii() - Vector2(margin, margin)
+	if r.x <= 1.0 or r.y <= 1.0:
 		return p
-	# Куда ближе — вверх или вниз. Выталкивание всегда в одну сторону сложило бы
-	# всех вытесненных в одну кучу над ареной.
-	var up   : float = p.y - r.position.y
-	var down : float = r.end.y - p.y
-	if up < down:
-		return Vector2(p.x, r.position.y - randf_range(4.0, 26.0))
-	return Vector2(p.x, r.end.y + randf_range(4.0, 26.0))
+	var d := p - c
+	var k : float = sqrt((d.x * d.x) / (r.x * r.x) + (d.y * d.y) / (r.y * r.y))
+	if k <= 1.0:
+		return p
+	return c + d / k
+
+# Толпа не заходит внутрь круга. Кольца стоят по радиусам 0.70…1.00 экрана, а
+# круг — 0.30 × 0.26, так что пересечься они могут только разбросом; выталкивание
+# РАДИАЛЬНОЕ — наружу от центра, туда же, куда смотрит само кольцо.
+func _push_out_of_arena(p: Vector2) -> Vector2:
+	var c := _arena_center()
+	var r := _arena_radii()
+	var d := p - c
+	var k : float = sqrt((d.x * d.x) / maxf(1.0, r.x * r.x)
+		+ (d.y * d.y) / maxf(1.0, r.y * r.y))
+	if k >= 1.0:
+		return p
+	if d.length() < 1.0:
+		d = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)).normalized()
+		k = 0.001
+	return c + d / maxf(0.001, k) * randf_range(1.02, 1.14)
 
 # ── Толпа ЛИКУЕТ ─────────────────────────────────────────────────────────────
 # Сбил противника — и вся арена подпрыгивает разом. Это единственный момент, где
@@ -375,19 +443,31 @@ func _shout(words: Array = SHOUTS) -> void:
 		.set_delay(SHOUT_LIFE * 0.55)
 	tw.tween_callback(bub.queue_free)
 
-# ── Нормальдо приклеен ───────────────────────────────────────────────────────
-# Не «управление отключено», а «тебя не пускают»: свайп сдвигает на несколько
-# пикселей и отпускает пружиной. Разница читается сразу — отключённое управление
-# ощущается поломкой, а пружина объясняет себя сама.
+# ── Нормальдо ДВИГАЕТСЯ, но из круга не выходит ──────────────────────────────
+# Управление обычное, то самое, которым игрок играл весь забег: свайп ведёт
+# голову. Отнимается ровно одно — право уйти с арены, и отнимается оно не
+# запретом ввода, а зажимом позиции: свайп в толпу докручивает голову до края
+# круга и там оставляет. Уперся — видно, что уперся, и почему.
+#
+# Спеллы заблокированы: тап здесь бьёт кулаком, и дабл-тап, кастующий спелл, тем
+# же жестом означал бы два действия сразу.
 func _lock_hero() -> void:
 	if not is_instance_valid(_normaldo):
 		return
-	_normaldo.position = Vector2(_hero_x, _fight_y)
-	if _normaldo.has_method("disable_input"):
-		_normaldo.call("disable_input")
+	_normaldo.position = _clamp_to_arena(Vector2(_hero_x, _fight_y))
 	if _normaldo.has_method("set_spells_blocked"):
 		_normaldo.call("set_spells_blocked", true)
+	if _normaldo.has_method("resume_input"):
+		_normaldo.call("resume_input")
 	_build_cd_bar()
+
+# Каждый кадр возвращает голову внутрь круга. Именно каждый: игрок ведёт её
+# пальцем непрерывно, и однократной проверки на входе хватило бы ровно на один
+# свайп.
+func _keep_hero_in_arena() -> void:
+	if not is_instance_valid(_normaldo):
+		return
+	_normaldo.position = _clamp_to_arena(_normaldo.position)
 
 # ── Полоска перезарядки ──────────────────────────────────────────────────────
 # Под Нормальдо и узкая. Перезарядка без индикатора — это правило, которое игрок
@@ -399,20 +479,31 @@ const CD_H : float = 7.0
 const CD_DY: float = 58.0
 
 var _cd_fill : ColorRect = null
+var _cd_back : ColorRect = null
 
 func _build_cd_bar() -> void:
-	var back := ColorRect.new()
-	back.color    = Color(0.06, 0.05, 0.04, 0.85)
-	back.size     = Vector2(CD_W + 4.0, CD_H + 4.0)
-	back.position = Vector2(_hero_x - CD_W * 0.5 - 2.0, _fight_y + CD_DY - 2.0)
-	back.z_index  = FIST_Z + 1
-	add_child(back)
+	var home := _hero_pos()
+	_cd_back = ColorRect.new()
+	_cd_back.color    = Color(0.06, 0.05, 0.04, 0.85)
+	_cd_back.size     = Vector2(CD_W + 4.0, CD_H + 4.0)
+	_cd_back.z_index  = FIST_Z + 1
+	add_child(_cd_back)
 	_cd_fill = ColorRect.new()
 	_cd_fill.color    = Color(0.40, 0.85, 0.50, 0.95)
 	_cd_fill.size     = Vector2(CD_W, CD_H)
-	_cd_fill.position = Vector2(_hero_x - CD_W * 0.5, _fight_y + CD_DY)
 	_cd_fill.z_index  = FIST_Z + 2
 	add_child(_cd_fill)
+	_move_cd_bar()
+
+# ПОЛОСКА ЕДЕТ ЗА ГОЛОВОЙ. Раньше она стояла в точке, к которой Нормальдо был
+# приклеен; теперь он ходит по кругу, и оставленная на месте полоска читалась бы
+# как чужой элемент интерфейса, лежащий на полу.
+func _move_cd_bar() -> void:
+	if not is_instance_valid(_cd_fill) or not is_instance_valid(_cd_back):
+		return
+	var home := _hero_pos()
+	_cd_back.position = Vector2(home.x - CD_W * 0.5 - 2.0, home.y + CD_DY - 2.0)
+	_cd_fill.position = Vector2(home.x - CD_W * 0.5, home.y + CD_DY)
 
 func _update_cd_bar() -> void:
 	if not is_instance_valid(_cd_fill):
@@ -423,26 +514,6 @@ func _update_cd_bar() -> void:
 	# мало, когда смотришь не на неё, а на кулаки.
 	_cd_fill.color = Color(0.40, 0.85, 0.50, 0.95) if ready >= 1.0 \
 		else Color(0.70, 0.62, 0.30, 0.85)
-
-# ── Арена выталкивает ────────────────────────────────────────────────────────
-# Не «управление отключено», а «тебя не пускают». Разница читается сразу:
-# отключённое управление ощущается поломкой, а пружина объясняет себя сама —
-# ты дёрнулся, толпа вернула на место.
-#
-# Сдвиг МАЛЕНЬКИЙ и всегда возвращается: сделай его больше — и это станет
-# движением, то есть тем самым уворотом, которого в этом бою нет.
-const PUSH_PX   : float = 9.0
-const PUSH_BACK : float = 0.22
-
-func _nudge_hero(dir: Vector2) -> void:
-	if not is_instance_valid(_normaldo) or dir.length() < 0.01:
-		return
-	var home := Vector2(_hero_x, _fight_y)
-	var to := home + dir.normalized() * PUSH_PX
-	var tw := _normaldo.create_tween()
-	tw.tween_property(_normaldo, "position", to, 0.06)
-	tw.tween_property(_normaldo, "position", home, PUSH_BACK)\
-		.set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 
 func _release_hero() -> void:
 	if not is_instance_valid(_normaldo):
@@ -478,14 +549,49 @@ func _build_bars() -> void:
 	# паузу), и углы экрана заняты: слева пауза, счётчики и стопка резистов,
 	# справа таймер. Полосы, поставленные в углы, легли ровно под них — на первом
 	# же кадре было видно, что боссовой не видно вовсе.
+	#
+	# СВОЯ ПОЛОСА СЛЕВА, ЧУЖАЯ СПРАВА — как стоят и сами бойцы: Нормальдо в левой
+	# половине круга, противник в правой. Раньше было наоборот, и в горячий
+	# момент рейки читались задом наперёд: игрок смотрел, как «у него убавилось»,
+	# а убавилось у него самого.
 	var hero_n : int = HERO_HP
-	var bw : float = float(KING_HP) * BAR_SEG_W + float(KING_HP - 1) * BAR_GAP
 	var hw : float = float(hero_n) * BAR_SEG_W + float(maxi(0, hero_n - 1)) * BAR_GAP
-	var total : float = bw + BAR_MID_GAP + hw
+	var bw : float = float(KING_HP) * BAR_SEG_W + float(KING_HP - 1) * BAR_GAP
+	var total : float = hw + BAR_MID_GAP + bw
 	var x0 : float = (vp.x - total) * 0.5
-	_boss_segs = _make_bar(Vector2(x0, BAR_Y), KING_HP, Color(0.85, 0.30, 0.26))
-	_hero_segs = _make_bar(Vector2(x0 + bw + BAR_MID_GAP, BAR_Y), hero_n,
-		Color(0.35, 0.80, 0.45))
+	_hero_segs = _make_bar(Vector2(x0, BAR_Y), hero_n, Color(0.35, 0.80, 0.45))
+	_boss_segs = _make_bar(Vector2(x0 + hw + BAR_MID_GAP, BAR_Y), KING_HP,
+		Color(0.85, 0.30, 0.26))
+	# ЧЬИ ЭТО РЕЙКИ — НАПИСАНО. Две одинаковые полоски по краям экрана ничем не
+	# отличаются, кроме цвета, а цвет в драке разбирать некогда. Слева имя скина,
+	# которым играют, справа — имя того, кто сейчас вышел; правая подпись
+	# меняется от волны к волне (`_set_foe_name`).
+	_hero_name = _bar_caption(Vector2(x0, BAR_Y - 16.0), hw,
+		String(SkinRegistry.get_skin(SaveData.active_skin).get("name_ru", "НОРМАЛЬДО")).to_upper(),
+		Color(0.62, 0.95, 0.70))
+	_foe_name  = _bar_caption(Vector2(x0 + hw + BAR_MID_GAP, BAR_Y - 16.0), bw, "",
+		Color(1.00, 0.66, 0.60))
+
+var _hero_name : Label = null
+var _foe_name  : Label = null
+
+func _bar_caption(at: Vector2, w: float, text: String, col: Color) -> Label:
+	var l := Label.new()
+	l.add_theme_font_override("font", UI_FONT)
+	l.add_theme_font_size_override("font_size", 11)
+	l.add_theme_color_override("font_color", col)
+	l.add_theme_color_override("font_outline_color", Color(0.05, 0.04, 0.03))
+	l.add_theme_constant_override("outline_size", 4)
+	l.text                 = text
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	l.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_bars_root, l, at, Vector2(w, 14.0))
+	return l
+
+func _set_foe_name(text: String) -> void:
+	if is_instance_valid(_foe_name):
+		_foe_name.text = text
 
 
 func _make_bar(at: Vector2, n: int, col: Color) -> Array:
@@ -515,17 +621,6 @@ func _drop_bars() -> void:
 
 # ── Противник в кадре ────────────────────────────────────────────────────────
 
-# Куда противник в итоге встаёт — НА РАССТОЯНИЕ УДАРА, и ни шагом ближе.
-# Вплотную подошедший противник закрыл бы собой и Нормальдо, и оба кулака; на
-# дистанции удара видно всё, ради чего этот бой и сделан.
-const FOE_STOP_X_RATIO : float = 0.70
-# Скорость подхода. Медленно: он ПРЕСЛЕДУЕТ, а не выпрыгивает — идти на игрока
-# страшнее, чем возникнуть перед ним.
-const FOE_WALK : float = 150.0
-
-var _foe_target_x : float = 0.0
-var _foe_walking  : bool  = false
-
 func _spawn_foe(tex: Texture2D, px: float, tint: Color) -> void:
 	_clear_foe()
 	_foe_sprite = Sprite2D.new()
@@ -534,29 +629,93 @@ func _spawn_foe(tex: Texture2D, px: float, tint: Color) -> void:
 	_foe_sprite.scale          = Vector2.ONE * (px / maxf(1.0, tex.get_size().y))
 	_foe_sprite.modulate       = tint
 	_foe_sprite.z_index        = 30
-	# ВЫХОДИТ ИЗ ТОЛПЫ И ИДЁТ НА ТЕБЯ. Прежняя версия подъезжала твином за
-	# полсекунды и вставала — это читалось как «его поставили», а не как «он
-	# пошёл». Теперь он шагает своим ходом (см. `_walk_foe`) и тормозит ровно на
-	# дистанции удара.
-	_foe_target_x = get_viewport_rect().size.x * FOE_STOP_X_RATIO
-	_foe_x        = get_viewport_rect().size.x + px * 0.5
-	_foe_sprite.position = Vector2(_foe_x, _fight_y)
-	_foe_walking  = true
+	# ВЫХОДИТ ИЗ ТОЛПЫ И ИДЁТ НА ТЕБЯ, своим ходом. Подъезжающий твином за
+	# полсекунды читался бы как «его поставили», а не как «он пошёл».
+	_foe_pos = Vector2(get_viewport_rect().size.x + px * 0.5, _fight_y)
+	_foe_sprite.position = _foe_pos
+	_foe_state   = "approach"
+	_foe_state_t = 0.0
 	add_child(_foe_sprite)
 
-# Шаг подхода. `_foe_x` — ЖИВАЯ координата противника, и попадания считаются по
-# ней: кулак, брошенный пока тот ещё идёт, обязан не долететь.
+# ── Преследование ────────────────────────────────────────────────────────────
+# Тот же рисунок, что у хозяина клуба: подходит, пока далеко; на дистанции удара
+# замирает на заряд; рывком проходит сквозь запомненную точку; отдыхает и снова
+# подходит. Заряд — единственный телеграф, и он обязан быть виден: точка
+# запоминается В НАЧАЛЕ заряда, иначе стоять до последнего выгоднее, чем уходить.
+#
+# Серый и рыжий этот цикл проходят наполовину: у них `_foe_attacks` снят, и
+# дальше «подошёл и держит дистанцию» дело не идёт.
 func _walk_foe(delta: float) -> void:
-	if not _foe_walking or not is_instance_valid(_foe_sprite):
+	if not is_instance_valid(_foe_sprite):
 		return
-	_foe_x = maxf(_foe_target_x, _foe_x - FOE_WALK * delta)
-	# Вразвалку: шаг читается по покачиванию, а ровно едущая голова выглядит
-	# как спрайт на рельсах.
-	_foe_sprite.position = Vector2(_foe_x,
-		_fight_y + sin(_foe_x * 0.06) * 5.0)
-	if is_equal_approx(_foe_x, _foe_target_x):
-		_foe_walking = false
-		_foe_sprite.position = Vector2(_foe_x, _fight_y)
+	var target : Vector2 = _hero_pos()
+	var to     : Vector2 = target - _foe_pos
+	_foe_state_t += delta
+	match _foe_state:
+		"approach":
+			if to.length() > FOE_KEEP:
+				_foe_pos += to.normalized() * FOE_WALK * delta
+			elif _foe_attacks and _foe_state_t >= 0.25:
+				_enter_charge()
+			# Вразвалку: шаг читается по покачиванию, а ровно едущая голова
+			# выглядит как спрайт на рельсах.
+			_foe_sprite.position = _foe_pos + Vector2(0.0, sin(_foe_pos.x * 0.06) * 5.0)
+		"charge":
+			if _foe_state_t >= CHARGE_T:
+				_enter_dash()
+			_foe_sprite.position = _foe_pos
+		"dash":
+			var d2 : Vector2 = _dash_to - _foe_pos
+			_foe_pos += d2.normalized() * DASH_SPEED * delta
+			# Долетел ИЛИ проскочил: на такой скорости кадр перепрыгивает цель, и
+			# по одному расстоянию рывок не кончался бы никогда.
+			if d2.length() <= DASH_SPEED * delta or _foe_state_t >= DASH_MAX_T:
+				_enter_recover()
+			_foe_sprite.position = _foe_pos
+		"recover":
+			# Отдышка КОРОЛЯ короче с каждой потерянной рейкой — в ней и живёт его
+			# злость (см. `king_gap`). У рядовых она постоянная: им злеть не с
+			# чего, они и не бьют.
+			var wait : float = king_gap() if current_wave == "king" else RECOVER_T
+			if _foe_state_t >= wait:
+				_foe_state   = "approach"
+				_foe_state_t = 0.0
+			_foe_sprite.position = _foe_pos
+		_:
+			_foe_sprite.position = _foe_pos
+	# Противник тоже держится круга: выскочивший в толпу боец читается как ушедший
+	# из боя, а на деле он просто перелетел рывком.
+	_foe_pos = _clamp_to_arena(_foe_pos, ARENA_MARGIN * 0.5)
+	if is_instance_valid(_foe_sprite):
+		_foe_sprite.flip_h = to.x > 0.0
+
+func _enter_charge() -> void:
+	_foe_state   = "charge"
+	_foe_state_t = 0.0
+	_dash_to     = _hero_pos()
+	# Нахмуренный кадр — телеграф заряда: у босса нет ни ленты, ни прицела, и
+	# предупреждает он лицом.
+	if current_wave == "king" and is_instance_valid(_foe_sprite):
+		_foe_sprite.texture = F_FROWN
+	SCREEN_SHAKE.play(_game_root, 6.0, 4)
+
+func _enter_dash() -> void:
+	_foe_state   = "dash"
+	_foe_state_t = 0.0
+	# Рывок И ЕСТЬ удар: замах выпускается в начале броска, и достанет он ровно
+	# если рывок довёл его на длину руки.
+	foe_punch()
+
+func _enter_recover() -> void:
+	_foe_state   = "recover"
+	_foe_state_t = 0.0
+	if current_wave == "king" and is_instance_valid(_foe_sprite):
+		_foe_sprite.texture = F_IDLE
+
+func _hero_pos() -> Vector2:
+	if is_instance_valid(_normaldo):
+		return _normaldo.position
+	return Vector2(_hero_x, _fight_y)
 
 func _clear_foe() -> void:
 	if is_instance_valid(_foe_sprite):
@@ -576,40 +735,61 @@ func _drop_foe() -> void:
 	tw.parallel().tween_property(s, "rotation", 1.4, 0.45)
 	tw.tween_callback(s.queue_free)
 
-# ── Кулаки ───────────────────────────────────────────────────────────────────
-
-func _make_fist(tex: Texture2D, from_x: float, dir: int) -> Dictionary:
+# ── Кулаки: ЗАМАХ, а не снаряд ───────────────────────────────────────────────
+# Кулак вырастает у головы, проходит короткую дугу вперёд и гаснет — ровно как
+# у викинга. Попадание считается ОДИН РАЗ, в середине дуги, и только по
+# дистанции: достал — попал, не достал — промахнулся.
+#
+# Летящий снаряд, стоявший тут раньше, был неправ вдвойне. Во-первых, он рисовал
+# в игре второй язык удара: у викинга замах, у босса — перестрелка кулаками.
+# Во-вторых, он превращал дистанцию в ничто — важно было только, кто раньше
+# нажал, а подходить или отходить не имело смысла вовсе.
+func _spawn_swing_fist(from: Vector2, dir: Vector2, tex: Texture2D,
+		mirror: bool) -> void:
 	var s := Sprite2D.new()
 	s.texture        = tex
 	s.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	s.scale          = Vector2.ONE * (FIST_PX / maxf(1.0, tex.get_size().x))
-	s.flip_h         = dir < 0
-	s.position       = Vector2(from_x, _fight_y)
+	s.flip_h         = mirror
 	s.z_index        = FIST_Z
+	s.position       = from + dir * (HEAD_R + 10.0)
 	add_child(s)
-	return { "node": s, "x": from_x, "dir": dir, "retract": false }
+	# Кулак ВЫРАСТАЕТ за первую треть замаха, а не появляется целиком: именно
+	# рост и читается как превращение руки, а не как подставленная картинка.
+	var full := s.scale
+	s.scale = full * 0.45
+	var tw := s.create_tween()
+	tw.tween_property(s, "scale", full, SWING_TIME * 0.35)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# И проходит дугу: от замаха сверху к доводке снизу, с вылетом вперёд.
+	var steps := 4
+	var arc := s.create_tween()
+	for i in range(1, steps + 1):
+		var t : float = float(i) / float(steps)
+		var ang : float = lerpf(-SWING_ARC * 0.5, SWING_ARC * 0.5, t)
+		var rad : float = lerpf(HEAD_R + 10.0, SWING_REACH, sin(t * PI * 0.75))
+		arc.tween_property(s, "position", from + dir.rotated(ang) * rad,
+			SWING_TIME / float(steps))
+	arc.tween_property(s, "modulate:a", 0.0, SWING_TIME * 0.3)
+	arc.tween_callback(s.queue_free)
 
 # Тап = удар. ЭТОТ ЖЕ ЖЕСТ в обычном забеге кастует спелл, и потому спелл здесь
 # заблокирован: два действия на один жест — это не глубина, а промах.
 func punch() -> void:
-	if not _running or _p_cd > 0.0 or not _p_fist.is_empty():
+	if not _running or _p_cd > 0.0 or not _p_swing.is_empty():
 		return
 	_p_cd    = PUNCH_CD
 	punches += 1
-	_p_fist  = _make_fist(F_PLAYER_FIST, _hero_x + HEAD_R, 1)
+	var from := _hero_pos()
+	var dir  : Vector2 = (_foe_pos - from)
+	dir = dir.normalized() if dir.length() > 1.0 else Vector2.RIGHT
+	_p_swing = { "t": 0.0, "resolved": false, "dir": dir }
+	_spawn_swing_fist(from, dir, F_PLAYER_FIST, dir.x < 0.0)
 
+# Тап бьёт, свайп ведёт голову. Свайп сюда даже не заходит: движением занимается
+# сам Нормальдо своим обычным управлением, а босс только держит его в круге.
 func _input(event: InputEvent) -> void:
 	if not _running:
-		return
-	# Свайп НЕ двигает, а упирается: Нормальдо дёргается на несколько пикселей и
-	# возвращается пружиной. Молча проглоченный свайп читался бы как «игра не
-	# поняла», и игрок пробовал бы снова вместо того, чтобы драться.
-	if event is InputEventScreenDrag:
-		_nudge_hero((event as InputEventScreenDrag).relative)
-		return
-	if event is InputEventMouseMotion \
-			and (event as InputEventMouseMotion).button_mask != 0:
-		_nudge_hero((event as InputEventMouseMotion).relative)
 		return
 	var pressed := (event is InputEventScreenTouch and (event as InputEventScreenTouch).pressed) \
 		or (event is InputEventMouseButton and (event as InputEventMouseButton).pressed \
@@ -619,13 +799,13 @@ func _input(event: InputEvent) -> void:
 
 # Удар противника. Публичный: им пользуются волны и тест.
 func foe_punch() -> void:
-	if not _running or not _e_fist.is_empty() or not is_instance_valid(_foe_sprite):
+	if not _running or not _e_swing.is_empty() or not is_instance_valid(_foe_sprite):
 		return
-	# Нахмуренный кадр — РОВНО на его удар. Это его телеграф: у босса нет ни
-	# ленты, ни прицела, и предупреждает он лицом.
-	if current_wave == "king":
-		_foe_sprite.texture = F_FROWN
-	_e_fist = _make_fist(F_FIST, _foe_x - HEAD_R, -1)
+	var from := _foe_pos
+	var dir  : Vector2 = (_hero_pos() - from)
+	dir = dir.normalized() if dir.length() > 1.0 else Vector2.LEFT
+	_e_swing = { "t": 0.0, "resolved": false, "dir": dir }
+	_spawn_swing_fist(from, dir, F_FIST, dir.x < 0.0)
 
 func _process(delta: float) -> void:
 	if _p_cd > 0.0:
@@ -636,95 +816,88 @@ func _process(delta: float) -> void:
 		_shout_t = 0.0
 		for i in SHOUT_AT_ONCE:
 			_shout()
+	# КРУГ ДЕРЖИТ ВЕСЬ БОЙ, а не только пока идут волны. Управление игроку
+	# возвращают сразу, до реплики босса, — и пока `_running` был ещё снят, в
+	# толпу можно было уйти прямо под его слова.
+	_keep_hero_in_arena()
+	_move_cd_bar()
 	if not _running:
 		return
 	_walk_foe(delta)
-	_advance(_p_fist, delta)
-	_advance(_e_fist, delta)
-	_resolve()
+	_resolve(delta)
 
-func _advance(f: Dictionary, delta: float) -> void:
-	if f.is_empty():
-		return
-	f["x"] = float(f["x"]) + FIST_SPEED * delta * (float(f["dir"]) * (-1.0 if f["retract"] else 1.0))
-	var s : Sprite2D = f["node"]
-	if is_instance_valid(s):
-		s.position.x = float(f["x"])
+# Дистанция между головами — по ней и решается всё. Не «кулак доехал», а
+# «дотянулся»: у замаха длина руки постоянная, и подойти на неё — это ход.
+func _fight_dist() -> float:
+	return _hero_pos().distance_to(_foe_pos)
+
+func _in_reach() -> bool:
+	return _fight_dist() <= SWING_REACH + HEAD_R
 
 # Один кадр разбора. ПОРЯДОК ЗДЕСЬ И ЕСТЬ ПРАВИЛО: сперва ничья, потом
-# попадания. Проверь попадания первыми — и размен, в котором оба доехали в один
+# попадания. Проверь попадания первыми — и размен, в котором оба достали в один
 # кадр, разрешился бы в пользу того, чья строка стоит выше, то есть блока не
 # было бы никогда.
-func _resolve() -> void:
-	if not _p_fist.is_empty() and not _e_fist.is_empty() \
-			and not bool(_p_fist["retract"]) and not bool(_e_fist["retract"]) \
-			and float(_p_fist["x"]) + FIST_PX * 0.5 >= float(_e_fist["x"]) - FIST_PX * 0.5:
+func _resolve(delta: float) -> void:
+	if not _p_swing.is_empty():
+		_p_swing["t"] = float(_p_swing["t"]) + delta
+	if not _e_swing.is_empty():
+		_e_swing["t"] = float(_e_swing["t"]) + delta
+
+	# БЛОК: оба замаха идут одновременно и оба дотягиваются. Кулаки встречаются —
+	# ни один не проходит.
+	if _swing_live(_p_swing) and _swing_live(_e_swing) and _in_reach() \
+			and (_swing_ripe(_p_swing) or _swing_ripe(_e_swing)):
 		_block()
 		return
-	if not _p_fist.is_empty() and not bool(_p_fist["retract"]) \
-			and float(_p_fist["x"]) >= _foe_x - HEAD_R:
-		_land_on_foe()
-	# Кулак, брошенный в подходящего издалека, не висит в воздухе вечно: дойдя до
-	# места, где противник ВСТАНЕТ, он отдёргивается. Иначе он ждал бы там, пока
-	# тот сам не наткнётся, и промах превращался бы в бесплатное попадание.
-	if not _p_fist.is_empty() and not bool(_p_fist["retract"]) \
-			and float(_p_fist["x"]) >= _foe_target_x - HEAD_R:
-		_p_fist["retract"] = true
-	if not _e_fist.is_empty() and not bool(_e_fist["retract"]) \
-			and float(_e_fist["x"]) <= _hero_x + HEAD_R:
-		_land_on_hero()
-	_retire(_p_fist)
-	_retire(_e_fist)
 
-# Улетевший обратно к хозяину кулак убирается. Возвращаются они всегда — кулак,
-# исчезнувший в момент удара, читался бы как «пропал», а не как «отдёрнул руку».
-func _retire(f: Dictionary) -> void:
-	if f.is_empty() or not bool(f["retract"]):
-		return
-	var home : float = (_hero_x if int(f["dir"]) > 0 else _foe_x)
-	if absf(float(f["x"]) - home) <= HEAD_R + 2.0:
-		var s : Sprite2D = f["node"]
-		if is_instance_valid(s):
-			s.queue_free()
-		f.clear()
+	if _swing_ripe(_p_swing):
+		_p_swing["resolved"] = true
+		if _in_reach():
+			_land_on_foe()
+	if _swing_ripe(_e_swing):
+		_e_swing["resolved"] = true
+		if _in_reach():
+			_land_on_hero()
+
+	# Замах кончился — руку убрали. Дальше кулак живёт своим твином и гаснет сам.
+	if not _p_swing.is_empty() and float(_p_swing["t"]) >= SWING_TIME:
+		_p_swing = {}
+	if not _e_swing.is_empty() and float(_e_swing["t"]) >= SWING_TIME:
+		_e_swing = {}
+
+func _swing_live(s: Dictionary) -> bool:
+	return not s.is_empty() and not bool(s["resolved"])
+
+func _swing_ripe(s: Dictionary) -> bool:
+	return _swing_live(s) and float(s["t"]) >= SWING_HIT_AT
 
 func _block() -> void:
 	blocks += 1
-	# Кулаки ПАДАЮТ, как сбитый предмет. Отдёрнутые назад читались бы как «оба
-	# передумали», а падение говорит «столкнулись» на языке, который в этой игре
-	# уже есть.
-	for f in [_p_fist, _e_fist]:
-		var s : Sprite2D = f["node"]
-		if is_instance_valid(s):
-			var tw := s.create_tween()
-			tw.tween_property(s, "position:y", s.position.y + 220.0, 0.42)\
-				.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-			tw.parallel().tween_property(s, "rotation", randf_range(-1.6, 1.6), 0.42)
-			tw.tween_callback(s.queue_free)
-	_p_fist = {}
-	_e_fist = {}
-	_p_cd   = PUNCH_CD
+	_p_swing["resolved"] = true
+	_e_swing["resolved"] = true
+	_p_cd = PUNCH_CD
 	_caption("БЛОК!", Color(1.00, 0.92, 0.55))
 	SCREEN_SHAKE.play(_game_root, 7.0, 5)
 
 func _land_on_foe() -> void:
 	hits_dealt += 1
-	_p_fist["retract"] = true
 	if current_wave == "king":
 		king_hp = maxi(0, king_hp - 1)
 		_burn(_boss_segs, king_hp)
 	else:
 		foe_hp = maxi(0, foe_hp - 1)
 		_burn(_boss_segs, KING_HP if foe_hp > 0 else KING_HP - 1)
-	if is_instance_valid(_foe_sprite):
-		var tw := _foe_sprite.create_tween()
-		tw.tween_property(_foe_sprite, "position:x", _foe_x + 26.0, 0.07)
-		tw.tween_property(_foe_sprite, "position:x", _foe_x, 0.14)
+	# Отлетает назад от удара — и рывок при этом сбивается: попал в разгоне,
+	# значит разгон и сорвал.
+	_foe_pos += (_foe_pos - _hero_pos()).normalized() * 26.0
+	_foe_pos = _clamp_to_arena(_foe_pos, ARENA_MARGIN * 0.5)
+	if _foe_state == "dash" or _foe_state == "charge":
+		_enter_recover()
 	SCREEN_SHAKE.play(_game_root, 11.0, 7)
 
 func _land_on_hero() -> void:
 	hits_taken += 1
-	_e_fist["retract"] = true
 	SCREEN_SHAKE.play(_game_root, 12.0, 8)
 	hero_hp = maxi(0, hero_hp - 1)
 	_burn(_hero_segs, hero_hp)
@@ -772,27 +945,33 @@ func _caption(text: String, col: Color) -> void:
 	tw.tween_callback(lay.queue_free)
 
 # ── Волна 1: СЕРЫЙ бомж ──────────────────────────────────────────────────────
-# Учит одному: тап = удар. Выходит из толпы и ИДЁТ на тебя, тормозя на дистанции
-# удара. НЕ БЬЁТ ВООБЩЕ — не «редко»: первая же плюха на обучении означала бы,
-# что игрок выучил не «тап бьёт», а «тапать опасно». 1 ХП.
+# Учит одному: тап = удар. Выходит из толпы и ПРЕСЛЕДУЕТ — идёт за Нормальдо по
+# всему кругу и держится на дистанции удара, но НЕ БЬЁТ ВООБЩЕ. Не «редко»:
+# первая же плюха на обучении означала бы, что игрок выучил не «тап бьёт», а
+# «тапать опасно». Одна рейка.
 func _wave_grey() -> void:
 	current_wave = "grey"
-	foe_hp = 1
+	foe_hp = FOE_HP
+	_foe_attacks = false
+	_burn(_boss_segs, KING_HP)
 	# homeless2 — СЕРЫЙ (homeless1 рыжий). Первым выходит именно серый, и путать
 	# их местами нельзя: цвет — единственное, чем волны различаются на вид.
 	_spawn_foe(CROWD_TEX[1], FOE_PX, Color.WHITE)
+	_set_foe_name("СЕРЫЙ БОМЖ")
 	_caption("БЕЙ!", Color(0.75, 1.00, 0.80))
 	await _await_foe_down()
 
 # ── Волна 2: РЫЖИЙ бомж ──────────────────────────────────────────────────────
-# Учит блоку. Сам не начинает никогда — ждёт твоего удара и отвечает ТУТ ЖЕ, так
-# что кулаки встречаются: это блок. Второй твой удар он уже не парирует и падает.
+# Учит блоку. Сам не начинает никогда — преследует, держит дистанцию и ждёт
+# твоего удара, отвечая ТУТ ЖЕ, так что замахи встречаются: это блок. Второй
+# удар он уже не парирует и падает. Одна рейка: блок её не тратит, он её
+# откладывает.
 #
-# Отвечает он на ЗАМАХ, а не на попадание: ответ на попадание опаздывает ровно
-# на полёт кулака, к его приходу твой уже отдёрнут, и блок в таком размене
+# Отвечает он на ЗАМАХ, а не на попадание: ответ на попадание опаздывает на всю
+# длину дуги, к его приходу твой кулак уже убран, и блок в таком размене
 # невозможен физически.
 #
-# ОТВЕЧАЕТ ОН РОВНО ОДИН РАЗ. Раньше второй ответ доезжал и бил игрока — то есть
+# ОТВЕЧАЕТ ОН РОВНО ОДИН РАЗ. Раньше второй ответ доходил и бил игрока — то есть
 # рядовой из обучающей волны отнимал жизнь до того, как игрок увидел настоящий
 # бой. Бьёт в этом бою только король.
 const GINGER_ANSWER_DELAY : float = 0.02
@@ -801,23 +980,20 @@ var _ginger_answers : int = 0
 
 func _wave_ginger() -> void:
 	current_wave = "ginger"
-	foe_hp = 2          # первый размен уходит в блок, второй удар добивает
+	foe_hp = FOE_HP
 	_ginger_answers = 0
+	_foe_attacks = false   # сам не нападает: только отвечает на твой замах
+	_burn(_boss_segs, KING_HP)
 	_spawn_foe(CROWD_TEX[0], FOE_PX, Color.WHITE)
+	_set_foe_name("РЫЖИЙ БОМЖ")
 	_caption("БЛОКИРУЙ!", Color(1.00, 0.92, 0.55))
 	await _await_foe_down()
 
-# Время полёта кулака от головы до головы. СЧИТАЕТСЯ, а не выписано числом:
-# именно от него зависит, чем кончится размен, и разъехавшись с реальностью оно
-# молча отменяет либо блок, либо попадание.
-func fist_flight_time() -> float:
-	return maxf(0.05, (_foe_x - _hero_x - HEAD_R * 2.0) / FIST_SPEED)
-
 # ── Волна 3: сам босс ────────────────────────────────────────────────────────
-# Пять ХП, и с каждым потерянным он ЗЛЕЕ: пауза между ударами короче. Пять
+# Пять ХП, и с каждым потерянным он ЗЛЕЕ: отдышка между бросками короче. Пять
 # ступеней сложности вместо пяти одинаковых попаданий.
-const KING_GAP_START : float = 2.30
-const KING_GAP_END   : float = 0.95
+const KING_GAP_START : float = 1.60
+const KING_GAP_END   : float = 0.65
 
 func king_gap() -> float:
 	var lost : float = float(KING_HP - king_hp) / float(maxi(1, KING_HP - 1))
@@ -831,36 +1007,22 @@ const KING_CALL : Array = ["СТАРЫЙ ПИРАТ!", "ПОРВИ ЕГО!!", "�
 func _wave_king() -> void:
 	current_wave = "king"
 	king_hp = KING_HP
+	_foe_attacks = true     # ЕДИНСТВЕННЫЙ, кто нападает сам
 	_burn(_boss_segs, king_hp)
 	_spawn_foe(F_IDLE, BOSS_PX, Color.WHITE)
+	_set_foe_name("СТАРЫЙ ПИРАТ")
 	_caption("СТАРЫЙ ПИРАТ", Color(1.00, 0.85, 0.40))
 	for i in SHOUT_AT_ONCE * 2:
 		_shout(KING_CALL)
 	_crowd_cheer()
 	HAPTICS.buzz(HAPTICS.BOSS)
-	var t := 0.0
+	# Драка идёт сама: преследование, заряд и рывок крутятся в `_walk_foe`, а
+	# злость выражается тем, что отдышка короче — см. `king_gap`. Здесь остаётся
+	# только дождаться, пока рейки кончатся.
 	while king_hp > 0:
 		if not await _step():
 			return
-		t += get_process_delta_time()
-		# Движется рвано: короткие рывки по вертикали вокруг своей линии. Ровное
-		# скольжение читалось бы как «стоит», а он должен выглядеть неудобной
-		# целью. Пока идёт — не дёргается: шаг и дёрганье разом читаются как сбой.
-		if is_instance_valid(_foe_sprite) and not _foe_walking:
-			_foe_sprite.position.y = _fight_y + sin(t * 3.1) * 26.0 \
-				+ sin(t * 7.7) * 8.0 * (1.0 + float(KING_HP - king_hp) * 0.25)
-		if t >= king_gap() and not _foe_walking:
-			t = 0.0
-			foe_punch()
-			# Кадр возвращается к «скалится» сразу после замаха: нахмуренность
-			# это телеграф удара, а не постоянное выражение лица.
-			if is_instance_valid(_foe_sprite):
-				var sp := _foe_sprite
-				get_tree().create_timer(0.35).timeout.connect(func():
-					if is_instance_valid(sp):
-						sp.texture = F_IDLE, CONNECT_ONE_SHOT)
-	if king_hp <= 0:
-		_crowd_cheer()
+	_crowd_cheer()
 	_drop_foe()
 
 # Ждать, пока текущий рядовой не кончится. Рыжий отвечает отсюда же: ответ —
@@ -904,7 +1066,7 @@ func _victory() -> void:
 	king.texture        = F_IDLE
 	king.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	king.scale          = Vector2.ONE * (BOSS_PX * 0.8 / maxf(1.0, F_IDLE.get_size().y))
-	king.position       = Vector2(_foe_x, _fight_y)
+	king.position       = _foe_pos
 	king.z_index        = 32
 	add_child(king)
 
@@ -914,7 +1076,7 @@ func _victory() -> void:
 		b.texture        = CROWD_TEX[i % CROWD_TEX.size()]
 		b.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		b.scale          = Vector2.ONE * (CROWD_PX * 1.1 / maxf(1.0, b.texture.get_size().y))
-		b.position       = Vector2(_foe_x - 54.0 + float(i) * 36.0, _fight_y + 62.0)
+		b.position       = _foe_pos + Vector2(-54.0 + float(i) * 36.0, 62.0)
 		b.z_index        = 31
 		add_child(b)
 		bearers.append(b)

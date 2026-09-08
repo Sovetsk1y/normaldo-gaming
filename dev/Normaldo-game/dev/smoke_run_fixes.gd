@@ -21,7 +21,7 @@ const BOSS_SPEECH := preload("res://scripts/boss_speech.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 17
+const EXPECTED_CHECKS : int = 18
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -135,8 +135,17 @@ func _initialize() -> void:
 	t.index    = 0
 	t.position = vp * 0.5
 	n.call("_input", t)
+	# ПОКА ПАЛЕЦ НА ЭКРАНЕ, взгляд слушается движения: игрок ведёт голову и
+	# видит, куда она летит. Разворачивать её тут значило бы спорить с рукой.
+	_check(bool(n.get("_facing_left")),
+		"пока палец на экране — взгляд слушается движения")
+	var up := InputEventScreenTouch.new()
+	up.pressed  = false
+	up.index    = 0
+	up.position = vp * 0.5
+	n.call("_input", up)
 	_check(not bool(n.get("_facing_left")),
-		"новое касание разворачивает её вперёд, к потоку")
+		"убрали палец — голова возвращается вперёд, к потоку")
 
 	# ── И ТО ЖЕ САМОЕ ВЖИВУЮ, на настоящем бою ──────────────────────────────
 	# Сверка по исходникам выше ловит копипасту, но не ловит пропуск: у Ноги
