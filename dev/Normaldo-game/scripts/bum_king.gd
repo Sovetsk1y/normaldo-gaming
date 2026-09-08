@@ -66,12 +66,15 @@ const CROWD_TEX : Array = [
 #
 # Серые и рыжие ВПЕРЕМЕШКУ и поровну: толпа из одного цвета читается как копии
 # одного человека.
+# Кольца стоят ПЛОТНО ПО КРАЮ, а не занимают весь экран вглубь. Раньше внутреннее
+# кольцо стояло на 0.70 радиуса, то есть толпа съедала треть экрана с каждой
+# стороны и арена выходила тесной: подойти и отойти было негде, вся драка шла в
+# пятне размером с двух бойцов.
 const CROWD_RINGS  : Array = [
 	# [доля радиуса, сколько в кольце, множитель роста]
-	[1.00, 34, 1.15],   # внешнее — крупные, ближе к зрителю
-	[0.90, 30, 1.02],
-	[0.80, 26, 0.92],
-	[0.70, 22, 0.84],   # дальние — мельче, уходят в глубину
+	[1.00, 38, 1.12],   # внешнее — крупные, ближе к зрителю
+	[0.93, 34, 1.00],
+	[0.86, 30, 0.90],   # дальние — мельче, уходят в глубину
 ]
 # РОСТ КАК В ПОТОКЕ. Бомж в забеге — это 328 px картинки в масштабе 0.2, то есть
 # около 66 на экране; в толпе стояло 54, и рядовые выглядели мельче тех же самых
@@ -85,6 +88,15 @@ const CROWD_Z      : int   = 8       # за бойцами, но перед фо
 # с ним — толпой.
 const CROWD_JITTER : float = 16.0
 
+# ── Толпа НАБЕГАЕТ ───────────────────────────────────────────────────────────
+# Откуда стартует каждый (за своим краем экрана), сколько бежит и насколько
+# растянут заезд. Разброс задержек обязателен: одновременный приезд сотни
+# спрайтов читается как выдвижение декорации целиком, а не как сбежавшаяся
+# толпа.
+const CROWD_RUN_FROM   : float = 420.0
+const CROWD_RUN_TIME   : float = 0.85
+const CROWD_RUN_SPREAD : float = 0.55
+
 # ── АРЕНА — КРУГ ВНУТРИ ТОЛПЫ ────────────────────────────────────────────────
 # Внутри толпы пусто, и в этом круге Нормальдо ДВИГАЕТСЯ КАК ОБЫЧНО. Раньше он
 # был приклеен к точке: свайп отдавал пружиной, а весь бой сводился к тому,
@@ -94,8 +106,8 @@ const CROWD_JITTER : float = 16.0
 # Теперь управление своё, обычное, и ограничение ровно одно: за круг не выйти.
 # Толпа стоит по эллипсу экрана, поэтому и круг эллиптический — вписанный в неё
 # с запасом, чтобы голова не залезала людям в лица.
-const ARENA_RX_K : float = 0.30   # доли ширины экрана
-const ARENA_RY_K : float = 0.26   # доли высоты
+const ARENA_RX_K : float = 0.38   # доли ширины экрана
+const ARENA_RY_K : float = 0.34   # доли высоты
 # Запас от края круга до центра головы: без него голова наполовину въезжает в
 # толпу и читается как «застрял в людях».
 const ARENA_MARGIN : float = 26.0
@@ -150,15 +162,20 @@ const HEAD_R      : float = 34.0
 # одной горизонтали и вставал столбом: пока Нормальдо был приклеен, этого
 # хватало, а свободному игроку такой враг не соперник — от него достаточно
 # отойти вбок.
-const FOE_WALK     : float = 150.0   # скорость подхода
+# ХОДЯТ МЕДЛЕННО. Быстрый подход не оставлял выбора: пока думаешь, подходить или
+# ждать, он уже подошёл сам, и вся игра с дистанцией схлопывалась.
+const FOE_WALK     : float = 84.0    # скорость подхода
 const FOE_KEEP     : float = 118.0   # на какой дистанции держится
-const CHARGE_T     : float = 0.55    # заряд перед рывком: столько есть на уход
-const DASH_SPEED   : float = 760.0
-const DASH_MAX_T   : float = 0.45
-const RECOVER_T    : float = 0.70
+const CHARGE_T     : float = 0.70    # заряд перед рывком: столько есть на уход
+const DASH_SPEED   : float = 520.0
+const DASH_MAX_T   : float = 0.60
+const RECOVER_T    : float = 0.90
 
-const BOSS_PX     : float = 210.0
-const FOE_PX      : float = 120.0   # рядовой из волн 1–2
+# РАЗМЕР БОЙЦОВ. Они мельче толпы вокруг не по недосмотру: круг просторный, и
+# двое крупных в нём занимали половину свободного места — отойти было некуда, а
+# «подойти на длину руки» превращалось в «стоять вплотную всегда».
+const BOSS_PX     : float = 150.0
+const FOE_PX      : float = 92.0    # рядовой из волн 1–2
 
 # ── Полосы ХП ────────────────────────────────────────────────────────────────
 const BAR_SEG_W   : float = 22.0
@@ -342,15 +359,40 @@ func _build_crowd() -> void:
 			add_child(s2)
 			_crowd.append(s2)
 			n += 1
-			# Каждый качается по-своему. Общая анимация на всю толпу выглядела бы
-			# как дрожащая картинка, а не как восемь десятков человек.
-			var tw := s2.create_tween().set_loops()
-			var dy : float = randf_range(3.0, 8.0)
-			var t  : float = randf_range(0.5, 1.1)
-			tw.tween_property(s2, "position:y", s2.position.y + dy, t)\
-				.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-			tw.tween_property(s2, "position:y", s2.position.y, t)\
-				.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+			# ── СБЕГАЮТСЯ СО ВСЕХ СТОРОН ────────────────────────────────────
+			# Толпа не стоит готовой к началу боя: она НАБЕГАЕТ и замыкает
+			# Нормальдо в кольцо. Готовый овал читался как декорация, которую
+			# нарисовали заранее; набегающая толпа — как событие, которое с
+			# тобой происходит.
+			#
+			# Каждый стартует ЗА СВОИМ краем экрана — по направлению от центра к
+			# своему месту, — и приезжает со своей задержкой: одновременный
+			# заезд всех ста выглядит как выдвижение декорации целиком.
+			var home : Vector2 = s2.position
+			var away : Vector2 = (home - Vector2(cx, cy)).normalized()
+			if away.length() < 0.01:
+				away = Vector2.RIGHT
+			s2.position = home + away * CROWD_RUN_FROM
+			var run := s2.create_tween()
+			run.tween_interval(randf_range(0.0, CROWD_RUN_SPREAD))
+			run.tween_property(s2, "position", home, CROWD_RUN_TIME)\
+				.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			# Покачивание заводится ПОСЛЕ прибытия: пущенное сразу, оно тянет
+			# узел за собой во время забега и тот приезжает не на своё место.
+			run.tween_callback(func() -> void:
+				if is_instance_valid(s2):
+					_sway(s2))
+
+# Каждый качается по-своему. Общая анимация на всю толпу выглядела бы как
+# дрожащая картинка, а не как сотня человек.
+func _sway(s2: Sprite2D) -> void:
+	var tw := s2.create_tween().set_loops()
+	var dy : float = randf_range(3.0, 8.0)
+	var t  : float = randf_range(0.5, 1.1)
+	tw.tween_property(s2, "position:y", s2.position.y + dy, t)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	tw.tween_property(s2, "position:y", s2.position.y, t)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 
 # ── Круг арены ───────────────────────────────────────────────────────────────
 # Центр — центр экрана, радиусы — доли экрана. Считается каждый раз, а не
@@ -788,14 +830,43 @@ func punch() -> void:
 
 # Тап бьёт, свайп ведёт голову. Свайп сюда даже не заходит: движением занимается
 # сам Нормальдо своим обычным управлением, а босс только держит его в круге.
+# ── УДАР — ДАБЛ-ТАП, а не одиночный тап ─────────────────────────────────────
+# Одиночным тапом бить нельзя, потому что тем же пальцем игрок ВЕДЁТ ГОЛОВУ:
+# каждое касание для движения засчитывалось ударом, кулак уходил в пустоту, и к
+# моменту, когда он нужен, тот был на перезарядке. Драка получалась не про
+# выбор, а про то, чтобы случайно не задеть экран.
+#
+# Дабл-тап — тот же жест, которым в забеге кастуют спелл, и пороги у него те же
+# (`normaldo._DTAP_TIME` / `_DTAP_DIST`): два быстрых касания рядом. Спелл здесь
+# заблокирован, так что жест свободен и учить ему заново не приходится.
+const DTAP_TIME : float = 0.20   # как у спелла: это БЫСТРЫЙ дабл-тап
+const DTAP_DIST : float = 55.0   # и касания рядом, а не через пол-экрана
+
+var _last_tap_t   : float   = -10.0
+var _last_tap_pos : Vector2 = Vector2.ZERO
+
 func _input(event: InputEvent) -> void:
 	if not _running:
 		return
 	var pressed := (event is InputEventScreenTouch and (event as InputEventScreenTouch).pressed) \
 		or (event is InputEventMouseButton and (event as InputEventMouseButton).pressed \
 			and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT)
-	if pressed:
+	if not pressed:
+		return
+	var at : Vector2 = Vector2.ZERO
+	if event is InputEventScreenTouch:
+		at = (event as InputEventScreenTouch).position
+	elif event is InputEventMouseButton:
+		at = (event as InputEventMouseButton).position
+	var now : float = float(Time.get_ticks_msec()) / 1000.0
+	if now - _last_tap_t <= DTAP_TIME and at.distance_to(_last_tap_pos) <= DTAP_DIST:
+		# Отметка сбрасывается, иначе третье касание подряд сойдёт за второй
+		# дабл-тап и удар уйдёт дважды на три касания.
+		_last_tap_t = -10.0
 		punch()
+		return
+	_last_tap_t   = now
+	_last_tap_pos = at
 
 # Удар противника. Публичный: им пользуются волны и тест.
 func foe_punch() -> void:
@@ -1062,47 +1133,144 @@ func _victory() -> void:
 	SCREEN_SHAKE.play(_game_root, 16.0, 10)
 
 	var vp := get_viewport_rect().size
-	var king := Sprite2D.new()
-	king.texture        = F_IDLE
-	king.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	king.scale          = Vector2.ONE * (BOSS_PX * 0.8 / maxf(1.0, F_IDLE.get_size().y))
-	king.position       = _foe_pos
-	king.z_index        = 32
-	add_child(king)
+	# Побеждённый босс — ТОТ ЖЕ узел, что дрался, а не новая копия на его месте.
+	# Подменять спрайт в момент падения значит на один кадр показать, как он
+	# дёрнулся: копия встаёт в свою позицию, а не туда, где он стоял.
+	var king : Sprite2D = _foe_sprite
+	_foe_sprite = null
+	if not is_instance_valid(king):
+		king = Sprite2D.new()
+		king.texture        = F_IDLE
+		king.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		king.scale          = Vector2.ONE * (BOSS_PX / maxf(1.0, F_IDLE.get_size().y))
+		king.position       = _foe_pos
+		king.z_index        = 32
+		add_child(king)
 
-	var bearers : Array = []
-	for i in 4:
-		var b := Sprite2D.new()
-		b.texture        = CROWD_TEX[i % CROWD_TEX.size()]
-		b.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-		b.scale          = Vector2.ONE * (CROWD_PX * 1.1 / maxf(1.0, b.texture.get_size().y))
-		b.position       = _foe_pos + Vector2(-54.0 + float(i) * 36.0, 62.0)
-		b.z_index        = 31
-		add_child(b)
-		bearers.append(b)
+	# ── ПАДАЕТ НАБОК ─────────────────────────────────────────────────────────
+	# Не оседает и не исчезает: заваливается на бок и остаётся лежать. Дальше в
+	# этом же положении его и унесут, поэтому поворот делается один раз и не
+	# отыгрывается назад.
+	var fall := king.create_tween()
+	fall.tween_property(king, "rotation", -PI * 0.5, KING_FALL_T)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	fall.parallel().tween_property(king, "position:y",
+		king.position.y + BOSS_PX * 0.22, KING_FALL_T)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	await fall.finished
+	if not _alive():
+		return
+	SCREEN_SHAKE.play(_game_root, 12.0, 8)
+	HAPTICS.buzz(HAPTICS.HEAVY)
 
-	# Толпа расступается: овал разъезжается к краям и гаснет.
+	# ── И ЕМУ НА ГОЛОВУ ПАДАЕТ ПИЦЦА ─────────────────────────────────────────
+	# Та же, что падает на морду крокодилу: это уже язык игры — «босс кончился,
+	# сверху пицца». Второй знак для того же события значил бы, что игрок должен
+	# выучить его заново.
+	var head : Vector2 = king.position + Vector2(-BOSS_PX * 0.30, -BOSS_PX * 0.10)
+	var pie := Sprite2D.new()
+	pie.texture        = _victory_pizza_tex()
+	pie.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	pie.scale          = Vector2.ONE * (PIZZA_ON_HEAD_PX
+		/ maxf(1.0, pie.texture.get_size().y))
+	pie.position       = head - Vector2(0.0, vp.y * 0.7)
+	pie.z_index        = 46
+	pie.rotation       = randf_range(-0.5, 0.5)
+	add_child(pie)
+	var drop := pie.create_tween()
+	drop.tween_property(pie, "position", head, 0.42)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	await drop.finished
+	if not _alive():
+		return
+	SCREEN_SHAKE.play(_game_root, 7.0, 5)
+	await get_tree().create_timer(0.45).timeout
+	if not _alive():
+		return
+
+	# ── ТОЛПА РАЗБЕГАЕТСЯ ────────────────────────────────────────────────────
+	# В РАЗНЫЕ СТОРОНЫ и вразнобой, а не ровным овалом наружу: расходящееся
+	# кольцо читается как обратная перемотка того, как они сбегались, а бой уже
+	# кончился — они не отступают, они расходятся.
+	#
+	# ТРОЕ ОСТАЮТСЯ. Их выбирают из ближних к боссу: бежать через весь экран,
+	# чтобы поднять его, было бы дольше самого выноса.
+	var carriers := _pick_carriers(king.position, 3)
 	for e in _crowd:
-		if not is_instance_valid(e):
+		if not is_instance_valid(e) or carriers.has(e):
 			continue
 		var c : Sprite2D = e
-		var away : Vector2 = (c.position - vp * 0.5).normalized() * 240.0
+		var away : Vector2 = (c.position - vp * 0.5).normalized()
+		if away.length() < 0.01:
+			away = Vector2.RIGHT
+		away = away.rotated(randf_range(-0.6, 0.6)) * randf_range(280.0, 460.0)
 		var tw : Tween = c.create_tween()
-		tw.tween_property(c, "position", c.position + away, 0.8)\
+		tw.tween_interval(randf_range(0.0, 0.35))
+		tw.tween_property(c, "position", c.position + away, randf_range(0.7, 1.1))\
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-		tw.parallel().tween_property(c, "modulate:a", 0.0, 0.8)
+		tw.parallel().tween_property(c, "modulate:a", 0.0, 0.9)
 
-	# Подняли — и понесли.
+	# ── ТРОЕ ПОДБЕГАЮТ И УНОСЯТ ЕГО ЛЁЖА ─────────────────────────────────────
+	# Сперва встают под него — по длине лежащего тела, — и только потом поднимают:
+	# поднятый до подхода носильщиков король висит в воздухе сам по себе.
+	var slots : Array = [-BOSS_PX * 0.34, 0.0, BOSS_PX * 0.34]
+	for i in carriers.size():
+		var b : Sprite2D = carriers[i]
+		var spot : Vector2 = king.position + Vector2(float(slots[i]), BOSS_PX * 0.22)
+		var run := b.create_tween()
+		run.tween_property(b, "position", spot, 0.45)\
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	await get_tree().create_timer(0.5).timeout
+	if not _alive():
+		return
+
+	# Подняли — и понесли. ЛЁЖА: поворот с падения не отыгрывается назад, его
+	# уносят в том положении, в каком он упал.
 	var lift := king.create_tween()
-	lift.tween_property(king, "position:y", _fight_y - 58.0, 0.45)\
+	lift.tween_property(king, "position:y", king.position.y - 46.0, 0.40)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	lift.tween_property(king, "position:x", -BOSS_PX, 1.5)\
+	lift.tween_property(king, "position:x", -BOSS_PX, 1.6)\
 		.set_trans(Tween.TRANS_SINE)
-	for b in bearers:
+	for b in carriers:
 		var tw2 := (b as Sprite2D).create_tween()
-		tw2.tween_interval(0.45)
-		tw2.tween_property(b, "position:x", -BOSS_PX, 1.5).set_trans(Tween.TRANS_SINE)
+		tw2.tween_interval(0.40)
+		tw2.tween_property(b, "position:x", -BOSS_PX, 1.6).set_trans(Tween.TRANS_SINE)
+	if is_instance_valid(pie):
+		# Пицца едет НА НЁМ: она лежит на голове, и оставшаяся висеть в воздухе
+		# читалась бы как отдельный предмет, случайно оказавшийся в кадре.
+		var tw3 := pie.create_tween()
+		tw3.tween_interval(0.40)
+		tw3.tween_property(pie, "position:y", pie.position.y - 46.0, 0.0)
+		tw3.tween_property(pie, "position:x", -BOSS_PX, 1.6).set_trans(Tween.TRANS_SINE)
 	await lift.finished
+
+# Кто понесёт: ближние к телу. Отбираются по расстоянию, а не по номеру в
+# массиве — иначе носильщиками стали бы первые созданные, то есть случайные
+# люди с другого края арены.
+func _pick_carriers(at: Vector2, n: int) -> Array:
+	var alive : Array = []
+	for e in _crowd:
+		if is_instance_valid(e):
+			alive.append(e)
+	alive.sort_custom(func(a, b):
+		return (a as Node2D).position.distance_to(at) \
+			< (b as Node2D).position.distance_to(at))
+	return alive.slice(0, mini(n, alive.size()))
+
+# Пицца, падающая на побеждённого. Своя, а не потоковая: у потоковой светлая
+# заливка без обводки, и на боссе она читается пятном. Грузится ПО ПУТИ и с
+# откатом — пока файла нет, финал играет обычной пиццей и ничего не ломается.
+const PIZZA_VICTORY_PATH : String = "res://assets/bosses/leatherhead/pizza_face.png"
+const PIZZA_STREAM_TEX   := preload("res://assets/items/pizza.png")
+const PIZZA_ON_HEAD_PX   : float = 88.0
+const KING_FALL_T        : float = 0.55
+
+func _victory_pizza_tex() -> Texture2D:
+	if ResourceLoader.exists(PIZZA_VICTORY_PATH):
+		var t = load(PIZZA_VICTORY_PATH)
+		if t != null:
+			return t
+	return PIZZA_STREAM_TEX
 
 func _finish() -> void:
 	_running = false

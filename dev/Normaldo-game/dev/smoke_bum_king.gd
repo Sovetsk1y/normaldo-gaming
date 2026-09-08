@@ -21,7 +21,7 @@ const BUM_KING := preload("res://scripts/bum_king.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 50
+const EXPECTED_CHECKS : int = 55
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -149,6 +149,24 @@ func _initialize() -> void:
 	var hero_lbl : Label = boss.get("_hero_name")
 	_check(is_instance_valid(hero_lbl) and not hero_lbl.text.strip_edges().is_empty(),
 		"своя подписана: «%s»" % [hero_lbl.text if hero_lbl != null else ""])
+
+	# ── УДАР — ДАБЛ-ТАП ─────────────────────────────────────────────────────
+	# Одиночным тапом бить нельзя: тем же пальцем игрок ВЕДЁТ ГОЛОВУ, и каждое
+	# касание для движения засчитывалось ударом — кулак уходил в пустоту, а к
+	# моменту, когда он нужен, был на перезарядке.
+	print("── Дабл-тап ──")
+	boss.set("_running", true)
+	var p_before : int = int(boss.get("punches"))
+	boss.set("_p_cd", 0.0)
+	_tap(boss, Vector2(300.0, 200.0))
+	await _wait(0.5)                       # заведомо дольше окна дабл-тапа
+	_check(int(boss.get("punches")) == p_before,
+		"одиночный тап НЕ бьёт: ударов %d" % (int(boss.get("punches")) - p_before))
+	_tap(boss, Vector2(300.0, 200.0))
+	_tap(boss, Vector2(306.0, 204.0))      # второй быстро и рядом
+	await process_frame
+	_check(int(boss.get("punches")) == p_before + 1,
+		"а дабл-тап бьёт: ударов %d" % (int(boss.get("punches")) - p_before))
 
 	# ── Волна 1: серый ПРЕСЛЕДУЕТ и не бьёт ─────────────────────────────────
 	print("── Волна 1: серый ──")
@@ -345,13 +363,65 @@ func _initialize() -> void:
 		"и сбитая рейка гаснет: %.2f" % seg.modulate.a)
 
 	# ── Победа ──────────────────────────────────────────────────────────────
+	# Финал длинный — падение, пицца, разбег толпы, вынос — и ломается он молча:
+	# любой шаг может не сыграть, а бой всё равно кончится и босс уберётся.
+	# Поэтому проверяются сами шаги, пока они идут.
 	print("── Победа ──")
+	var fallen : Sprite2D = boss.get("_foe_sprite")
 	boss.set("king_hp", 0)
+
+	# ПАДАЕТ НАБОК. Не оседает и не исчезает: заваливается и остаётся лежать —
+	# дальше в этом же положении его и унесут.
+	var laid := false
+	var fin_end := Time.get_ticks_msec() + 4000
+	while Time.get_ticks_msec() < fin_end and is_instance_valid(boss):
+		if is_instance_valid(fallen) and absf(fallen.rotation) > 1.2:
+			laid = true
+			break
+		await process_frame
+	_check(laid, "босс заваливается набок: поворот %.2f"
+		% (fallen.rotation if is_instance_valid(fallen) else 0.0))
+
+	# И СВЕРХУ ПАДАЕТ ПИЦЦА — тот же знак, что у крокодила: «босс кончился».
+	var pie_seen := false
+	fin_end = Time.get_ticks_msec() + 4000
+	while Time.get_ticks_msec() < fin_end and is_instance_valid(boss):
+		if _pizza_of(boss) != null:
+			pie_seen = true
+			break
+		await process_frame
+	_check(pie_seen, "и на него падает пицца")
+
+	# ТРОЕ ОСТАЮТСЯ, остальные разбегаются. Проверяется, что толпа именно
+	# редеет: расходящийся овал целиком читался бы как обратная перемотка входа.
+	fin_end = Time.get_ticks_msec() + 3000
+	while Time.get_ticks_msec() < fin_end and is_instance_valid(boss):
+		await process_frame
+	var still := 0
+	if is_instance_valid(boss):
+		for c in (boss.get("_crowd") as Array):
+			if is_instance_valid(c) and (c as Sprite2D).modulate.a > 0.5:
+				still += 1
+	_check(still <= 12, "толпа разбегается, остаются единицы: %d" % still)
+
 	var gone := await _await_free(boss, 14.0)
 	_check(gone, "босс добит и убрался за %.1f c" % 14.0)
 	_check(not bool(n.get("spells_blocked")), "спелл разблокирован обратно")
 
 	_finish()
+
+# Пицца в финале: спрайт с текстурой пиццы, лежащий поверх всех.
+func _pizza_of(boss: Node) -> Sprite2D:
+	for c in boss.get_children():
+		if c is Sprite2D and (c as Sprite2D).z_index >= 46:
+			return c
+	return null
+
+func _tap(boss: Node, at: Vector2) -> void:
+	var ev := InputEventScreenTouch.new()
+	ev.pressed  = true
+	ev.position = at
+	boss.call("_input", ev)
 
 func _in_ellipse(p: Vector2, c: Vector2, r: Vector2) -> bool:
 	var d := p - c

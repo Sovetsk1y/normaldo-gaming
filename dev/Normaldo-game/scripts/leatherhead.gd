@@ -1012,6 +1012,24 @@ func _drop_loot(at: Vector2, speed: float = 240.0, kind: String = "") -> void:
 # Расписан автором старого проекта в комментарии и никогда не написан кодом:
 # крокодилу на морду падает пицца, он озирается, и его сносит гигантским
 # хвостом. Забирать у битвы такой финал было бы жалко.
+# ── Пицца, которая падает на морду ───────────────────────────────────────────
+# Своя, а не та, что летит в потоке: у потоковой светлая заливка без обводки, и
+# на морде крокодила она теряется — рядом с его чёрным контуром читается как
+# пятно, а не как шлёпнувшийся кусок. Присланная нарисована под это: густая
+# чёрная обводка и стекающий сыр.
+#
+# Грузится ПО ПУТИ и с откатом на потоковую. Так задумано: пока файла нет,
+# финал играет прежней пиццей и ничего не ломается, а появится файл — подхватится
+# сам, без правки кода.
+const PIZZA_FACE_PATH : String = "res://assets/bosses/leatherhead/pizza_face.png"
+
+func _face_pizza_tex() -> Texture2D:
+	if ResourceLoader.exists(PIZZA_FACE_PATH):
+		var t = load(PIZZA_FACE_PATH)
+		if t != null:
+			return t
+	return PIZZA_TEX
+
 func _finale() -> void:
 	current_act = "finale"
 	var vp := get_viewport_rect().size
@@ -1026,7 +1044,7 @@ func _finale() -> void:
 
 	# Пицца падает сверху ему на морду.
 	var pie := Sprite2D.new()
-	pie.texture        = PIZZA_TEX
+	pie.texture        = _face_pizza_tex()
 	pie.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	ItemSizing.fit_sprite(pie, 54.0)
 	pie.position = Vector2(vp.x * 0.72, -60.0)
