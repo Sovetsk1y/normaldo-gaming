@@ -21,7 +21,7 @@ const BUM_KING := preload("res://scripts/bum_king.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 69
+const EXPECTED_CHECKS : int = 74
 
 # Пауза, за которую кулак успевает дорасти до полного размера: треть замаха
 # плюс запас на кадр. Меряем руки только после неё.
@@ -67,6 +67,9 @@ func _initialize() -> void:
 	# ТОЛПА ПЛОТНАЯ И МНОГОЛЮДНАЯ: сквозь редкое кольцо видно стену, и «уходить
 	# некуда» держится только на словах.
 	_check(crowd.size() >= 100, "толпа плотная: %d бомжей" % crowd.size())
+	# Число запоминаем ЧИСЛОМ, а не массивом: `_crowd` возвращается ссылкой, и
+	# «сравним размер потом» сравнивало бы массив сам с собой.
+	var crowd_n0 : int = crowd.size()
 	# И РОСТОМ КАК В ПОТОКЕ. Бомж в забеге — около 66 px на экране; мельче — и
 	# толпа читается не как «те самые бомжи», а как их уменьшенные копии.
 	var px_min : float = 1e9
@@ -269,6 +272,18 @@ func _initialize() -> void:
 	var king_in_crowd : Sprite2D = boss.get("_king_crowd")
 	_check(is_instance_valid(king_in_crowd) and king_in_crowd.texture == boss.F_IDLE,
 		"а пират ждёт своей очереди В ТОЛПЕ")
+	# И РЯДОВОЙ ТОЖЕ ВЫШЕЛ ИЗ КОЛЬЦА, а не из-за края: он появился внутри экрана,
+	# и в толпе стало на одного меньше — это и есть тот, кто вышел.
+	_check((boss.get("_crowd") as Array).size() < crowd_n0
+			and is_instance_valid(foe) and foe.position.x < vp.x,
+		"и вышел он ИЗ ТОЛПЫ: в кольце стало %d вместо %d, и он внутри экрана"
+			% [(boss.get("_crowd") as Array).size(), crowd_n0])
+	# ЧЕМ БИТЬ — НАПИСАНО НА ЭКРАНЕ. Жест здесь не тот, что в забеге: там тем же
+	# дабл-тапом кастуют спелл, и догадаться об этом неоткуда.
+	var hint : Label = boss.get("_hint")
+	_check(is_instance_valid(hint) and hint.text.contains("ДВОЙНОЕ"),
+		"подсказка про двойное нажатие на экране: «%s»"
+			% [hint.text if hint != null else ""])
 
 	# ПРЕСЛЕДУЕТ ПО ВСЕМУ КРУГУ, а не едет по одной горизонтали. Ставим героя в
 	# сторону и смотрим, что противник пошёл ЗА НИМ, в том числе по вертикали:
@@ -310,13 +325,23 @@ func _initialize() -> void:
 	_check(int(boss.get("hits_dealt")) == d0,
 		"издалека удар НЕ достаёт: попаданий %d" % (int(boss.get("hits_dealt")) - d0))
 
-	# А вплотную — доходит.
-	boss.set("_foe_pos", n.position + Vector2(90.0, 0.0))
+	# А ТУДА, КУДА ДОЕЗЖАЕТ РИСУНОК КУЛАКА, — доходит. Ставим противника на две
+	# трети дальности: раньше засчитывалось только вплотную (166 px от центра до
+	# центра), при том что картинка кулака в 215 px проезжала по нему задолго до
+	# этого — игрок видел, как рука проходит сквозь бомжа, и ничего не менялось.
+	var reach : float = float(boss.SWING_REACH) + float(boss.FIST_R)
+	boss.set("_foe_pos", n.position + Vector2(reach * 0.95, 0.0))
 	boss.set("_p_cd", 0.0)
 	boss.call("punch")
 	await _wait(0.6)
 	_check(int(boss.get("hits_dealt")) == d0 + 1,
-		"а с дистанции удара доходит: %d" % (int(boss.get("hits_dealt")) - d0))
+		"а на длину руки (%.0f px) доходит: %d"
+			% [reach * 0.95, int(boss.get("hits_dealt")) - d0])
+	# И РАНЬШЕ ЭТОГО НЕ ДОХОДИЛО БЫ. Проверка держит саму починку: вернись
+	# дальность к «центр в центр» — и этот удар снова станет промахом.
+	_check(reach * 0.95 > float(boss.SWING_REACH) + float(boss.HEAD_R),
+		"и это дальше прежнего «вплотную»: %.0f против %.0f px"
+			% [reach * 0.95, float(boss.SWING_REACH) + float(boss.HEAD_R)])
 	# ПОЛУЧИЛ — МИГНУЛ КРАСНЫМ. Попадание обязано быть видно на том, кто его
 	# получил: рейка стоит в верху экрана, куда в размене не смотрят. Бьём ещё
 	# раз и следим за спрайтом с этого момента — вспышка коротка, и по следам
@@ -346,6 +371,11 @@ func _initialize() -> void:
 	var fill : ColorRect = boss.get("_cd_fill")
 	_check(fill != null, "полоска перезарядки есть")
 	var before : int = int(boss.get("hits_dealt"))
+	# Ставим его обратно на дистанцию удара: каждое попадание отбрасывает
+	# противника назад, и после двух предыдущих он уже вне досягаемости — три
+	# тапа дали бы ноль попаданий, и провалилась бы проверка перезарядки, хотя
+	# перезарядка тут ни при чём.
+	boss.set("_foe_pos", n.position + Vector2(120.0, 0.0))
 	boss.set("_p_cd", 0.0)
 	boss.call("punch")
 	boss.call("punch")
@@ -412,8 +442,23 @@ func _initialize() -> void:
 		"первым не бьёт: получили %d за 2.2 c простоя"
 			% (int(boss.get("hits_taken")) - quiet))
 
+	# ИЗДАЛЕКА ОН НЕ ОТВЕЧАЕТ. Раньше рыжий отвечал на ЛЮБОЙ замах, хоть с другого
+	# конца арены: игрок бил в воздух, рыжий — в свой, и совпадение по времени
+	# засчитывалось блоком. Блок — это встреча двух кулаков, а не два промаха.
+	var far_b : int = int(boss.get("blocks"))
+	boss.set("_foe_pos", c_arena + Vector2(r_arena.x * 0.95, 0.0))
+	n.position = c_arena - Vector2(r_arena.x * 0.95, 0.0)
+	boss.set("_p_cd", 0.0)
+	boss.call("punch")
+	await _wait(1.0)
+	_check(int(boss.get("blocks")) == far_b,
+		"через всю арену он НЕ отвечает: блоков %d"
+			% (int(boss.get("blocks")) - far_b))
+
 	# ПЕРВЫЙ РАЗМЕН — БЛОК, ВТОРОЙ УДАР ДОБИВАЕТ. Блок не тратит его рейку, он
 	# её откладывает; отвечает рыжий ровно один раз.
+	n.position = c_arena
+	boss.set("_foe_pos", n.position + Vector2(90.0, 0.0))
 	var b0 : int = int(boss.get("blocks"))
 	var t0 : int = int(boss.get("hits_taken"))
 	var dd : int = int(boss.get("hits_dealt"))
@@ -549,6 +594,23 @@ func _initialize() -> void:
 			if is_instance_valid(c) and (c as Sprite2D).modulate.a > 0.5:
 				still += 1
 	_check(still <= 12, "толпа разбегается, остаются единицы: %d" % still)
+
+	# А НОСИЛЬЩИКИ ОСТАЮТСЯ ПОД НИМ. Здесь была тихая поломка: качание в толпе —
+	# вечный твин по абсолютной координате, и он никем не выключался. Носильщики
+	# подбегали под тело, а качание тут же тянуло их обратно в кольцо — король
+	# уезжал один, а между ним и «носильщиками» зияла пустота через пол-экрана.
+	if is_instance_valid(boss) and is_instance_valid(fallen):
+		var near := 0
+		for c in (boss.get("_crowd") as Array):
+			if not is_instance_valid(c):
+				continue
+			var s : Sprite2D = c
+			if s.modulate.a > 0.5 \
+					and s.position.distance_to(fallen.position) < float(boss.BOSS_PX):
+				near += 1
+		_check(near >= 2,
+			"а носильщики держатся ПРИ ТЕЛЕ, а не уезжают в кольцо: рядом %d"
+				% near)
 
 	var gone := await _await_free(boss, 14.0)
 	_check(gone, "босс добит и убрался за %.1f c" % 14.0)

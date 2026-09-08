@@ -78,6 +78,13 @@ func _initialize() -> void:
 	await _await_king_out(boss, 8.0)
 	await _run(1.2)
 	await _save(out, "bum_king_boss")
+
+	# Пятый — ВЫНОС: он лежит на руках у троих. Кадр нужен именно этот, потому
+	# что ломается тут не логика, а расстояние: тело обязано лежать НА них, а не
+	# ехать отдельно.
+	boss.set("king_hp", 0)
+	await _run(2.8)
+	await _save(out, "bum_king_carry")
 	quit(0)
 
 func _await_king_out(boss: Node, limit: float) -> void:

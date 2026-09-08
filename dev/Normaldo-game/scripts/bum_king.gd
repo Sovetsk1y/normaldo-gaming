@@ -489,6 +489,29 @@ func _king_crowd_pos() -> Vector2:
 		return _king_crowd.position
 	return _king_home()
 
+# ── И РЯДОВЫЕ ТОЖЕ ВЫХОДЯТ ИЗ КОЛЬЦА ─────────────────────────────────────────
+# Из толпы выходит не только пират: каждый противник — это КТО-ТО ИЗ ЭТИХ, а не
+# ещё один такой же, подъехавший из-за края. Берём того, кто того же вида и стоит
+# правее прочих: он уходит из кольца, и на его месте остаётся просвет — видно,
+# что вышел именно он.
+func _take_from_crowd(tex: Texture2D) -> Vector2:
+	var best : Sprite2D = null
+	for e in _crowd:
+		if not is_instance_valid(e):
+			continue
+		var s : Sprite2D = e
+		if s.texture != tex:
+			continue
+		if best == null or s.position.x > best.position.x:
+			best = s
+	if best == null:
+		return Vector2.INF   # толпы нет — выйдет из-за края, как раньше
+	var at : Vector2 = best.position
+	_crowd.erase(best)
+	_stop_sway(best)
+	best.queue_free()
+	return at
+
 func _king_steps_out() -> void:
 	if is_instance_valid(_king_crowd):
 		_king_crowd.queue_free()
@@ -504,6 +527,21 @@ func _sway(s2: Sprite2D) -> void:
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	tw.tween_property(s2, "position:y", s2.position.y, t)\
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	# Ссылку на качание НАДО ХРАНИТЬ, потому что его придётся ВЫКЛЮЧАТЬ.
+	# Качание — вечный цикл по абсолютным координатам, запомненным при заводе. Кто
+	# бы потом ни двигал этого бомжа — разбег в финале, подход под тело, — качание
+	# каждый второй кадр возвращало его на место в кольце. В финале это выглядело
+	# так: носильщики подбегают под короля, тот поднимается, а они уезжают обратно
+	# в толпу, и король висит в воздухе один, далеко от всех.
+	s2.set_meta("sway", tw)
+
+func _stop_sway(s2: Node) -> void:
+	if not is_instance_valid(s2) or not s2.has_meta("sway"):
+		return
+	var tw = s2.get_meta("sway")
+	if tw is Tween and (tw as Tween).is_valid():
+		(tw as Tween).kill()
+	s2.remove_meta("sway")
 
 # ── Круг арены ───────────────────────────────────────────────────────────────
 # Центр — центр экрана, радиусы — доли экрана. Считается каждый раз, а не
@@ -767,6 +805,33 @@ func _layout_bars(foe_n: int, foe_text: String) -> void:
 	# Перестроенные рейки показывают ТЕКУЩЕЕ здоровье, а не полное: полосу игрока
 	# перекладывает каждая волна, а он к третьей приходит уже побитым.
 	_burn(_hero_segs, hero_hp)
+	_build_hint()
+
+# ── ЧЕМ БЬЮТ — НАПИСАНО НА ЭКРАНЕ ────────────────────────────────────────────
+# Удар здесь по ДВОЙНОМУ нажатию, и это единственное место в игре, где жест
+# значит не то же, что в забеге: там тем же дабл-тапом кастуют спелл. Догадаться
+# об этом неоткуда — толпа кричит «БЕЙ!», игрок тапает, ничего не происходит.
+# Поэтому не подсказка на пару секунд, а надпись, которая висит весь бой: цена
+# ей — строка внизу экрана, а без неё бой начинается с непонимания.
+const HINT_TEXT : String = "ДВОЙНОЕ НАЖАТИЕ — УДАР"
+
+func _build_hint() -> void:
+	if is_instance_valid(_hint):
+		return
+	var vp := get_viewport_rect().size
+	_hint = Label.new()
+	_hint.add_theme_font_override("font", UI_FONT)
+	_hint.add_theme_font_size_override("font_size", 13)
+	_hint.add_theme_color_override("font_color", Color(1.00, 0.94, 0.72, 0.92))
+	_hint.add_theme_color_override("font_outline_color", Color(0.05, 0.04, 0.03))
+	_hint.add_theme_constant_override("outline_size", 6)
+	_hint.text                 = HINT_TEXT
+	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hint.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_hint.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_bars_root, _hint, Vector2(0.0, vp.y - 26.0), Vector2(vp.x, 18.0))
+
+var _hint : Label = null
 
 var _hero_name : Label = null
 var _foe_name  : Label = null
@@ -1120,8 +1185,30 @@ func _process(delta: float) -> void:
 func _fight_dist() -> float:
 	return _hero_pos().distance_to(_foe_pos)
 
-func _in_reach() -> bool:
-	return _fight_dist() <= SWING_REACH + HEAD_R
+# ── ДОСТАЁТ ТУДА, КУДА ДОЕЗЖАЕТ РИСУНОК ──────────────────────────────────────
+# Считалось это одной длиной на обоих и от ЦЕНТРОВ голов: `SWING_REACH + HEAD_R`,
+# то есть 166 px. А кулак на экране — картинка в 215 px шириной, и её край
+# проезжал по противнику задолго до этих 166: игрок видел, как рука проходит
+# сквозь бомжа, и ничего не происходило. Попадать приходилось вплотную.
+#
+# Теперь дальность складывается из того, что видно: длина дуги + костяшки +
+# голова того, в кого бьют. У каждой стороны своя, потому что головы разного
+# размера: у Нормальдо HEAD_R, у пирата — его собственный рост.
+const FIST_R : float = FIST_PX * 0.34   # костяшки, а не вся картинка кулака
+
+func _foe_r() -> float:
+	if not is_instance_valid(_foe_sprite) or _foe_sprite.texture == null:
+		return FOE_PX * 0.42
+	return ItemSizing.content_rect(_foe_sprite.texture).size.y \
+		* _foe_sprite.scale.y * 0.42
+
+# Мой кулак достаёт до него.
+func _hero_can_reach() -> bool:
+	return _fight_dist() <= SWING_REACH + FIST_R + _foe_r()
+
+# Его кулак достаёт до меня.
+func _foe_can_reach() -> bool:
+	return _fight_dist() <= SWING_REACH + FIST_R + HEAD_R
 
 # Один кадр разбора. ПОРЯДОК ЗДЕСЬ И ЕСТЬ ПРАВИЛО: сперва ничья, потом
 # попадания. Проверь попадания первыми — и размен, в котором оба достали в один
@@ -1134,19 +1221,21 @@ func _resolve(delta: float) -> void:
 		_e_swing["t"] = float(_e_swing["t"]) + delta
 
 	# БЛОК: оба замаха идут одновременно и оба дотягиваются. Кулаки встречаются —
-	# ни один не проходит.
-	if _swing_live(_p_swing) and _swing_live(_e_swing) and _in_reach() \
+	# ни один не проходит. Дотягиваться должны ОБА: размен, в котором один стоит
+	# вне досягаемости, — это не ничья, это два промаха.
+	if _swing_live(_p_swing) and _swing_live(_e_swing) \
+			and _hero_can_reach() and _foe_can_reach() \
 			and (_swing_ripe(_p_swing) or _swing_ripe(_e_swing)):
 		_block()
 		return
 
 	if _swing_ripe(_p_swing):
 		_p_swing["resolved"] = true
-		if _in_reach():
+		if _hero_can_reach():
 			_land_on_foe()
 	if _swing_ripe(_e_swing):
 		_e_swing["resolved"] = true
-		if _in_reach():
+		if _foe_can_reach():
 			_land_on_hero()
 
 	# Замах кончился — руку убрали. Дальше кулак живёт своим твином и гаснет сам.
@@ -1253,7 +1342,7 @@ func _wave_grey() -> void:
 	_burn(_boss_segs, foe_hp)
 	# homeless2 — СЕРЫЙ (homeless1 рыжий). Первым выходит именно серый, и путать
 	# их местами нельзя: цвет — единственное, чем волны различаются на вид.
-	_spawn_foe(CROWD_TEX[1], FOE_PX, Color.WHITE)
+	_spawn_foe(CROWD_TEX[1], FOE_PX, Color.WHITE, _take_from_crowd(CROWD_TEX[1]))
 	_caption("БЕЙ!", Color(0.75, 1.00, 0.80))
 	await _await_foe_down()
 
@@ -1281,7 +1370,7 @@ func _wave_ginger() -> void:
 	_foe_attacks = false   # сам не нападает: только отвечает на твой замах
 	_layout_bars(FOE_HP, "РЫЖИЙ БОМЖ")
 	_burn(_boss_segs, foe_hp)
-	_spawn_foe(CROWD_TEX[0], FOE_PX, Color.WHITE)
+	_spawn_foe(CROWD_TEX[0], FOE_PX, Color.WHITE, _take_from_crowd(CROWD_TEX[0]))
 	_caption("БЛОКИРУЙ!", Color(1.00, 0.92, 0.55))
 	await _await_foe_down()
 
@@ -1340,7 +1429,11 @@ func _wave_king() -> void:
 		if not await _step():
 			return
 	_crowd_cheer()
-	_drop_foe()
+	# А ронять его ЗДЕСЬ НЕЛЬЗЯ — это делает финал, и делает иначе. `_drop_foe`
+	# роняет рядового: тот проваливается вниз и исчезает. Король же заваливается
+	# набок и остаётся лежать, ему на голову падает пицца, и уносят его тем же
+	# самым телом. Пока падение стояло здесь, финал начинался с того, что боец
+	# уезжает вниз, а на его месте появляется свежая копия и падает второй раз.
 
 # Ждать, пока текущий рядовой не кончится. Рыжий отвечает отсюда же: ответ —
 # это реакция на ТВОЙ удар, и место ему там, где удар и виден.
@@ -1355,6 +1448,13 @@ func _await_foe_down() -> void:
 			return
 		if current_wave == "ginger" and punches > seen:
 			seen = punches
+			# ОТВЕЧАЕТ ТОЛЬКО НА УДАР, КОТОРЫЙ ДО НЕГО ДОХОДИТ. Раньше он отвечал
+			# на любой замах, хоть с другого конца арены: игрок бил в воздух,
+			# рыжий бил в ответ в свой воздух, и на экране это ловилось как
+			# «блок», хотя друг до друга они не дотягивались. Блок — это встреча
+			# двух кулаков, а не совпадение двух промахов по времени.
+			if not _hero_can_reach():
+				continue
 			_ginger_answers += 1
 			# Только на ПЕРВЫЙ замах: он показывает блок и на этом свою работу
 			# кончает. Второй ответ был бы ударом по игроку от учебного рядового.
@@ -1449,6 +1549,7 @@ func _victory() -> void:
 		if not is_instance_valid(e) or carriers.has(e):
 			continue
 		var c : Sprite2D = e
+		_stop_sway(c)
 		var away : Vector2 = (c.position - vp * 0.5).normalized()
 		if away.length() < 0.01:
 			away = Vector2.RIGHT
@@ -1462,10 +1563,16 @@ func _victory() -> void:
 	# ── ТРОЕ ПОДБЕГАЮТ И УНОСЯТ ЕГО ЛЁЖА ─────────────────────────────────────
 	# Сперва встают под него — по длине лежащего тела, — и только потом поднимают:
 	# поднятый до подхода носильщиков король висит в воздухе сам по себе.
-	var slots : Array = [-BOSS_PX * 0.34, 0.0, BOSS_PX * 0.34]
+	# Носильщики встают ПОД ЛЕЖАЩЕЕ ТЕЛО: он повёрнут набок, и его длина на экране
+	# — это ширина рисунка, а не высота кадра. Раньше слоты считались от BOSS_PX,
+	# то есть от высоты стоящего, и крайние вставали в пустоту рядом с телом.
+	var body_w : float = ItemSizing.content_rect(king.texture).size.y * king.scale.y
+	var body_h : float = ItemSizing.content_rect(king.texture).size.x * king.scale.x
+	var slots : Array = [-body_w * 0.32, 0.0, body_w * 0.32]
 	for i in carriers.size():
 		var b : Sprite2D = carriers[i]
-		var spot : Vector2 = king.position + Vector2(float(slots[i]), BOSS_PX * 0.22)
+		_stop_sway(b)
+		var spot : Vector2 = king.position + Vector2(float(slots[i]), body_h * 0.5 + 8.0)
 		var run := b.create_tween()
 		run.tween_property(b, "position", spot, 0.45)\
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
@@ -1475,15 +1582,24 @@ func _victory() -> void:
 
 	# Подняли — и понесли. ЛЁЖА: поворот с падения не отыгрывается назад, его
 	# уносят в том положении, в каком он упал.
+	# ВЫСОТА ПОДЪЁМА — ДО ИХ РУК, а не «на глаз». Поднятый на фиксированные 46 px
+	# король отрывался от носильщиков и ехал сам по себе, а между ним и ними
+	# зияла пустота. Считаем так, чтобы низ лежащего тела лёг на макушки: они
+	# стоят под ним, значит поднять надо ровно на полголовы носильщика.
+	var lift_h : float = maxf(8.0, CROWD_PX * 0.5 - 8.0)
 	var lift := king.create_tween()
-	lift.tween_property(king, "position:y", king.position.y - 46.0, 0.40)\
+	lift.tween_property(king, "position:y", king.position.y - lift_h, 0.40)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	lift.tween_property(king, "position:x", -BOSS_PX, 1.6)\
 		.set_trans(Tween.TRANS_SINE)
+	# Уносят его ВМЕСТЕ С СОБОЙ и с той же скоростью: разъехавшись хоть на кадр,
+	# тело и носильщики читаются как две отдельные едущие картинки.
 	for b in carriers:
 		var tw2 := (b as Sprite2D).create_tween()
 		tw2.tween_interval(0.40)
-		tw2.tween_property(b, "position:x", -BOSS_PX, 1.6).set_trans(Tween.TRANS_SINE)
+		tw2.tween_property(b, "position:x",
+			(b as Sprite2D).position.x - (king.position.x + BOSS_PX), 1.6)\
+			.set_trans(Tween.TRANS_SINE)
 	if is_instance_valid(pie):
 		# Пицца едет НА НЁМ: она лежит на голове, и оставшаяся висеть в воздухе
 		# читалась бы как отдельный предмет, случайно оказавшийся в кадре.
