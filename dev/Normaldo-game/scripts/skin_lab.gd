@@ -460,7 +460,7 @@ func _rebuild_worn(id: String, tex: Texture2D) -> void:
 	_worn_spr = null
 	if _worn.is_empty() or tex == null:
 		return
-	var w : Dictionary = SkinMetrics.worn_for(id, _fat, _worn)
+	var w : Dictionary = SkinMetrics.worn_for(id, _fat, _worn, _pose)
 	if _worn == "hat":
 		_worn_spr = WornItem.make(tex, TEX_HAT, float(w["k"]),
 			Vector2(float(w["x"]), 0.0), float(w["sink"]))
@@ -522,13 +522,13 @@ func _drag_worn(id: String, tex: Texture2D, delta: Vector2) -> void:
 	var sz : Vector2 = tex.get_size()
 	if k <= 0.0 or sz.x <= 0.0 or sz.y <= 0.0:
 		return
-	var w : Dictionary = SkinMetrics.worn_for(id, _fat, _worn).duplicate()
+	var w : Dictionary = SkinMetrics.worn_for(id, _fat, _worn, _pose).duplicate()
 	w["x"] = float(w["x"]) + delta.x / (sz.x * k)
 	if _worn == "hat":
 		w["sink"] = float(w["sink"]) + delta.y / (sz.y * k)
 	else:
 		w["y"] = float(w["y"]) + delta.y / (sz.y * k)
-	SkinMetrics.worn_set(id, _fat, _worn, w)
+	SkinMetrics.worn_set(id, _fat, _worn, w, _pose)
 	_dirty = true
 	_refresh()
 
@@ -592,9 +592,9 @@ func _bump_tweak(d: float) -> void:
 	# пришлось бы держать два набора кнопок и помнить, к чему сейчас относится
 	# колесо.
 	if not _worn.is_empty():
-		var w : Dictionary = SkinMetrics.worn_for(id, _fat, _worn).duplicate()
+		var w : Dictionary = SkinMetrics.worn_for(id, _fat, _worn, _pose).duplicate()
 		w["k"] = clampf(float(w["k"]) + d, 0.05, 3.0)
-		SkinMetrics.worn_set(id, _fat, _worn, w)
+		SkinMetrics.worn_set(id, _fat, _worn, w, _pose)
 		_dirty = true
 		_refresh()
 		return
@@ -616,7 +616,7 @@ func _reset_current() -> void:
 		_reset_item()
 		return
 	if not _worn.is_empty():
-		SkinMetrics.worn_clear(_skin_id(), _fat, _worn)
+		SkinMetrics.worn_clear(_skin_id(), _fat, _worn, _pose)
 		_dirty = true
 		_refresh()
 		_set_status("посадка вещи сброшена к общей: %s, жир %d" % [_skin_id(), _fat + 1])
@@ -774,7 +774,7 @@ func _worn_px_at(id: String, fat: int) -> float:
 	var host : Texture2D = SkinRegistry.get_avatar_texture(id, fat)
 	if t == null or host == null:
 		return 0.0
-	var w : Dictionary = SkinMetrics.worn_for(id, fat, _worn)
+	var w : Dictionary = SkinMetrics.worn_for(id, fat, _worn, _pose)
 	return WornItem.art_px(host, t, float(w["k"]),
 		SkinMetrics.sprite_scale(id, fat, host.get_size()))
 
@@ -801,7 +801,7 @@ func _worn_size_line(id: String, tex: Texture2D) -> String:
 func _worn_line(id: String) -> String:
 	if _worn.is_empty():
 		return "—"
-	var w : Dictionary = SkinMetrics.worn_for(id, _fat, _worn)
+	var w : Dictionary = SkinMetrics.worn_for(id, _fat, _worn, _pose)
 	if _worn == "hat":
 		return "ш%.2f x%.3f глуб%.3f" % [float(w["k"]), float(w["x"]), float(w["sink"])]
 	return "ш%.2f x%.3f y%.3f" % [float(w["k"]), float(w["x"]), float(w["y"])]
@@ -833,9 +833,9 @@ func _worn_same_width() -> void:
 			SkinMetrics.sprite_scale(id, f, host.get_size()))
 		if k <= 0.0:
 			continue
-		var w : Dictionary = SkinMetrics.worn_for(id, f, _worn).duplicate()
+		var w : Dictionary = SkinMetrics.worn_for(id, f, _worn, _pose).duplicate()
 		w["k"] = clampf(k, 0.05, 3.0)
-		SkinMetrics.worn_set(id, f, _worn, w)
+		SkinMetrics.worn_set(id, f, _worn, w, _pose)
 	_dirty = true
 	_refresh()
 	_set_status("ширина %d px разослана на все жиры" % int(round(want)))

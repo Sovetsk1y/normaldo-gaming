@@ -255,12 +255,29 @@ const WORN_DEFAULTS : Dictionary = {
 	"mask": { "k": 0.98, "x": 0.0,  "y": -0.006 },
 }
 
-func worn_for(skin_id: String, fat_state: int, kind: String) -> Dictionary:
+# Посадка вещи НА КОНКРЕТНОМ КАДРЕ. Слоёв три, и каждый следующий кладётся
+# поверх предыдущего: общие значения по умолчанию → посадка скина на этом жире →
+# поправка на кадр поедания.
+#
+# Третий слой появился не сразу и не от красоты. Шляпа садится по МАКУШКЕ
+# РИСУНКА, а у кадра «ест» рисунок другой: рот открыт, голова наклонена, макушка
+# в другом месте. Одна посадка на оба кадра означала ровно то, на что и
+# наткнулись: выставил шляпу на покое — на поедании она съехала; поправил на
+# поедании — уехала на покое. Двигали одно число туда-обратно, а верного
+# положения у него не было вовсе.
+func worn_for(skin_id: String, fat_state: int, kind: String,
+		variant: String = "") -> Dictionary:
 	var base : Dictionary = (WORN_DEFAULTS.get(kind, {}) as Dictionary).duplicate()
-	var worn : Dictionary = _layout_row(skin_id, fat_state).get("worn", {})
-	var mine : Dictionary = worn.get(kind, {})
+	var row  : Dictionary = _layout_row(skin_id, fat_state)
+	var mine : Dictionary = (row.get("worn", {}) as Dictionary).get(kind, {})
 	for key in mine:
 		base[key] = mine[key]
+	if variant.is_empty():
+		return base
+	var pw : Dictionary = (((row.get("pose", {}) as Dictionary)
+		.get(variant, {}) as Dictionary).get("worn", {}) as Dictionary).get(kind, {})
+	for key in pw:
+		base[key] = pw[key]
 	return base
 
 # ── Правка ручного слоя из лаборатории ───────────────────────────────────────
@@ -281,18 +298,34 @@ func layout_set(skin_id: String, fat_state: int, tweak: float, nudge: Vector2) -
 # вместе с правкой, и «отмена» вернула бы то же самое.
 # Посадка вещи. Пишется отдельно от размера и сдвига по той же причине, по
 # которой отдельно и правится: это разные величины, и трогают их порознь.
-func worn_set(skin_id: String, fat_state: int, kind: String, vals: Dictionary) -> void:
+func worn_set(skin_id: String, fat_state: int, kind: String, vals: Dictionary,
+		variant: String = "") -> void:
 	var cur := _fat_row_for_write(skin_id, fat_state)
-	var worn : Dictionary = cur.get("worn", {})
 	var clean : Dictionary = {}
 	for key in vals:
 		clean[key] = snappedf(float(vals[key]), 0.0001)
-	worn[kind] = clean
-	cur["worn"] = worn
+	if variant.is_empty():
+		var worn : Dictionary = cur.get("worn", {})
+		worn[kind] = clean
+		cur["worn"] = worn
+		return
+	# Поправка на кадр пишется В СЛОЙ КАДРА, рядом с его размером и сдвигом.
+	var pose : Dictionary = cur.get("pose", {})
+	var row  : Dictionary = pose.get(variant, {})
+	var pw   : Dictionary = row.get("worn", {})
+	pw[kind]    = clean
+	row["worn"] = pw
+	pose[variant] = row
+	cur["pose"]   = pose
 
-func worn_clear(skin_id: String, fat_state: int, kind: String) -> void:
-	var worn : Dictionary = _layout_row(skin_id, fat_state).get("worn", {})
-	worn.erase(kind)
+func worn_clear(skin_id: String, fat_state: int, kind: String,
+		variant: String = "") -> void:
+	var row : Dictionary = _layout_row(skin_id, fat_state)
+	if variant.is_empty():
+		(row.get("worn", {}) as Dictionary).erase(kind)
+		return
+	(((row.get("pose", {}) as Dictionary).get(variant, {}) as Dictionary)
+		.get("worn", {}) as Dictionary).erase(kind)
 
 func layout_snapshot() -> Dictionary:
 	return _layout.duplicate(true)

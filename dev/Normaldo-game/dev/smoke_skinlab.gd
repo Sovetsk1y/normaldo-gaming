@@ -42,7 +42,7 @@ func _const(node: Node, name: String):
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 40
+const EXPECTED_CHECKS : int = 44
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -137,9 +137,43 @@ func _test_pose() -> void:
 			and _met.call("pose_nudge_for", id, 1, "_eat") == Vector2.ZERO,
 		"сброс снимает правку кадра начисто")
 
+	# ── ПОСАДКА ВЕЩИ У КАЖДОГО КАДРА СВОЯ ───────────────────────────────────
+	# Шляпа садится по МАКУШКЕ РИСУНКА, а у кадра «ест» рисунок другой: рот
+	# открыт, голова наклонена, макушка в другом месте. Пока посадка была одна на
+	# оба кадра, выходил тупик: выставил шляпу на покое — на поедании съехала;
+	# поправил на поедании — уехала на покое. Верного значения у одного числа не
+	# было вовсе.
+	_met.call("worn_set", id, 1, "hat", { "k": 0.74, "x": 0.05, "sink": 0.40 })
+	_met.call("worn_set", id, 1, "hat", { "k": 0.74, "x": -0.03, "sink": 0.60 }, "_eat")
+	var w_idle : Dictionary = _met.call("worn_for", id, 1, "hat")
+	var w_eat  : Dictionary = _met.call("worn_for", id, 1, "hat", "_eat")
+	_check(absf(float(w_idle["sink"]) - 0.40) < 0.001,
+		"посадка на покое своя: sink %.2f" % float(w_idle["sink"]))
+	_check(absf(float(w_eat["sink"]) - 0.60) < 0.001,
+		"а на поедании своя: sink %.2f" % float(w_eat["sink"]))
+	# И ПОПРАВКА КЛАДЁТСЯ ПОВЕРХ, а не вместо: чего в кадре не правили, то
+	# берётся с покоя. Иначе на каждый кадр пришлось бы выставлять всё заново.
+	_met.call("worn_set", id, 1, "hat", { "sink": 0.55 }, "_eat")
+	var w_eat2 : Dictionary = _met.call("worn_for", id, 1, "hat", "_eat")
+	_check(absf(float(w_eat2["x"]) - 0.05) < 0.001,
+		"а не тронутое в кадре берётся с покоя: x %.2f" % float(w_eat2["x"]))
+
+	# Игра берёт ту же посадку: `normaldo._refit_worn` пересаживает вещь на
+	# каждой смене кадра, иначе правка в лаборатории осталась бы в лаборатории.
+	var n : Node = _live_normaldo()
+	_check(n != null and n.has_method("_refit_worn"),
+		"и игра умеет пересаживать вещь под кадр")
+
 	lab.call("_cycle_pose")
 	_check(String(lab.get("_pose")).is_empty(), "и переключатель возвращается к покою")
 	_met.call("layout_restore", snap)
+
+func _live_normaldo() -> Node:
+	for w in get_root().get_children():
+		var n := w.get_node_or_null("Normaldo")
+		if n != null:
+			return n
+	return null
 
 # ── Геометрия ────────────────────────────────────────────────────────────────
 

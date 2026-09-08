@@ -1437,6 +1437,12 @@ func _place_head(tex: Texture2D, variant: String) -> void:
 	_sprite.position.x = _head_home.x
 	if changed:
 		_sprite.position.y = _head_home.y
+		# ВЕЩИ ПЕРЕСАЖИВАЮТСЯ ВМЕСТЕ С КАДРОМ. Шляпа садится по макушке РИСУНКА,
+		# а у кадра «ест» рисунок другой — рот открыт, голова наклонена, макушка
+		# в другом месте. Посаженная один раз, при надевании, она на подмене
+		# кадра съезжала: на покое сидела, на поедании висела над головой или
+		# лезла на глаза, и поправить это было нечем — числа-то одни на оба.
+		_refit_worn()
 
 # Какой кадр головы сейчас на экране. Отдельной функцией, потому что вариантов
 # уже три пары: обычная, «ест» и серая призрачная у Дракулы под невидимостью.
@@ -3968,11 +3974,37 @@ func _spawn_worn(tex: Texture2D, width_k: float, pos: Vector2,
 var _hat_worn  : Sprite2D = null
 var _hat_token : int = 0
 
+# Пересадить надетые вещи под ТЕКУЩИЙ кадр головы. Зовётся из `_place_head` при
+# каждой смене кадра — то есть на каждой съеденной пицце.
+#
+# Пересчитывается ровно то же, что считалось при надевании (`WornItem.make`), но
+# от новой текстуры и с поправкой этого кадра. Пересоздавать узел нельзя:
+# у шляпы идёт таймер снятия по токену, и новый спрайт остался бы на голове
+# навсегда.
+func _refit_worn() -> void:
+	if not is_instance_valid(_sprite) or _sprite.texture == null:
+		return
+	_refit_one(_hat_worn,   _MAGIC_HAT_TEX, "hat")
+	_refit_one(_scars_mask, _CASEY_TEX,     "mask")
+
+func _refit_one(node: Sprite2D, tex: Texture2D, kind: String) -> void:
+	if not is_instance_valid(node):
+		return
+	var w : Dictionary = SkinMetrics.worn_for(SaveData.active_skin, fat_state,
+		kind, _head_variant)
+	var fresh := WornItem.make(_sprite.texture, tex, float(w["k"]),
+		Vector2(float(w["x"]), float(w.get("y", 0.0))),
+		float(w["sink"]) if w.has("sink") else -1.0)
+	node.scale    = fresh.scale
+	node.position = fresh.position
+	fresh.free()
+
 func _wear_hat(duration: float) -> void:
 	_hat_token += 1
 	var tok := _hat_token
 	if not is_instance_valid(_hat_worn):
-		var w : Dictionary = SkinMetrics.worn_for(SaveData.active_skin, fat_state, "hat")
+		var w : Dictionary = SkinMetrics.worn_for(SaveData.active_skin, fat_state,
+			"hat", _head_variant)
 		_hat_worn = _spawn_worn(_MAGIC_HAT_TEX, float(w["k"]),
 			Vector2(float(w["x"]), 0.0), float(w["sink"]))
 	# Подобрал вторую шляпу — эффект продлевается, и старый таймер снимать её
@@ -3983,7 +4015,8 @@ func _wear_hat(duration: float) -> void:
 			_hat_worn = null)
 
 func _spawn_scars_mask() -> void:
-	var w : Dictionary = SkinMetrics.worn_for(SaveData.active_skin, fat_state, "mask")
+	var w : Dictionary = SkinMetrics.worn_for(SaveData.active_skin, fat_state,
+		"mask", _head_variant)
 	_scars_mask = _spawn_worn(_CASEY_TEX, float(w["k"]),
 		Vector2(float(w["x"]), float(w["y"])))
 
