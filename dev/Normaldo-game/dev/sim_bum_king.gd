@@ -14,7 +14,7 @@ const BUM_KING := preload("res://scripts/bum_king.gd")
 func _initialize() -> void:
 	var argv := OS.get_cmdline_user_args()
 	var runs : int = int(argv[0]) if argv.size() > 0 else 12
-	for bot in ["spam", "smart"]:
+	for bot in ["spam", "smart", "press"]:
 		var wins := 0
 		var hp_left := 0
 		var king_left := 0
@@ -106,8 +106,17 @@ func _one_fight(bot: String = "spam") -> Array:
 					n.position + dir * 460.0 * dt, 26.0)
 				if float(boss.get("_p_cd")) <= 0.0 and boss.call("_hero_can_reach"):
 					boss.call("punch")
-			# В остальное время стоит: бегать от него бессмысленно — он гонит.
-		if bot == "smart":
+			elif bot == "press":
+				# ДАВИТ: не ждёт его броска, а идёт следом и бьёт, как только
+				# достаёт, — принимая, что часть замахов он прочитает. Так играет
+				# тот, кто разобрался: наказания одной отдышки на десять реек не
+				# хватает.
+				n.position = boss.call("_clamp_to_arena",
+					n.position + dir * 300.0 * dt, 26.0)
+				if float(boss.get("_p_cd")) <= 0.0 and boss.call("_hero_can_reach"):
+					boss.call("punch")
+			# «smart» в остальное время стоит: он живёт с одной отдышки.
+		if bot == "zzz":
 			var k : String = st
 			_seen[k] = int(_seen.get(k, 0)) + 1
 			if k == "recover":
@@ -117,7 +126,7 @@ func _one_fight(bot: String = "spam") -> Array:
 	var won  : bool = int(boss.get("king_hp")) <= 0
 	var hp   : int  = int(boss.get("hero_hp"))
 	var khp  : int  = int(boss.get("king_hp"))
-	if bot == "smart":
+	if bot == "zzz":
 		print("    состояния ", _seen, " ближайшее в отдышке %.0f px, руки хватает на %.0f"
 			% [_rec_d, float(boss.SWING_REACH) + float(boss.FIST_R) + float(boss.call("_foe_r"))])
 		_seen = {} ; _rec_d = 1e9

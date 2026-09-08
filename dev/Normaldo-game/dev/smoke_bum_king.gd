@@ -21,7 +21,7 @@ const BUM_KING := preload("res://scripts/bum_king.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 89
+const EXPECTED_CHECKS : int = 94
 
 # Пауза, за которую кулак успевает дорасти до полного размера: треть замаха
 # плюс запас на кадр. Меряем руки только после неё.
@@ -160,6 +160,23 @@ func _initialize() -> void:
 	var hero_lbl : Label = boss.get("_hero_name")
 	_check(is_instance_valid(hero_lbl) and not hero_lbl.text.strip_edges().is_empty(),
 		"своя подписана: «%s»" % [hero_lbl.text if hero_lbl != null else ""])
+	# И СТОЯТ ОНИ НА ПОДЛОЖКЕ. Рейки лежат на кирпичной стене, и без тёмной
+	# полосы сверху их приходится искать глазами ровно тогда, когда смотреть надо
+	# на кулаки.
+	var shade : TextureRect = null
+	for c in (boss.get("_bars_root") as CanvasLayer).get_children():
+		if c is TextureRect:
+			shade = c
+			break
+	_check(is_instance_valid(shade) and shade.size.x >= vp.x - 1.0,
+		"под рейками тёмная подложка во всю ширину: %s"
+			% [shade.size.round() if shade != null else "нет"])
+	# И ВСЯ СТРОКА ВЛЕЗАЕТ В ЭКРАН. У короля десять реек, у игрока три: с
+	# фиксированной шириной сегмента на узком экране строка вышла бы за края.
+	var row_r : float = (bs[bs.size() - 1] as Panel).position.x 		+ (bs[bs.size() - 1] as Panel).size.x
+	_check((hs[0] as Panel).position.x >= 0.0 and row_r <= vp.x,
+		"и строка реек влезает в экран: от %.0f до %.0f при ширине %.0f"
+			% [(hs[0] as Panel).position.x, row_r, vp.x])
 
 	# ── УДАР — ДАБЛ-ТАП ─────────────────────────────────────────────────────
 	# Одиночным тапом бить нельзя: тем же пальцем игрок ВЕДЁТ ГОЛОВУ, и каждое
@@ -284,6 +301,11 @@ func _initialize() -> void:
 	_check(is_instance_valid(hint) and hint.text.contains("ДВОЙНОЕ"),
 		"подсказка про двойное нажатие на экране: «%s»"
 			% [hint.text if hint != null else ""])
+	# И стоит она В ВЕРХНЕЙ ПАНЕЛИ, на подложке: у нижнего края она терялась на
+	# кирпичах мелкой строчкой.
+	_check(is_instance_valid(hint) and hint.position.y < vp.y * 0.35,
+		"и стоит она под рейками, а не у нижнего края: y = %.0f"
+			% [hint.position.y if hint != null else -1.0])
 
 	# ПРЕСЛЕДУЕТ ПО ВСЕМУ КРУГУ, а не едет по одной горизонтали. Ставим героя в
 	# сторону и смотрим, что противник пошёл ЗА НИМ, в том числе по вертикали:
@@ -540,6 +562,24 @@ func _initialize() -> void:
 	_check(king_at.x < vp.x,
 		"и вышел он ИЗНУТРИ экрана, а не из-за края: x = %.0f при ширине %.0f"
 			% [king_at.x, vp.x])
+	# И ГОВОРИТ ОН НА ХОДУ: облачко висит У НЕГО НАД ГОЛОВОЙ и идёт вместе с ним.
+	# Оставшееся на месте, где он был, оно читалось бы как чужие слова.
+	var say : Panel = boss.get("_king_say")
+	_check(is_instance_valid(say), "и на выходе он говорит — облачком над собой")
+	if is_instance_valid(say):
+		# Меряется ПРИВЯЗКА, а не пройденный путь. У края экрана облачко упирается
+		# в зажим — оно не должно вылезать за экран, — и «сместилось на столько
+		# же» там неверно: правильное поведение выглядело бы как ноль.
+		var gap0 : float = absf(say.position.x + say.size.x * 0.5
+			- Vector2(boss.get("_foe_pos")).x)
+		await _wait(0.9)
+		var gap1 : float = 1e9
+		if is_instance_valid(say):
+			gap1 = absf(say.position.x + say.size.x * 0.5
+				- Vector2(boss.get("_foe_pos")).x)
+		_check(gap0 < 200.0 and gap1 < 200.0,
+			"и облачко держится У НЕГО: %.0f px в начале, %.0f через 0.9 с"
+				% [gap0, gap1])
 	# И ОН ЕДИНСТВЕННЫЙ, КТО НАПАДАЕТ САМ: рядовые только преследуют и отвечают.
 	_check(bool(boss.get("_foe_attacks")), "и он нападает сам")
 

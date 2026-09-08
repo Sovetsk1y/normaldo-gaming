@@ -223,17 +223,26 @@ const BOSS_PX     : float = 150.0
 const FOE_PX      : float = 92.0    # рядовой из волн 1–2
 
 # ── Полосы ХП ────────────────────────────────────────────────────────────────
-const BAR_SEG_W   : float = 22.0
-const BAR_SEG_H   : float = 12.0
-const BAR_GAP     : float = 4.0
+# РЕЙКИ СТОЯТ СВЕРХУ ВО ВЕСЬ ЭКРАН, как в старых играх: широкие сегменты в один
+# ряд, а под ними тёмная подложка, сходящая на нет. Прежние 22×12 терялись на
+# кирпичной стене — их приходилось искать глазами в тот момент, когда смотреть
+# надо на кулаки.
+#
+# Ширина сегмента ПОДБИРАЕТСЯ: у короля их десять, у игрока три, и на узком
+# экране фиксированная ширина просто не влезла бы. Берём предельную и ужимаем,
+# пока строка не встанет в экран с полями.
+const BAR_SEG_W   : float = 34.0    # предел; реальная считается под экран
+const BAR_SEG_H   : float = 18.0
+const BAR_GAP     : float = 5.0
+const BAR_SIDE_PAD: float = 16.0
 # Ниже верхней полосы забега (счётчики и таймер занимают первые ~30 px).
 const BAR_Y       : float = 38.0
 # Просвет между его полосой и твоей: без него десять сегментов подряд читались
 # бы как одна полоса на двоих.
-const BAR_MID_GAP : float = 46.0
+const BAR_MID_GAP : float = 40.0
 const BAR_Z       : int   = 90
 
-const KING_HP     : int = 5
+const KING_HP     : int = 10
 # У рядовых ПО ОДНОЙ рейке. У рыжего первый размен уходит в блок, и его единица
 # сгорает со второго удара — блок не отнимает жизнь, он её откладывает.
 const FOE_HP      : int = 1
@@ -512,6 +521,66 @@ func _take_from_crowd(tex: Texture2D) -> Vector2:
 	best.queue_free()
 	return at
 
+# ── ЕГО РЕПЛИКА ИДЁТ ЗА НИМ ───────────────────────────────────────────────────
+# Реплика босса на входе — не титр посреди экрана, а облачко НАД НИМ: он выходит
+# из кольца и идёт через полэкрана, и слова, оставшиеся висеть там, где он был,
+# читались бы как чужие. Облачко держится у головы, пока он входит в круг, и
+# гаснет, когда бой начался.
+const KING_ENTER_SAY : String = "Моя набережная, парень."
+
+var _king_say : Panel = null
+
+func _say_over_king(text: String) -> void:
+	if not is_instance_valid(_game_root):
+		return
+	var l := Label.new()
+	l.add_theme_font_override("font", UI_FONT)
+	l.add_theme_font_size_override("font_size", 15)
+	l.add_theme_color_override("font_color", Color(1.00, 0.95, 0.82))
+	l.text                 = text
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	l.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	var w : float = UI_FONT.get_string_size(text,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x + 24.0
+	l.size = Vector2(w, 26.0)
+
+	var b := Panel.new()
+	b.add_theme_stylebox_override("panel",
+		UiKit.rounded(Color(0.16, 0.13, 0.09, 0.96), 10,
+			Color(0.85, 0.72, 0.35, 0.95), 2))
+	b.size         = l.size
+	b.z_index      = FIST_Z_TOP + 2
+	b.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	b.add_child(l)
+	add_child(b)
+	_king_say = b
+	_move_king_say()
+
+# Каждый кадр — у его головы. Твином тут не обойтись: он идёт своим ходом, и
+# путь его заранее неизвестен.
+func _move_king_say() -> void:
+	if not is_instance_valid(_king_say):
+		return
+	var at : Vector2 = _foe_pos
+	if is_instance_valid(_foe_sprite):
+		at = _foe_sprite.position
+	elif is_instance_valid(_king_crowd):
+		at = _king_crowd.position
+	var vp := get_viewport_rect().size
+	_king_say.position = Vector2(
+		clampf(at.x - _king_say.size.x * 0.5, 4.0, vp.x - _king_say.size.x - 4.0),
+		maxf(BAR_Y + BAR_SEG_H + 56.0, at.y - BOSS_PX * 0.75))
+
+func _drop_king_say() -> void:
+	if not is_instance_valid(_king_say):
+		return
+	var b := _king_say
+	_king_say = null
+	var tw := b.create_tween()
+	tw.tween_property(b, "modulate:a", 0.0, 0.35)
+	tw.tween_callback(b.queue_free)
+
 func _king_steps_out() -> void:
 	if is_instance_valid(_king_crowd):
 		_king_crowd.queue_free()
@@ -766,7 +835,33 @@ func _build_bars() -> void:
 	_bars_root = CanvasLayer.new()
 	_bars_root.layer = BAR_Z
 	_game_root.add_child(_bars_root)
+	# Подложка кладётся ПЕРВОЙ и живёт отдельно от реек: раскладка реек
+	# перестраивается каждой волной, а подложка стоит весь бой. Была бы она их
+	# частью — мигала бы на каждой смене противника.
+	_build_bar_shade()
 	_layout_bars(FOE_HP, "")
+
+# Тёмная полоса сверху, сходящая на нет книзу. Рейки стоят на кирпичной стене, и
+# без подложки их приходится искать глазами — ровно в тот момент, когда смотреть
+# надо на кулаки.
+func _build_bar_shade() -> void:
+	var vp := get_viewport_rect().size
+	var g := Gradient.new()
+	g.set_color(0, Color(0.0, 0.0, 0.0, 0.80))
+	g.set_color(1, Color(0.0, 0.0, 0.0, 0.0))
+	var tex := GradientTexture2D.new()
+	tex.gradient  = g
+	tex.fill_from = Vector2(0.0, 0.0)
+	tex.fill_to   = Vector2(0.0, 1.0)
+	tex.width     = 8
+	tex.height    = 128
+	var tr := TextureRect.new()
+	tr.texture      = tex
+	tr.stretch_mode = TextureRect.STRETCH_SCALE
+	tr.position     = Vector2.ZERO
+	tr.size         = Vector2(vp.x, BAR_Y + BAR_SEG_H + 54.0)
+	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_bars_root.add_child(tr)
 
 func _layout_bars(foe_n: int, foe_text: String) -> void:
 	if not is_instance_valid(_bars_root):
@@ -791,13 +886,17 @@ func _layout_bars(foe_n: int, foe_text: String) -> void:
 	# а убавилось у него самого.
 	var hero_n : int = HERO_HP
 	var foe_c  : int = maxi(1, foe_n)
-	var hw : float = float(hero_n) * BAR_SEG_W + float(maxi(0, hero_n - 1)) * BAR_GAP
-	var bw : float = float(foe_c) * BAR_SEG_W + float(foe_c - 1) * BAR_GAP
+	# Сегмент — не меньше, чем позволяет экран, и не шире предела.
+	var gaps  : float = float(hero_n - 1 + foe_c - 1) * BAR_GAP
+	var avail : float = vp.x - BAR_SIDE_PAD * 2.0 - BAR_MID_GAP - gaps
+	var seg_w : float = minf(BAR_SEG_W, avail / float(maxi(1, hero_n + foe_c)))
+	var hw : float = float(hero_n) * seg_w + float(maxi(0, hero_n - 1)) * BAR_GAP
+	var bw : float = float(foe_c) * seg_w + float(foe_c - 1) * BAR_GAP
 	var total : float = hw + BAR_MID_GAP + bw
 	var x0 : float = (vp.x - total) * 0.5
-	_hero_segs = _make_bar(Vector2(x0, BAR_Y), hero_n, Color(0.35, 0.80, 0.45))
+	_hero_segs = _make_bar(Vector2(x0, BAR_Y), hero_n, Color(0.35, 0.80, 0.45), seg_w)
 	_boss_segs = _make_bar(Vector2(x0 + hw + BAR_MID_GAP, BAR_Y), foe_c,
-		Color(0.85, 0.30, 0.26))
+		Color(0.85, 0.30, 0.26), seg_w)
 	# ЧЬИ ЭТО РЕЙКИ — НАПИСАНО. Две одинаковые полоски по краям экрана ничем не
 	# отличаются, кроме цвета, а цвет в драке разбирать некогда. Слева имя скина,
 	# которым играют, справа — имя того, кто сейчас вышел; правая подпись и число
@@ -830,7 +929,7 @@ func _build_hint() -> void:
 	var vp := get_viewport_rect().size
 	_hint = Label.new()
 	_hint.add_theme_font_override("font", UI_FONT)
-	_hint.add_theme_font_size_override("font_size", 13)
+	_hint.add_theme_font_size_override("font_size", 16)
 	_hint.add_theme_color_override("font_color", Color(1.00, 0.94, 0.72, 0.92))
 	_hint.add_theme_color_override("font_outline_color", Color(0.05, 0.04, 0.03))
 	_hint.add_theme_constant_override("outline_size", 6)
@@ -838,7 +937,11 @@ func _build_hint() -> void:
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_hint.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	_hint.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	UiKit.place(_bars_root, _hint, Vector2(0.0, vp.y - 26.0), Vector2(vp.x, 18.0))
+	# ПОД РЕЙКАМИ, а не у нижнего края. Внизу она стояла на кирпичах мелкой
+	# строчкой и терялась; здесь — на тёмной подложке, в той же панели, куда
+	# игрок и так смотрит, проверяя рейки.
+	UiKit.place(_bars_root, _hint,
+		Vector2(0.0, BAR_Y + BAR_SEG_H + 10.0), Vector2(vp.x, 20.0))
 
 var _hint : Label = null
 
@@ -860,14 +963,14 @@ func _bar_caption(at: Vector2, w: float, text: String, col: Color) -> Label:
 	return l
 
 
-func _make_bar(at: Vector2, n: int, col: Color) -> Array:
+func _make_bar(at: Vector2, n: int, col: Color, seg_w: float = BAR_SEG_W) -> Array:
 	var out : Array = []
 	for i in n:
 		var p := Panel.new()
 		p.add_theme_stylebox_override("panel",
 			UiKit.rounded(col, 3, Color(0.05, 0.04, 0.03, 0.9), 1))
-		p.position     = at + Vector2(float(i) * (BAR_SEG_W + BAR_GAP), 0.0)
-		p.size         = Vector2(BAR_SEG_W, BAR_SEG_H)
+		p.position     = at + Vector2(float(i) * (seg_w + BAR_GAP), 0.0)
+		p.size         = Vector2(seg_w, BAR_SEG_H)
 		p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_bars_root.add_child(p)
 		out.append(p)
@@ -1365,8 +1468,13 @@ func punch() -> void:
 # Дабл-тап — тот же жест, которым в забеге кастуют спелл, и пороги у него те же
 # (`normaldo._DTAP_TIME` / `_DTAP_DIST`): два быстрых касания рядом. Спелл здесь
 # заблокирован, так что жест свободен и учить ему заново не приходится.
-const DTAP_TIME : float = 0.20   # как у спелла: это БЫСТРЫЙ дабл-тап
-const DTAP_DIST : float = 55.0   # и касания рядом, а не через пол-экрана
+# Окно ЗДЕСЬ ШИРЕ, чем у спелла в забеге (0.20 с / 55 px). Спелл — необязательное
+# действие: не вышло — просто не скастовал. Здесь дабл-тап это ЕДИНСТВЕННЫЙ
+# способ ударить, и не распознанное касание читается не как «не попал в окно», а
+# как «удар не работает». Плата за широкое окно — случайный удар при быстром
+# ведении головы; она меньше, чем бой, в котором не бьётся.
+const DTAP_TIME : float = 0.32
+const DTAP_DIST : float = 80.0
 
 var _last_tap_t   : float   = -10.0
 var _last_tap_pos : Vector2 = Vector2.ZERO
@@ -1429,6 +1537,11 @@ func _process(delta: float) -> void:
 	# паузах между волнами Нормальдо обязан стоять к сопернику лицом, а не
 	# застывать в том развороте, в каком его застало последнее движение.
 	_face_foe()
+	# Реплика короля держится у его головы, пока он входит в круг.
+	if is_instance_valid(_king_say):
+		_move_king_say()
+		if is_instance_valid(_foe_sprite) and _foe_state != "enter":
+			_drop_king_say()
 	if not _running:
 		return
 	_walk_foe(delta)
@@ -1648,7 +1761,9 @@ func _caption(text: String, col: Color) -> void:
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	l.size                 = Vector2(vp.x, 44.0)
-	l.position             = Vector2(0.0, BAR_Y + BAR_SEG_H + 10.0)
+	# Ниже подсказки: обе строки в верхней панели, и наезжать друг на друга им
+	# нельзя — «БЛОК!» появляется ровно тогда, когда подсказка ещё нужна.
+	l.position             = Vector2(0.0, BAR_Y + BAR_SEG_H + 38.0)
 	l.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	var lay := CanvasLayer.new()
 	lay.layer = BAR_Z + 1
@@ -1756,6 +1871,8 @@ func _wave_king() -> void:
 			_king_crowd.z_index = CROWD_Z + 60
 	_king_steps_out()
 	_spawn_foe(F_IDLE, BOSS_PX, Color.WHITE, from)
+	# И говорит он это, ВЫХОДЯ, — облачко идёт с ним до самого круга.
+	_say_over_king(KING_ENTER_SAY)
 	# Драка идёт сама: преследование, заряд и рывок крутятся в `_walk_foe`, а
 	# злость выражается тем, что отдышка короче — см. `king_gap`. Здесь остаётся
 	# только дождаться, пока рейки кончатся.
