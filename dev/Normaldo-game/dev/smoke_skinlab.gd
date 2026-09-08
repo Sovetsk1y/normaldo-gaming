@@ -42,7 +42,7 @@ func _const(node: Node, name: String):
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 44
+const EXPECTED_CHECKS : int = 50
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -67,6 +67,10 @@ func _initialize() -> void:
 	await _test_worn_width()
 	print("── Кадр поедания ──")
 	await _test_pose()
+	print("── Классика: правка доходит ──")
+	await _test_classic_moves()
+	print("── Чип лаборатории под флагом ──")
+	await _test_lab_chip_gated()
 	_finish()
 
 # ── Кадр поедания ────────────────────────────────────────────────────────────
@@ -479,6 +483,85 @@ func _test_worn_width() -> void:
 	lab.queue_free()
 	await process_frame
 	_met.call("layout_restore", snap)
+
+# ── КЛАССИКА ДВИГАЕТСЯ, И КАДР «ЕСТ» НЕ УЛЕТАЕТ ──────────────────────────────
+# Тихая пара ошибок, найденная по жалобе «первый скин в лабе не двигается
+# никак»: у классики посадка бралась ЖЁСТКОЙ пиксельной константой, и ручная
+# правка на неё не влияла вовсе. Сдвиг при этом честно копился в файле — а тот
+# же накопленный сдвиг применялся к кадру «ест» (его-то сажают по доле кадра) и
+# уносил кадр на пол-экрана в сторону.
+#
+# Проверяется поэтому и то, и другое: что правка ДОХОДИТ и что кадр варианта
+# остаётся рядом со своим кадром покоя.
+func _test_classic_moves() -> void:
+	var snap = _met.call("layout_snapshot")
+	var lab : Node = await _open_lab()
+	if lab == null:
+		_check(false, "лаборатория открылась")
+		return
+	lab.set("_skin", 0)
+	lab.set("_fat", 3)
+	lab.set("_pose", "")
+	lab.call("_refresh")
+	await process_frame
+	var spr : Sprite2D = lab.get("_sprite")
+	var was : Vector2 = spr.position
+	# Двигаем ровно тем же путём, что и палец в лаборатории.
+	lab.call("_apply", "classic", float(lab.call("_cur_tweak", "classic")),
+		Vector2(0.02, 0.0))
+	await process_frame
+	_check(spr.position.distance_to(was) > 1.0,
+		"классика ДВИГАЕТСЯ ручной правкой: %s → %s" % [was.round(), spr.position.round()])
+
+	# А кадр «ест» садится рядом с кадром покоя, а не улетает.
+	lab.call("_apply", "classic", float(lab.call("_cur_tweak", "classic")), Vector2.ZERO)
+	await process_frame
+	var idle_pos : Vector2 = spr.position
+	var idle_scale : float = spr.scale.x
+	lab.set("_pose", "_eat")
+	lab.call("_refresh")
+	await process_frame
+	_check(spr.position.distance_to(idle_pos) < 40.0,
+		"кадр «ест» садится рядом с покоем: %s против %s"
+			% [spr.position.round(), idle_pos.round()])
+
+	# И МАСШТАБ У НЕГО ТОТ ЖЕ, ЧТО В ИГРЕ: база по кадру ПОКОЯ, помноженная на
+	# поправку кадра (`normaldo._show_head`). Считая базу по кадру варианта,
+	# лаборатория показывала голову в полтора раза крупнее, чем видит игрок, —
+	# и по ней подбирали числа.
+	var pk : float = float(_met.call("pose_k", "classic", "_eat", 3))
+	_check(absf(spr.scale.x - idle_scale * pk) < 0.01,
+		"и масштаб как в игре: %.3f против %.3f" % [spr.scale.x, idle_scale * pk])
+
+	lab.queue_free()
+	await process_frame
+	_met.call("layout_restore", snap)
+
+# ── ЧИП ЛАБОРАТОРИИ ЖИВЁТ ПОД ФЛАГОМ, И ОТДЕЛЬНО ОТ ЧИПА «ОПЫТ» ──────────────
+# Они строились в одной функции: флаг на них один, а смысл разный. Опыт задуман
+# оставаться и в сборке без инструментария — лестницу скинов иначе не проверить,
+# — и, вынеся его из-под рубильника, вынесли бы заодно и лабораторию, не заметив.
+func _test_lab_chip_gated() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var hud : Node = game.get_node_or_null("HUD")
+	_check(hud != null and hud.has_method("_build_menu_dev_lab_btn"),
+		"чип лаборатории собирается своей функцией")
+	# И функция чипа «ОПЫТ» его больше не создаёт.
+	var src := FileAccess.get_file_as_string("res://scripts/hud.gd")
+	var xp_i : int = src.find("func _build_menu_dev_xp_btn")
+	var lab_i : int = src.find("func _build_menu_dev_lab_btn")
+	var xp_body : String = src.substr(xp_i, maxi(0, lab_i - xp_i)) if xp_i >= 0 and lab_i > xp_i else ""
+	_check(not xp_body.contains("_show_skin_lab"),
+		"и чип «ОПЫТ» её не тащит за собой")
+	# А вызывается он под флагом.
+	var call_i : int = src.find("_build_menu_dev_lab_btn(vp)")
+	var gate_i : int = src.rfind("if DevFlags.ENABLED", call_i)
+	_check(gate_i > 0 and call_i - gate_i < 600,
+		"и стоит он под DevFlags.ENABLED")
+	game.queue_free()
+	await process_frame
 
 # Лаборатория поверх живой игры — тем же путём, каким её открывает игрок.
 func _open_lab() -> Node:

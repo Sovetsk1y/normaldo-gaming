@@ -531,6 +531,16 @@ func _build_podium_card(r: Dictionary, pos: Vector2, size: Vector2, place: int, 
 		_build_reward_block(_podium_root, pos + Vector2(10.0, size.y - 26.0),
 			size.x - 20.0, LeaderboardModes.reward_for_place(place), 18.0)
 
+	# ПО КАРТОЧКЕ ПЬЕДЕСТАЛА ТОЖЕ МОЖНО ТАПНУТЬ. Тап по строке открывает карточку
+	# игрока, а первые три места — не строки, а карточки, и по ним не
+	# происходило ничего. Между тем именно туда игрок тычет первым делом: верх
+	# таблицы — это и есть те, «кто это вообще такие».
+	#
+	# Зона добавляется ПОСЛЕДНЕЙ, поверх всей карточки: подписи и иконки под ней
+	# мышь игнорируют, перехватывать ей нечего.
+	var row_copy : Dictionary = r.duplicate(true)
+	UiKit.tap_zone(_podium_root, pos, size, func(): _show_player_card(row_copy))
+
 # Своя строка внизу экрана — видна всегда. Тап прокручивает список к себе
 # (бывшая плавающая кнопка «МОЯ ПОЗИЦИЯ», которая закрывала строки списка).
 func _build_my_strip(vp: Vector2) -> void:

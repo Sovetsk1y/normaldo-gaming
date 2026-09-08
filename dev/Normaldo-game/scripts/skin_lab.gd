@@ -740,20 +740,50 @@ func _refresh() -> void:
 # (POSE_K для пустого варианта не спрашивают), у поедания она и есть то, что
 # здесь правится.
 func _shown_scale(id: String, tex: Texture2D) -> float:
-	var s : float = SkinMetrics.sprite_scale(id, _fat, tex.get_size())
 	if _pose.is_empty():
-		return s
-	return s * SkinMetrics.pose_k(id, _pose, _fat)
+		return SkinMetrics.sprite_scale(id, _fat, tex.get_size())
+	# БАЗА БЕРЁТСЯ ПО КАДРУ ПОКОЯ, а не по кадру варианта. Так считает игра
+	# (`normaldo._show_head`: `_base_scale * _head_k`), и иначе поправка кадра
+	# применяется дважды: `POSE_K` затем и мерили, чтобы привести кадр варианта к
+	# масштабу покоя. У классики на четвёртом жире это давало ×1.252 вместо
+	# ×0.833 — голова в лаборатории была в полтора раза крупнее, чем в игре.
+	var idle : Texture2D = SkinRegistry.get_avatar_texture(id, _fat)
+	var base : float = SkinMetrics.sprite_scale(id, _fat,
+		idle.get_size() if idle != null else tex.get_size())
+	return base * SkinMetrics.pose_k(id, _pose, _fat)
+
+# Посадка КАДРА ПОКОЯ — построчно как `normaldo._apply_head_offset`.
+func _idle_offset(id: String, tex: Texture2D, s: float) -> Vector2:
+	var sz : Vector2 = tex.get_size()
+	if id == "classic":
+		# База у классики в пикселях, а не в долях кадра, — но ручная правка
+		# поверх неё применяется, как у всех. Пока не применялась, классика была
+		# единственным скином, который в лаборатории не двигался: сдвиг копился
+		# в файле, а на экране не менялось ничего.
+		var nd : Vector2 = SkinMetrics.nudge_for(id, _fat)
+		return CLASSIC_NUDGE_PX + Vector2(-nd.x * sz.x * s, -nd.y * sz.y * s)
+	var off : Vector2 = SkinMetrics.offset_for(id, _fat)
+	return Vector2(-off.x * sz.x * s, -off.y * sz.y * s)
+
+# ЯКОРЬ ГОЛОВЫ — точка, к которой прикалываются кадры вариантов. Считается по
+# кадру покоя, ровно как `normaldo._recalc_head_anchor`: иначе кадр «ест»
+# садился бы от нуля, а в игре — от якоря, и лаборатория показывала бы не игру.
+# У классики разница ровно на её пиксельный сдвиг, то есть постоянные 14 px.
+func _anchor_offset(id: String) -> Vector2:
+	var idle : Texture2D = SkinRegistry.get_avatar_texture(id, _fat)
+	if idle == null:
+		return Vector2.ZERO
+	var si : float = SkinMetrics.sprite_scale(id, _fat, idle.get_size())
+	var off : Vector2 = SkinMetrics.offset_for(id, _fat)
+	var sz : Vector2 = idle.get_size()
+	return _idle_offset(id, idle, si) + Vector2(off.x * sz.x * si, off.y * sz.y * si)
 
 func _sprite_offset(id: String, tex: Texture2D, s: float) -> Vector2:
-	# Классика садится по замеренному в пикселях сдвигу — но только в покое: у
-	# её кадра поедания своя рамка, и по ней считается так же, как у всех.
-	if id == "classic" and _pose.is_empty():
-		return CLASSIC_NUDGE_PX
+	if _pose.is_empty():
+		return _idle_offset(id, tex, s)
 	var sz : Vector2 = tex.get_size()
-	var off : Vector2 = SkinMetrics.offset_for(id, _fat) if _pose.is_empty() \
-		else SkinMetrics.pose_off(id, _pose, _fat)
-	return Vector2(-off.x * sz.x * s, -off.y * sz.y * s)
+	var off : Vector2 = SkinMetrics.pose_off(id, _pose, _fat)
+	return _anchor_offset(id) - Vector2(off.x * sz.x * s, off.y * sz.y * s)
 
 # Правая панель. Показывает не «что нарисовано», а ЧИСЛА, по которым это
 # нарисовано, — и отдельно то, из чего они сложились: замер, коробка, ручная

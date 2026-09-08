@@ -211,6 +211,34 @@ func _test_podium(hud: Node, mock: Node) -> void:
 	_check(t.has("1") and t.has("2") and t.has("3"),
 		"на карточках подиума стоят номера мест")
 
+	# ПО КАРТОЧКАМ ПОДИУМА ТОЖЕ МОЖНО ТАПНУТЬ. Тап по строке списка открывает
+	# карточку игрока с самого начала, а первые три места — не строки, а
+	# карточки: по ним не происходило ничего. Между тем именно туда игрок тычет
+	# первым делом, и жалоба пришла ровно об этом — «жал на второе место».
+	var pod_zones : Array = []
+	for c in (scr.get("_podium_root") as Node).get_children():
+		if c is Control and (c as Control).mouse_filter == Control.MOUSE_FILTER_PASS:
+			pod_zones.append(c)
+	_check(pod_zones.size() >= 3,
+		"по карточкам подиума можно тапнуть: зон %d" % pod_zones.size())
+	if not pod_zones.is_empty():
+		var pz : Control = pod_zones[0]
+		var d0 := InputEventScreenTouch.new()
+		d0.pressed  = true
+		d0.position = pz.global_position + pz.size * 0.5
+		pz.gui_input.emit(d0)
+		var u0 := InputEventScreenTouch.new()
+		u0.pressed  = false
+		u0.position = d0.position
+		pz.gui_input.emit(u0)
+		await process_frame
+		_check(scr.get("_card_node") != null,
+			"и тап по карточке подиума открывает профиль")
+		var c0 = scr.get("_card_node")
+		if is_instance_valid(c0):
+			c0.queue_free()
+			await process_frame
+
 	# Имена на подиуме — те же, что у первых трёх строк поданных данных.
 	var names_ok := t.has("И1") and t.has("И2") and t.has("И3")
 	_check(names_ok, "на подиуме те же игроки, что и в данных: %s" % [t])

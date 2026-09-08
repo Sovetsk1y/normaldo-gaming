@@ -261,6 +261,24 @@ func _test_claim(hud: Node, save: Node) -> void:
 	# второй раз не даст ничего и прочтётся как сбой.
 	_check(not (hud.get("_go_quest_claim") as Dictionary).has(0),
 		"а кнопка после нажатия убрана")
+	# И ПОЛОСА ЗАНИМАЕТ ЕЁ МЕСТО. Кнопка ушла, и на её месте оставалась дыра:
+	# строка задания вдруг становилась короче соседних, и это читается как
+	# «что-то пропало», а не как «награда забрана».
+	var parts : Dictionary = (hud.get("_go_quest_bar") as Dictionary).get(0, {})
+	var bg : Control = parts.get("bg")
+	var want_w : float = float(parts.get("full_w", 0.0))
+	var was_w : float = bg.size.x if is_instance_valid(bg) else 0.0
+	_check(want_w > was_w,
+		"полосе есть куда расти: %.0f из %.0f px" % [was_w, want_w])
+	# Рост ПЛАВНЫЙ — твином, а не подстановкой: на паузе экрана смерти обычный
+	# твин не идёт вовсе, и первая версия этой анимации не играла бы никогда.
+	var t_grow := Time.get_ticks_msec()
+	while is_instance_valid(bg) and bg.size.x < want_w - 1.0 \
+			and Time.get_ticks_msec() - t_grow < 2000:
+		await process_frame
+	_check(is_instance_valid(bg) and bg.size.x >= want_w - 1.0,
+		"и она дотянулась до края: %.0f из %.0f px"
+			% [bg.size.x if is_instance_valid(bg) else -1.0, want_w])
 	var d1 : int = int(save.get("dollars"))
 	hud.call("_on_go_claim_daily", 0, Vector2(100.0, 100.0))
 	await process_frame

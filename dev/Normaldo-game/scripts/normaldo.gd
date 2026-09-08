@@ -407,10 +407,17 @@ func _apply_head_offset() -> void:
 	if tex == null:
 		return
 	var pos : Vector2
+	var sz  : Vector2 = tex.get_size()
 	if SaveData.active_skin == "classic" and not _fat_boss_active:
-		pos = CLASSIC_HEAD_NUDGE_PX
+		# У классики база — замеренный в пикселях сдвиг, а не доля кадра. Но
+		# РУЧНАЯ ПРАВКА поверх него применяться обязана: без неё классика была
+		# единственным скином, который в лаборатории не двигался вовсе — сдвиг
+		# копился в файле, на экране не менялось ничего, и тот же накопленный
+		# сдвиг всплывал на кадре «ест» (его-то сажают по доле кадра) и уносил
+		# кадр на пол-экрана.
+		var nd := SkinMetrics.nudge_for("classic", fat_state)
+		pos = CLASSIC_HEAD_NUDGE_PX 			+ Vector2(-nd.x * sz.x * _base_scale.x, -nd.y * sz.y * _base_scale.y)
 	else:
-		var sz  : Vector2 = tex.get_size()
 		var off := SkinMetrics.offset_for(SaveData.active_skin, fat_state)
 		pos = Vector2(-off.x * sz.x * _base_scale.x, -off.y * sz.y * _base_scale.y)
 	# СДВИГ ЗЕРКАЛИТСЯ ВМЕСТЕ С КАДРОМ. Он существует ровно затем, чтобы голова

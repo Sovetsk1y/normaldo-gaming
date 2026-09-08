@@ -1380,6 +1380,8 @@ func _show_menu() -> void:
 		# иначе можно только забегами. Сбросы и доллары — под общим рубильником
 		# инструментария.
 		_build_menu_dev_xp_btn(vp)
+		# Лаборатория скинов — только под флагом, и гейт стоит ЗДЕСЬ, на виду.
+		_build_menu_dev_lab_btn(vp)
 	if DevFlags.ENABLED and DevFlags.TOOLBOX:
 		_build_menu_dev_reset_skins_btn(vp)
 		_build_menu_dev_reset_quests_btn(vp)
@@ -1517,9 +1519,16 @@ func _build_menu_dev_xp_btn(vp: Vector2) -> void:
 	var chip := _menu_dev_chip(Vector2(8.0 + (SZ + GAP) * 4.0, vp.y - SZ - 8.0),
 		"ОПЫТ", Color(0.55, 1.00, 0.55), _toggle_menu_xp_row)
 	_menu_overlay.add_child(chip)
-	# Лаборатория скинов — третий чип под голым ENABLED, и это не размывание
-	# правила, а его же буква: правило про чипы, СТОЯЩИЕ НА ИГРОВОМ ЭКРАНЕ
-	# (см. dev_flags.gd), а этот живёт в меню, как и соседний ОПЫТ.
+
+# ЛАБОРАТОРИЯ — СВОЙ ЧИП И СВОЙ ФЛАГ. Раньше она строилась вместе с чипом
+# «ОПЫТ», в его же функции. Флаг на них при этом был один, но по смыслу они
+# разные: опыт задуман оставаться и в сборке без инструментария (лестницу скинов
+# иначе не проверить), а лаборатория — чистый инструмент разработки. Пока они
+# жили в одной функции, вынести опыт из-под рубильника значило бы молча вынести
+# из-под него и лабораторию.
+func _build_menu_dev_lab_btn(vp: Vector2) -> void:
+	const SZ : float = 44.0
+	const GAP : float = 6.0
 	var lab := _menu_dev_chip(Vector2(8.0 + (SZ + GAP) * 5.0, vp.y - SZ - 8.0),
 		"СКИНЫ", Color(0.55, 0.80, 1.00), _show_skin_lab)
 	_menu_overlay.add_child(lab)
@@ -8400,8 +8409,12 @@ func _build_go_quest_row(pos: Vector2, size: Vector2, slot: int, _pm: int) -> vo
 		# и без действия. Читается как сломанная кнопка, а не как забранная
 		# награда.
 		_go_quest_claim[slot] = [btn, bl, bbg]
-	_go_quest_bar[slot] = _go_bar(pos + Vector2(8.0, size.y - 19.0), bar_w, 14.0,
+	var parts : Dictionary = _go_bar(pos + Vector2(8.0, size.y - 19.0), bar_w, 14.0,
 		frac, col, line, _pm)
+	# Полная ширина строки — та, что была бы без кнопки. По ней полоса дотянется
+	# до края, когда награду заберут.
+	parts["full_w"] = size.x - 16.0
+	_go_quest_bar[slot] = parts
 
 # Забрать награду задания с экрана смерти.
 #
@@ -8425,10 +8438,30 @@ func _on_go_claim_daily(slot: int, src: Vector2) -> void:
 		if is_instance_valid(n):
 			(n as Node).queue_free()
 	_go_quest_claim.erase(slot)
-	var bar : Label = _go_quest_bar.get(slot)
+	var parts : Dictionary = _go_quest_bar.get(slot, {})
+	var bar : Label = parts.get("lbl")
 	if is_instance_valid(bar):
 		bar.text     = "ЗАБРАНО"
 		bar.modulate = Color(0.70, 1.00, 0.72)
+	# ПОЛОСА ДОТЯГИВАЕТСЯ ДО КРАЯ — плавно. Кнопка ушла, и на её месте осталась
+	# дыра: строка задания вдруг оказывалась короче соседних, и это читалось как
+	# «что-то пропало», а не как «награда забрана». Рост полосы говорит обратное:
+	# место освободилось, потому что дело сделано.
+	var full : float = float(parts.get("full_w", 0.0))
+	if full > 0.0:
+		_go_grow_bar(parts.get("bg"),   full)
+		_go_grow_bar(bar,               full)
+		_go_grow_bar(parts.get("fill"), full - 4.0)
+
+# Плавный рост одной части полоски. Твин с `TWEEN_PAUSE_PROCESS`: экран смерти
+# останавливает игру, и обычный твин на паузе не идёт вовсе.
+func _go_grow_bar(node, to_w: float) -> void:
+	if not (node is Control) or not is_instance_valid(node):
+		return
+	var c : Control = node
+	var tw := create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_property(c, "size:x", to_w, 0.30)\
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 # Иконки награды летят к балансу. Отдельно от `_go_fly_dollars`: тот ещё и
 # крутит счётчик долларов по дороге, а здесь баланс уже изменил `claim_daily`,
@@ -8447,15 +8480,19 @@ func _go_fly_icons(tex: Texture2D, src: Vector2, count: int) -> void:
 		tw.parallel().tween_property(fly, "modulate:a", 0.0, 0.18).set_delay(0.28)
 		tw.tween_callback(fly.queue_free)
 
-# Возвращает подпись полоски: строке задания она нужна, чтобы переписать её на
-# «ЗАБРАНО» после получения награды.
+# Возвращает ЧАСТИ полоски, а не одну подпись. Строке задания нужна не только
+# подпись («ЗАБРАНО» после получения): забранная награда освобождает место, где
+# стояла кнопка, и полоса дотягивается туда — а для этого её надо за что-то
+# взять.
 func _go_bar(pos: Vector2, w: float, h: float, frac: float, col: Color,
-		text: String, _pm: int) -> Label:
-	UiKit.panel(self, pos, Vector2(w, h),
-		Color(0.03, 0.03, 0.05, 0.95), 6, Color(0.28, 0.30, 0.38, 0.9), 1).process_mode = _pm
+		text: String, _pm: int) -> Dictionary:
+	var bg : Panel = UiKit.panel(self, pos, Vector2(w, h),
+		Color(0.03, 0.03, 0.05, 0.95), 6, Color(0.28, 0.30, 0.38, 0.9), 1)
+	bg.process_mode = _pm
+	var fill : Panel = null
 	var f : float = clampf(frac, 0.0, 1.0)
 	if f > 0.0:
-		var fill := Panel.new()
+		fill = Panel.new()
 		fill.add_theme_stylebox_override("panel", UiKit.rounded(
 			Color(col.r, col.g, col.b, 0.85), 5))
 		fill.process_mode = _pm
@@ -8473,7 +8510,7 @@ func _go_bar(pos: Vector2, w: float, h: float, frac: float, col: Color,
 	l.process_mode         = _pm
 	l.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	UiKit.place(self, l, pos, Vector2(w, h))
-	return l
+	return { "lbl": l, "bg": bg, "fill": fill, "frac": f }
 
 # Быстрая прокачка скина прямо с экрана смерти: четыре кнопки опыта и сброс
 # уровня. Нужны, чтобы за минуту прогнать скин по всей лестнице наград.
