@@ -22,8 +22,12 @@ func _initialize() -> void:
 	var story : String = String(sp.call("level_story"))
 	print("эпизод %d → «%s»" % [ep, story])
 	LevelTransition.play(hud, "НЕМНОГО ПОЗДНЕЕ…", func() -> void: pass, story)
-	# Ждём, пока шторка закроется и текст проявится.
-	for _i in 70:
+	# Ждём, пока переход закроет экран и текст проявится. Отсчёт в РЕАЛЬНОМ
+	# времени, а не в кадрах: твины идут по `SceneTree.create_timer`, и семьдесят
+	# кадров headless-рендера в секунду не укладываются — кадр выходил до того,
+	# как облако доезжало.
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 1500:
 		await process_frame
 	await RenderingServer.frame_post_draw
 	get_root().get_texture().get_image().save_png("%s/curtain.png" % out)

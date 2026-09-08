@@ -135,7 +135,24 @@ static func play(host: Node, caption: String, on_covered: Callable,
 
 var _rect : ColorRect = null
 
+# ── ДВА ПЕРЕХОДА, ОДИН ВКЛЮЧЁН ───────────────────────────────────────────────
+# «money» — облако денег во весь экран, без шторки вообще (`_run_money`).
+# «curtain» — прежний: зубчатая шторка закрывается, под ней летят деньги, и она
+# открывается обратно (`_run_curtain`).
+#
+# Старый НЕ УДАЛЁН намеренно. Он рабочий, проверен тестом и отличается от нового
+# не мелочью, а самим приёмом: шторка ГАРАНТИРУЕТ, что подмена фона не видна
+# (сплошная заливка), а облако держит это плотностью и подложкой. Если у облака
+# на каком-нибудь экране полезут просветы, вернуться — это одна строка здесь.
+const STYLE : String = "money"
+
 func _run(caption: String, on_covered: Callable, story: String = "") -> void:
+	if STYLE == "curtain":
+		await _run_curtain(caption, on_covered, story)
+		return
+	await _run_money(caption, on_covered, story)
+
+func _run_curtain(caption: String, on_covered: Callable, story: String = "") -> void:
 	layer = LAYER
 	# Переход обязан идти и на паузе, и до включения управления: он часть
 	# сцены, а не часть геймплея.
@@ -223,6 +240,176 @@ func _run(caption: String, on_covered: Callable, story: String = "") -> void:
 
 	# ── Открываемся ──────────────────────────────────────────────────────────
 	await _tween_factor(1.0, 0.0, REVEAL_T)
+
+# ── Переход ОБЛАКОМ ДЕНЕГ ────────────────────────────────────────────────────
+# Шторки нет вовсе. Справа влетает одно сплошное облако из сотен купюр, налепших
+# друг на друга, — оно закрывает экран целиком; поверх него проступает сюжетный
+# текст; всё это висит пару секунд и уезжает дальше влево, вместе с текстом.
+#
+# ── Почему одно облако, а не дождь ──────────────────────────────────────────
+# Дождь из отдельных купюр — это фон, сквозь который видно происходящее; он и
+# был у старой шторки в роли украшения. Здесь деньги не украшают переход, они и
+# ЕСТЬ переход: за ними меняется эпизод, и потому им надо быть непрозрачной
+# массой, а не россыпью.
+#
+# Отсюда и устройство: все купюры лежат в ОДНОМ узле и едут одним твином. Триста
+# отдельных твинов — это триста отдельных скоростей, то есть снова россыпь; да и
+# считать их каждый кадр незачем.
+#
+# ── Купюры стоят по СЕТКЕ, а не разбросаны случайно ─────────────────────────
+# Случайная россыпь оставляет дыры: при трёхкратном перекрытии по площади всё
+# равно около пяти процентов экрана остаётся пустым — и это не абстракция, а
+# мигающие окошки в живой забег ровно в тот момент, когда за ними подменяют фон.
+# Сетка с шагом меньше купюры кроет по построению; случайность добавляется
+# СВЕРХУ, сдвигом внутри клетки, и на плотность не влияет.
+const CLOUD_BILL_PX : float = 112.0
+# Шаг сетки — заметно меньше купюры, чтобы соседние перекрывались телами, а не
+# краями. 0.46 даёт перекрытие по площади примерно в два с половиной раза — при
+# 0.56 выходило полтора, и на подложке между купюрами оставались видимые
+# проплешины.
+const CLOUD_STEP_K  : float = 0.46
+# Насколько облако шире и выше экрана. Запас нужен с обеих сторон: слева и
+# справа — чтобы край облака не показался ровной линией, сверху и снизу — чтобы
+# при качании оно не отходило от краёв.
+const CLOUD_OVER_W  : float = 1.55
+const CLOUD_OVER_H  : float = 1.45
+# Разброс внутри клетки, доля шага. Больше половины — и сетка снова начинает
+# оставлять дыры.
+const CLOUD_JITTER_K : float = 0.34
+
+const CLOUD_FLY_IN  : float = 0.85
+const CLOUD_HOLD    : float = 2.00
+const CLOUD_FLY_OUT : float = 0.85
+
+# ПОДЛОЖКА ЦВЕТА ДЕНЕГ, а не чёрная. У знака доллара внутри дырки, и сквозь
+# самую плотную кучу купюр всё равно просвечивает то, что под ней. Чёрная
+# подложка вернула бы ровно тот чёрный экран, ради ухода от которого этот переход
+# и сделан; тёмно-зелёная читается как тень между бумажками.
+#
+# Она ПРИБИТА К ЭКРАНУ, а не к облаку: поедь она с облаком, её прямая кромка
+# проехала бы через кадр зелёной шторкой. Появляется она под уже сомкнувшейся
+# массой и потому невидима сама по себе.
+const COL_CLOUD_BACK : Color = Color(0.04, 0.10, 0.06)
+const CLOUD_BACK_T   : float = 0.20
+
+func _run_money(caption: String, on_covered: Callable, story: String = "") -> void:
+	layer = LAYER
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	var vp : Vector2 = get_viewport().get_visible_rect().size
+
+	var back := ColorRect.new()
+	back.color        = Color(COL_CLOUD_BACK.r, COL_CLOUD_BACK.g, COL_CLOUD_BACK.b, 0.0)
+	back.size         = vp
+	back.z_index      = 0
+	back.mouse_filter = Control.MOUSE_FILTER_STOP   # тапы сквозь переход не идут
+	add_child(back)
+
+	var cloud := _build_cloud(vp)
+	cloud.z_index = 1
+	add_child(cloud)
+
+	# Текст — РЕБЁНОК ОБЛАКА: он обязан уехать вместе с деньгами, а не растаять
+	# на месте, пока они улетают.
+	# Кегль КРУПНЕЕ, чем у шторки. Там текст лежал на ровной заливке и читался
+	# любым; здесь под ним вороха знаков доллара того же масштаба, и надпись
+	# обязана быть заметно крупнее их, иначе тонет в общей ряби.
+	var lbl := _cloud_label(caption, 46, COL_TEXT, Vector2(-vp.x * 0.5, -34.0),
+		Vector2(vp.x, 64.0))
+	cloud.add_child(lbl)
+	var story_lbl : Label = null
+	if not story.strip_edges().is_empty():
+		story_lbl = _cloud_label(story, 28, COL_STORY,
+			Vector2(-vp.x * 0.5, 36.0), Vector2(vp.x, 36.0))
+		cloud.add_child(story_lbl)
+
+	# ── Влетает ──────────────────────────────────────────────────────────────
+	cloud.position = Vector2(vp.x * 1.6, vp.y * 0.5)
+	var tw_in := create_tween()
+	tw_in.tween_property(cloud, "position:x", vp.x * 0.5, CLOUD_FLY_IN)\
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	# Подложка догоняет ровно к приходу: раньше — и её кромку видно, позже — и
+	# просветы успеют мигнуть.
+	tw_in.parallel().tween_property(back, "color:a", 1.0, CLOUD_BACK_T)\
+		.set_delay(maxf(0.0, CLOUD_FLY_IN - CLOUD_BACK_T))
+	await tw_in.finished
+	if not is_inside_tree():
+		if on_covered.is_valid():
+			on_covered.call()
+		return
+
+	# Экран закрыт — вот теперь можно менять всё, что меняется.
+	if on_covered.is_valid():
+		on_covered.call()
+
+	# ── Текст ────────────────────────────────────────────────────────────────
+	var tw := create_tween()
+	tw.tween_property(lbl, "modulate:a", 1.0, 0.22)
+	if story_lbl != null:
+		# Сюжетная строка появляется ЧУТЬ ПОЗЖЕ главной: одновременно они читаются
+		# как один блок из двух строк, а по очереди — как «прошло время… и вот
+		# зачем ты здесь».
+		tw.parallel().tween_property(story_lbl, "modulate:a", 1.0, 0.22).set_delay(0.16)
+	await tw.finished
+	await get_tree().create_timer(CLOUD_HOLD).timeout
+	if not is_inside_tree():
+		return
+
+	# ── Улетает ДАЛЬШЕ, вместе с текстом ─────────────────────────────────────
+	# Не назад и не растворяясь: облако прошло сквозь кадр и ушло. Обратный ход
+	# читался бы как «передумало», а растворение — как выключенный свет.
+	var tw_out := create_tween()
+	tw_out.tween_property(cloud, "position:x", -vp.x * 1.6, CLOUD_FLY_OUT)\
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+	# Подложка гаснет СРАЗУ: под ней уже новый эпизод, и держать её до конца
+	# значило бы смотреть, как облако улетает с тёмного экрана.
+	tw_out.parallel().tween_property(back, "color:a", 0.0, CLOUD_BACK_T)
+	await tw_out.finished
+
+# Купюры одной кучей. Возвращает узел, у которого начало координат — центр
+# облака: так его достаточно возить по x, не пересчитывая ничего внутри.
+func _build_cloud(vp: Vector2) -> Node2D:
+	var root := Node2D.new()
+	var ts : Vector2 = DOLLAR_TEX.get_size()
+	var step : float = CLOUD_BILL_PX * CLOUD_STEP_K
+	var w : float = vp.x * CLOUD_OVER_W
+	var h : float = vp.y * CLOUD_OVER_H
+	var cols : int = int(ceil(w / step)) + 1
+	var rows : int = int(ceil(h / step)) + 1
+	var jit : float = step * CLOUD_JITTER_K
+	for cy in rows:
+		for cx in cols:
+			var b := Sprite2D.new()
+			b.texture        = DOLLAR_TEX
+			b.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			var px : float = CLOUD_BILL_PX * randf_range(0.82, 1.18)
+			b.scale    = Vector2.ONE * (px / maxf(ts.x, ts.y))
+			b.rotation = randf_range(-PI, PI)
+			b.position = Vector2(-w * 0.5 + float(cx) * step + randf_range(-jit, jit),
+				-h * 0.5 + float(cy) * step + randf_range(-jit, jit))
+			root.add_child(b)
+	return root
+
+func _cloud_label(text: String, size_px: int, col: Color, at: Vector2,
+		size: Vector2) -> Label:
+	var l := Label.new()
+	l.add_theme_font_override("font", UI_FONT)
+	l.add_theme_font_size_override("font_size", size_px)
+	# Обводка ОТ КЕГЛЯ, а не постоянная. Шторка ставит 12 px при любом размере, и
+	# на ней это незаметно: там под буквами ровная тёмная заливка того же цвета,
+	# что и обводка. Здесь фон пёстрый, обводка видна как есть — и 12 px при
+	# кегле 30 смыкались поверх штрихов буквы толщиной в четыре пикселя, так что
+	# светлая надпись выходила тёмным пятном в зелёном ореоле.
+	l.add_theme_color_override("font_outline_color", Color(0.03, 0.03, 0.05))
+	l.add_theme_constant_override("outline_size", int(round(float(size_px) * 0.18)))
+	l.text                 = text
+	l.modulate             = Color(col.r, col.g, col.b, 0.0)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	l.size                 = size
+	l.position             = at
+	l.z_index              = 3
+	l.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	return l
 
 func _tween_factor(from: float, to: float, sec: float) -> void:
 	if not is_instance_valid(_rect):
