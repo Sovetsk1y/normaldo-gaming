@@ -663,6 +663,12 @@ func _lock_hero() -> void:
 	if not is_instance_valid(_normaldo):
 		return
 	_normaldo.position = _clamp_to_arena(Vector2(_hero_x, _fight_y))
+	# ВЗГЛЯД — НА ПРОТИВНИКА, и только на него. В забеге направление решает
+	# движение, но здесь есть тот, с кем дерутся: голова, смотрящая туда, куда
+	# последний раз вели пальцем, дерётся затылком к сопернику. Куда именно
+	# смотреть, говорим каждый кадр (`_face_foe`).
+	if _normaldo.has_method("set_face_lock"):
+		_normaldo.call("set_face_lock", true)
 	if _normaldo.has_method("set_spells_blocked"):
 		_normaldo.call("set_spells_blocked", true)
 	if _normaldo.has_method("resume_input"):
@@ -728,6 +734,9 @@ func _update_cd_bar() -> void:
 func _release_hero() -> void:
 	if not is_instance_valid(_normaldo):
 		return
+	# Взгляд возвращается забегу: дальше смотреть надо туда, откуда всё летит.
+	if _normaldo.has_method("set_face_lock"):
+		_normaldo.call("set_face_lock", false)
 	if _normaldo.has_method("set_spells_blocked"):
 		_normaldo.call("set_spells_blocked", false)
 	if _normaldo.has_method("resume_input"):
@@ -973,7 +982,12 @@ func _walk_foe(delta: float) -> void:
 func _enter_charge() -> void:
 	_foe_state   = "charge"
 	_foe_state_t = 0.0
-	_dash_to     = _hero_pos()
+	# Целится НЕ В САМОГО ИГРОКА, а на длину вытянутой руки перед ним. Раньше
+	# точкой рывка была ровно позиция головы, и не ушедший игрок обнаруживал
+	# пирата в своей собственной точке — две головы в одной.
+	var to_hero : Vector2 = _hero_pos() - _foe_pos
+	_dash_to = _hero_pos() - (to_hero.normalized() if to_hero.length() > 1.0
+		else Vector2.LEFT) * _min_gap()
 	# Нахмуренный кадр — телеграф заряда: у босса нет ни ленты, ни прицела, и
 	# предупреждает он лицом.
 	if current_wave == "king" and is_instance_valid(_foe_sprite):
@@ -1175,9 +1189,14 @@ func _process(delta: float) -> void:
 	# толпу можно было уйти прямо под его слова.
 	_keep_hero_in_arena()
 	_move_cd_bar()
+	# ВЗГЛЯД ТОЖЕ ВЕСЬ БОЙ, а не только пока идут волны: под реплику босса и в
+	# паузах между волнами Нормальдо обязан стоять к сопернику лицом, а не
+	# застывать в том развороте, в каком его застало последнее движение.
+	_face_foe()
 	if not _running:
 		return
 	_walk_foe(delta)
+	_keep_apart()
 	_resolve(delta)
 
 # Дистанция между головами — по ней и решается всё. Не «кулак доехал», а
@@ -1201,6 +1220,48 @@ func _foe_r() -> float:
 		return FOE_PX * 0.42
 	return ItemSizing.content_rect(_foe_sprite.texture).size.y \
 		* _foe_sprite.scale.y * 0.42
+
+# ── РАЗМЕН РАСТАЛКИВАЕТ ОБОИХ ────────────────────────────────────────────────
+# Любой исход — попал, получил, блок — разводит бойцов. Раньше отлетал только
+# получивший от игрока, а всё остальное оставляло их стоять вплотную: после
+# блока оба уже стояли нос к носу, и следующий размен начинался без дистанции,
+# то есть без самой игры. Ударил — разошлись, и подходить надо заново.
+const KNOCK_FOE  : float = 40.0
+const KNOCK_HERO : float = 30.0
+
+# Ближе этого бойцы не сходятся НИКОГДА. Пират в рывке целился в запомненную
+# точку — то есть ровно туда, где стоит игрок, — и, если тот не уходил, оказывался
+# прямо в его позиции: две головы в одной точке.
+func _min_gap() -> float:
+	return HEAD_R + _foe_r() + 10.0
+
+func _knock_apart(k_foe: float, k_hero: float) -> void:
+	var axis : Vector2 = _foe_pos - _hero_pos()
+	axis = axis.normalized() if axis.length() > 1.0 else Vector2.RIGHT
+	_foe_pos = _clamp_to_arena(_foe_pos + axis * k_foe, ARENA_MARGIN * 0.5)
+	if is_instance_valid(_normaldo):
+		_normaldo.position = _clamp_to_arena(
+			_normaldo.position - axis * k_hero, ARENA_MARGIN)
+	# И разгон сбивается: размен в разгоне — это размен, а не проезд насквозь.
+	if _foe_state == "dash" or _foe_state == "charge":
+		_enter_recover()
+
+# Каждый кадр: разъехаться, если сошлись ближе допустимого.
+func _keep_apart() -> void:
+	if not is_instance_valid(_foe_sprite) or _foe_state == "enter":
+		return
+	var d : Vector2 = _foe_pos - _hero_pos()
+	var gap : float = _min_gap()
+	if d.length() >= gap:
+		return
+	var axis : Vector2 = d.normalized() if d.length() > 1.0 else Vector2.RIGHT
+	_foe_pos = _clamp_to_arena(_hero_pos() + axis * gap, ARENA_MARGIN * 0.5)
+
+# Смотреть на противника. Каждый кадр, а не на входе: он ходит кругом, и один
+# разворот на старте боя означал бы «смотрит туда, где противник был».
+func _face_foe() -> void:
+	if is_instance_valid(_normaldo) and _normaldo.has_method("face_towards"):
+		_normaldo.call("face_towards", _foe_pos.x)
 
 # Мой кулак достаёт до него.
 func _hero_can_reach() -> bool:
@@ -1256,6 +1317,9 @@ func _block() -> void:
 	_e_swing["resolved"] = true
 	_p_cd = PUNCH_CD
 	_caption("БЛОК!", Color(1.00, 0.92, 0.55))
+	# Кулаки встретились — обоих отбросило. Раньше после блока они оставались
+	# стоять нос к носу, и следующий размен шёл уже без дистанции.
+	_knock_apart(KNOCK_FOE, KNOCK_HERO)
 	_sfx(SFX_BLOCK, -4.0)
 	SCREEN_SHAKE.play(_game_root, 7.0, 5)
 
@@ -1271,17 +1335,16 @@ func _land_on_foe() -> void:
 	# «он сам отошёл», а рейка стоит вверху экрана, куда в размене не смотрят.
 	# Тем же красным мигает и Нормальдо (`_flash_hit`) — язык один на обоих.
 	_flash_red(_foe_sprite)
-	# Отлетает назад от удара — и рывок при этом сбивается: попал в разгоне,
-	# значит разгон и сорвал.
-	_foe_pos += (_foe_pos - _hero_pos()).normalized() * 26.0
-	_foe_pos = _clamp_to_arena(_foe_pos, ARENA_MARGIN * 0.5)
-	if _foe_state == "dash" or _foe_state == "charge":
-		_enter_recover()
+	# Разводит ОБОИХ: он отлетает дальше, но и бьющего отдачей отбрасывает.
+	_knock_apart(KNOCK_FOE, KNOCK_HERO * 0.6)
 	_sfx(SFX_HIT, -2.0)
 	SCREEN_SHAKE.play(_game_root, 11.0, 7)
 
 func _land_on_hero() -> void:
 	hits_taken += 1
+	# И здесь тоже разводит обоих — иначе пират, достав в рывке, оставался стоять
+	# ровно там же, где стоит игрок.
+	_knock_apart(KNOCK_FOE * 0.6, KNOCK_HERO)
 	SCREEN_SHAKE.play(_game_root, 12.0, 8)
 	hero_hp = maxi(0, hero_hp - 1)
 	_burn(_hero_segs, hero_hp)

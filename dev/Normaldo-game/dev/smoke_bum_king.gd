@@ -21,7 +21,7 @@ const BUM_KING := preload("res://scripts/bum_king.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 74
+const EXPECTED_CHECKS : int = 79
 
 # Пауза, за которую кулак успевает дорасти до полного размера: треть замаха
 # плюс запас на кадр. Меряем руки только после неё.
@@ -342,10 +342,35 @@ func _initialize() -> void:
 	_check(reach * 0.95 > float(boss.SWING_REACH) + float(boss.HEAD_R),
 		"и это дальше прежнего «вплотную»: %.0f против %.0f px"
 			% [reach * 0.95, float(boss.SWING_REACH) + float(boss.HEAD_R)])
+	# УДАР РАЗВОДИТ ОБОИХ. После размена бойцы обязаны разойтись: стоящие вплотную
+	# начинают следующий размен без дистанции, то есть без самой игры.
+	# Ставим на дистанцию удара заново: прошлое попадание уже развело их, и
+	# следующий удар просто не дошёл бы — мерили бы «два промаха».
+	boss.set("_foe_pos", n.position + Vector2(120.0, 0.0))
+	var gap_before : float = n.position.distance_to(boss.get("_foe_pos"))
+	boss.set("_p_cd", 0.0)
+	boss.call("punch")
+	await _wait(0.5)
+	_check(n.position.distance_to(boss.get("_foe_pos")) > gap_before + 20.0,
+		"попадание разводит обоих: %.0f → %.0f px"
+			% [gap_before, n.position.distance_to(boss.get("_foe_pos"))])
+
+	# И СМОТРИТ ОН НА ПРОТИВНИКА, а не туда, куда последний раз вели пальцем.
+	boss.set("_foe_pos", n.position - Vector2(140.0, 0.0))
+	await _wait(0.2)
+	_check(bool(n.get("_facing_left")),
+		"противник слева — Нормальдо смотрит влево")
+	boss.set("_foe_pos", n.position + Vector2(140.0, 0.0))
+	await _wait(0.2)
+	_check(not bool(n.get("_facing_left")),
+		"противник справа — и он разворачивается вправо")
+
 	# ПОЛУЧИЛ — МИГНУЛ КРАСНЫМ. Попадание обязано быть видно на том, кто его
 	# получил: рейка стоит в верху экрана, куда в размене не смотрят. Бьём ещё
 	# раз и следим за спрайтом с этого момента — вспышка коротка, и по следам
-	# прошлого удара её уже не поймать.
+	# прошлого удара её уже не поймать. Ставим его обратно на дистанцию удара:
+	# прошлое попадание только что развело их.
+	boss.set("_foe_pos", n.position + Vector2(120.0, 0.0))
 	boss.set("_p_cd", 0.0)
 	boss.call("punch")
 	var hurt : Sprite2D = boss.get("_foe_sprite")
@@ -552,6 +577,26 @@ func _initialize() -> void:
 	var seg : Panel = (boss.get("_hero_segs") as Array)[2]
 	_check(is_instance_valid(seg) and seg.modulate.a < 0.5,
 		"и сбитая рейка гаснет: %.2f" % seg.modulate.a)
+	# И ПОСЛЕ СВОЕГО ПОПАДАНИЯ ОН НЕ СТОИТ В ТВОЕЙ ТОЧКЕ. Рывок целился ровно в
+	# позицию головы, и не ушедший игрок обнаруживал пирата прямо в себе.
+	_check(n.position.distance_to(boss.get("_foe_pos")) >= float(boss.call("_min_gap")),
+		"ударив, он не оказывается в твоей позиции: %.0f px при минимуме %.0f"
+			% [n.position.distance_to(boss.get("_foe_pos")),
+				float(boss.call("_min_gap"))])
+
+	# И В РЫВКЕ ТОЖЕ НЕ ПРОХОДИТ НАСКВОЗЬ: круг тесный, разогнаться он успевает
+	# по-настоящему, а сойтись в одну точку не должен ни разу.
+	boss.set("_foe_state", "approach")
+	var min_seen : float = 1e9
+	var t_dash := Time.get_ticks_msec()
+	while float(Time.get_ticks_msec() - t_dash) < 5000.0 and is_instance_valid(boss):
+		# Рейки игроку возвращаем: здесь меряется дистанция, а не выживание, а
+		# король за пять секунд успевает добить — и до финала дело бы не дошло.
+		boss.set("hero_hp", 3)
+		min_seen = minf(min_seen, n.position.distance_to(boss.get("_foe_pos")))
+		await process_frame
+	_check(min_seen >= float(boss.call("_min_gap")) - 4.0,
+		"и в разгоне ближе минимума не подходит: %.0f px" % min_seen)
 
 	# ── Победа ──────────────────────────────────────────────────────────────
 	# Финал длинный — падение, пицца, разбег толпы, вынос — и ломается он молча:
