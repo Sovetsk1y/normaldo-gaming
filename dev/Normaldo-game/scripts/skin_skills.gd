@@ -144,7 +144,7 @@ const DATA : Dictionary = {
 		"skills": [], "resists": [],
 		"ability": { "type": SPELL, "id": "card_deck", "combat": RANGED, "cd": 5.0,
 			"label": "КОЛОДА КАРТ",
-			"desc": "Три карты разлетаются веером в разные стороны" },
+			"desc": "Четыре карты крестом: бьют плохое, отскакивают от краёв и возвращаются" },
 		"unique": {},
 	},
 	"spider_man": {

@@ -3,9 +3,26 @@ extends SceneTree
 # Headless-проверка скинов: лестница уровней, резисты и касты всех спеллов.
 #   godot --headless --path . --script res://dev/smoke_skins.gd
 
-var _fails : int = 0
+var _fails  : int = 0
+var _checks : int = 0
+
+# ── СКОЛЬКО ПРОВЕРОК ОБЯЗАНО ОТРАБОТАТЬ ────────────────────────────────────
+# Набор печатал «ВСЁ ЗЕЛЁНОЕ» по одному лишь отсутствию провалов — и это его
+# подводило. Проверка, которая УПАЛА С ОШИБКОЙ, ничего не засчитывает: корутина
+# обрывается на месте, оставшиеся `_check` не выполняются вовсе, провалов ноль,
+# и набор честно рапортует, что всё хорошо.
+#
+# Так и вышло с колодой Джокера: обращение к уже освобождённой карте оборвало
+# тест на середине, три последние проверки не отработали, а прогон был зелёным.
+# Ошибку в логе было видно, но никто не обязан читать лог зелёного прогона —
+# в том и смысл зелёного.
+#
+# Число — нижняя граница, а не точное совпадение: добавлять проверки можно, а
+# терять — нет. Не сошлось — прогон падает и говорит, сколько недосчитался.
+const EXPECTED_CHECKS : int = 60
 
 func _check(ok: bool, what: String) -> void:
+	_checks += 1
 	if ok:
 		print("  ok   ", what)
 	else:
@@ -44,10 +61,17 @@ func _initialize() -> void:
 	await _test_web(save)
 	print("── Поза каста при взгляде влево ──")
 	await _test_pose_mirror(reg, save)
+	print("── Колода Джокера: крест, отскоки, возврат ──")
+	await _test_card_deck(save)
 
 	print("")
+	if _checks < EXPECTED_CHECKS:
+		print("ПРОВАЛ: проверок %d из %d — какой-то тест не отработал"
+			% [_checks, EXPECTED_CHECKS])
+		quit(1)
+		return
 	if _fails == 0:
-		print("ВСЁ ЗЕЛЁНОЕ")
+		print("ВСЁ ЗЕЛЁНОЕ (проверок: %d)" % _checks)
 	else:
 		print("ПРОВАЛОВ: ", _fails)
 	quit(1 if _fails > 0 else 0)
@@ -635,6 +659,96 @@ func _test_casts(reg: Node, save: Node) -> void:
 #
 # Порядок каста целиком проверяет `dev/smoke_spells.gd`; здесь — две половины по
 # отдельности, вызовом изнутри.
+# ── КОЛОДА ДЖОКЕРА ─────────────────────────────────────────────────────────
+# Четыре карты крестом, каждая с четырьмя отскоками от краёв, и после четвёртого
+# — домой, а не в небытие.
+#
+# Всё это ломается ТИХО. Крест превращается в веер одной строкой; отскоки
+# отваливаются, если снаряд начнёт гаснуть за краем, как все остальные; возврат
+# не случается вовсе, если хозяин потерян, — и на экране это выглядит просто как
+# «карты куда-то делись», без единой ошибки в логе.
+func _test_card_deck(save: Node) -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var normaldo : Node2D = game.get_node_or_null("Normaldo")
+	var spawner  : Node   = game.get_node_or_null("Spawner")
+	spawner.clear_items()
+	save.active_skin = "joker"
+	normaldo.call("reload_skin")
+	normaldo.position = Vector2(300.0, 215.0)
+	await process_frame
+
+	normaldo.call("_cast_card_deck", Vector2.RIGHT)
+	await process_frame
+	var cards : Array = _cards_of(game)
+	_check(cards.size() == 4, "вылетело четыре карты: %d" % cards.size())
+	if cards.is_empty():
+		game.queue_free()
+		return
+
+	# КРЕСТ, А НЕ ВЕЕР. Проверяется не «четыре разных угла», а именно диагонали:
+	# веер из четырёх карт тоже дал бы четыре разных угла.
+	var quads : Dictionary = {}
+	var diag  := true
+	for c in cards:
+		var v : Vector2 = c.get("velocity")
+		quads["%d%d" % [int(signf(v.x)), int(signf(v.y))]] = true
+		if absf(absf(v.x) - absf(v.y)) > 1.0:
+			diag = false
+	_check(quads.size() == 4 and diag,
+		"крестом по диагоналям: углов %d, ровно 45° — %s" % [quads.size(), diag])
+
+	# ЛЕТИТ ДАЛЬШЕ ПОСЛЕ ПОПАДАНИЯ. Карта, гаснущая на первом предмете, отскочить
+	# уже не успеет — весь спелл держится на том, что она пробивает.
+	var rock := Area2D.new()
+	rock.set_script(preload("res://scripts/hazard_item.gd"))
+	rock.set("kind", "helm")
+	rock.set("speed", 250.0)
+	rock.position = Vector2(500.0, 200.0)
+	spawner.add_child(rock)
+	await process_frame
+	var handler : Callable = normaldo.call("_break_handler")
+	_check(not bool(handler.call(rock)), "карта пробивает предмет, а не гаснет на нём")
+
+	# ОТСКОКИ И ВОЗВРАТ. Гоняем время и смотрим за одной картой: она обязана
+	# остаться в кадре (значит, отскакивает) и в конце пойти к хозяину.
+	var card : Node2D = cards[0]
+	var vp : Vector2 = get_root().get_visible_rect().size
+	var out_of_frame := false
+	var t := 0.0
+	while t < 9.0:
+		await process_frame
+		t += 1.0 / 60.0
+		# ПРОВЕРЯТЬ ЖИВОСТЬ НАДО ПОСЛЕ ОЖИДАНИЯ, а не только в условии цикла:
+		# карта возвращается домой и освобождается ИМЕННО во время `await`, и
+		# обращение к её `position` следующей строкой роняло тест. Роняло тихо —
+		# функция обрывалась на середине, три последние проверки не выполнялись
+		# вовсе, а набор печатал «ВСЁ ЗЕЛЁНОЕ».
+		if not is_instance_valid(card):
+			break
+		if card.position.x < -40.0 or card.position.x > vp.x + 40.0 \
+				or card.position.y < -40.0 or card.position.y > vp.y + 40.0:
+			out_of_frame = true
+	_check(not out_of_frame, "карта не улетает за край — отбивается")
+	_check(t < 9.0, "и кончается сама за %.1f c, а не висит до конца забега" % t)
+	# Она кончилась ДОМА, а не по времени жизни: жизнь у неё 10 секунд, и всё,
+	# что уложилось раньше, — это возврат в руку.
+	_check(t < 8.0, "то есть вернулась, а не догорела по таймеру")
+
+	game.queue_free()
+	await process_frame
+
+func _cards_of(game: Node) -> Array:
+	var out : Array = []
+	for c in game.get_children():
+		if not is_instance_valid(c):
+			continue
+		var s = c.get_script()
+		if s != null and String(s.resource_path).ends_with("skill_projectile.gd"):
+			out.append(c)
+	return out
+
 func _test_web(save: Node) -> void:
 	var game : Node = load("res://scenes/game.tscn").instantiate()
 	get_root().add_child(game)

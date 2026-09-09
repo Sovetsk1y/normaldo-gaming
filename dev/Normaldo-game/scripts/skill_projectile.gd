@@ -111,6 +111,72 @@ func _bounce() -> void:
 		return          # некуда доворачивать — летим дальше своим курсом
 	velocity = global_position.direction_to(best.global_position) * velocity.length()
 
+# ── ОТСКОКИ ОТ КРАЁВ И ВОЗВРАТ К ХОЗЯИНУ ────────────────────────────────────
+# Колода Джокера: карта отбивается от краёв экрана `wall_bounces` раз, а потом НЕ
+# ГАСНЕТ, а идёт обратно к тому, кто её бросил.
+#
+# Это не то же самое, что `bounces` выше. Тот — рикошет ПО ЦЕЛЯМ: разбил предмет
+# и довернул к следующему. Здесь отскок от ПУСТОЙ СТЕНЫ, и цели он не касается
+# вовсе. Два разных слова для двух разных вещей нарочно: свести их в одно
+# значило бы, что батаранг начнёт отскакивать от рамки, а карта — доворачивать к
+# предметам.
+#
+# По умолчанию 0 — снаряд улетает за край и гаснет, как раньше.
+var wall_bounces : int    = 0
+var return_to    : Node2D = null
+
+var _walls_left : int  = 0
+var _returning  : bool = false
+
+# Насколько круто карта доворачивает домой. Не мгновенный разворот: карта,
+# щёлкнувшая направление в одном кадре, читается как новая карта, вылетевшая
+# оттуда же. Дуга разворота — это то, по чему видно, что вернулась ТА ЖЕ.
+const RETURN_TURN : float = 7.0
+# На каком расстоянии считается пойманной.
+const CATCH_R : float = 36.0
+
+func arm_walls(times: int, home: Node2D) -> void:
+	wall_bounces = times
+	_walls_left  = times
+	return_to    = home
+
+# Отражение по КАЖДОЙ стене отдельно и только если снаряд летит НАРУЖУ: без
+# второй проверки карта, поджатая к краю, отражалась бы каждый кадр и дрожала в
+# стене, сжигая отскоки за долю секунды.
+func _bounce_walls() -> bool:
+	var vp := get_viewport_rect().size
+	var m  := radius * 0.5
+	var hit := false
+	if position.x < m and velocity.x < 0.0:
+		position.x = m
+		velocity.x = absf(velocity.x)
+		hit = true
+	elif position.x > vp.x - m and velocity.x > 0.0:
+		position.x = vp.x - m
+		velocity.x = -absf(velocity.x)
+		hit = true
+	if position.y < m and velocity.y < 0.0:
+		position.y = m
+		velocity.y = absf(velocity.y)
+		hit = true
+	elif position.y > vp.y - m and velocity.y > 0.0:
+		position.y = vp.y - m
+		velocity.y = -absf(velocity.y)
+		hit = true
+	return hit
+
+func _steer_home(delta: float) -> void:
+	# Хозяина не стало (умер, забег кончился) — возвращаться некому.
+	if not is_instance_valid(return_to):
+		queue_free()
+		return
+	var d : Vector2 = return_to.global_position - global_position
+	if d.length() < CATCH_R:
+		queue_free()
+		return
+	var want : Vector2 = d.normalized() * velocity.length()
+	velocity = velocity.lerp(want, clampf(RETURN_TURN * delta, 0.0, 1.0))
+
 func _process(delta: float) -> void:
 	if frames.size() > 1 and _spr is Sprite2D:
 		_frame_t += delta * fps
@@ -123,10 +189,27 @@ func _process(delta: float) -> void:
 			var rim := _spr.get_node_or_null("Rim")
 			if rim is Sprite2D:
 				(rim as Sprite2D).texture = frames[i]
+	if _returning:
+		_steer_home(delta)
+		if not is_instance_valid(self):
+			return
 	position += velocity * delta
 	life     -= delta
 	if _spr != null and spin != 0.0:
 		_spr.rotation += spin * delta
+
+	# ВОЗВРАЩАЮЩАЯСЯ КАРТА ОТ СТЕН НЕ ОТСКАКИВАЕТ. Иначе она отбилась бы от
+	# ближайшего края обратно и не дошла бы домой никогда.
+	if wall_bounces > 0 and not _returning:
+		if _bounce_walls():
+			_walls_left -= 1
+			if _walls_left <= 0:
+				_returning = true
+		# Улететь за край она не может, поэтому проверка границ ей не нужна —
+		# только время жизни, и то как страховка.
+		if life <= 0.0:
+			queue_free()
+		return
 
 	var vp := get_viewport_rect().size
 	if life <= 0.0 or position.x < -140.0 or position.x > vp.x + 140.0 \
