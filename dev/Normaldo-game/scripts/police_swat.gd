@@ -101,6 +101,9 @@ var _state : int = State.DROP
 
 var _sprite : Sprite2D = null
 var _gear   : Sprite2D = null      # щит, ствол или рука с гранатой
+# Посадка снаряжения при взгляде ВЛЕВО. При зеркале x меняет знак.
+var _gear_home    : Vector2 = Vector2.ZERO
+var _facing_right : bool    = false
 var _t      : float    = 0.0
 var _shoot_t: float    = 0.0
 var _dead   : bool     = false
@@ -138,16 +141,37 @@ func _build_gear() -> void:
 			_gear.texture  = SHIELD_TEX
 			ItemSizing.fit_sprite_content(_gear, SHIELD_PX)
 			# Щит СПЕРЕДИ, то есть слева: оттуда идёт Нормальдо.
-			_gear.position = Vector2(-HEAD_PX * 0.46, HEAD_PX * 0.10)
+			_gear_home = Vector2(-HEAD_PX * 0.46, HEAD_PX * 0.10)
 		"grenade":
 			_gear.texture  = HAND_GR_TEX
 			ItemSizing.fit_sprite_content(_gear, HAND_PX)
-			_gear.position = Vector2(-HEAD_PX * 0.42, HEAD_PX * 0.30)
+			_gear_home = Vector2(-HEAD_PX * 0.42, HEAD_PX * 0.30)
 		_:
 			_gear.texture  = M16_TEX
 			ItemSizing.fit_sprite_content(_gear, M16_PX)
-			_gear.position = Vector2(-HEAD_PX * 0.30, HEAD_PX * 0.28)
+			_gear_home = Vector2(-HEAD_PX * 0.30, HEAD_PX * 0.28)
 	add_child(_gear)
+	_apply_facing()
+
+# ── КУДА СТРЕЛЯЕТ, ТУДА И СМОТРИТ ──────────────────────────────────────────
+# Боец нарисован смотрящим влево, и до сих пор он таким и оставался при любой
+# наводке: Нормальдо заходил справа, ствол разворачивался ему вслед, а голова
+# продолжала смотреть в другую сторону. Получался человек, стреляющий у себя
+# из-за спины.
+#
+# Зеркалим ОБА спрайта и переносим посадку снаряжения на другой бок — иначе
+# отражённая голова осталась бы с автоматом, торчащим из затылка.
+#
+# Щитоносец не зеркалится никогда: он не целится, он ИДЁТ, и щит у него всегда
+# спереди по ходу. Развернувшийся щитоносец подставил бы спину — и правило «его
+# не обойти в лоб» сломалось бы само собой.
+func _apply_facing() -> void:
+	var mx : float = -1.0 if _facing_right else 1.0
+	if is_instance_valid(_sprite):
+		_sprite.flip_h = _facing_right
+	if is_instance_valid(_gear):
+		_gear.flip_h   = _facing_right
+		_gear.position = Vector2(_gear_home.x * mx, _gear_home.y)
 
 # Вход БЕЗ ВЕРТОЛЁТА — для потока. Боец уже на своей полосе и сразу живой:
 # падать ему неоткуда, а пауза на разворот в потоке означала бы, что он въезжает
@@ -213,8 +237,17 @@ func _face_target() -> void:
 	var d := target.global_position - global_position
 	if d.length() < 1.0:
 		return
-	# Ствол нарисован смотрящим влево, поэтому угол считается от «влево».
-	_gear.rotation = clampf(wrapf(d.angle() - PI, -PI, PI), -0.7, 0.7)
+	# ЗЕРКАЛО ПО ЦЕЛИ, и с запасом в 8 пикселей: без него боец, оказавшийся ровно
+	# над Нормальдо, дёргался бы туда-сюда каждый кадр.
+	var want_right : bool = d.x > 8.0 if not _facing_right else d.x > -8.0
+	if want_right != _facing_right:
+		_facing_right = want_right
+		_apply_facing()
+	# Угол считается от того, куда ствол смотрит СЕЙЧАС: у неотражённого это
+	# «влево» (то есть π), у отражённого — «вправо» (0). Оставить одну формулу на
+	# оба случая значит развернуть отражённому стволу наводку задом наперёд.
+	var base : float = 0.0 if _facing_right else PI
+	_gear.rotation = clampf(wrapf(d.angle() - base, -PI, PI), -0.7, 0.7)
 
 func _shoot() -> void:
 	if not is_inside_tree() or not is_instance_valid(target):

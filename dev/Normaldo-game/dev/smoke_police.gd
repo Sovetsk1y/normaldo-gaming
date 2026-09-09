@@ -23,7 +23,7 @@ const FIRE_W : float = 59.0
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 27
+const EXPECTED_CHECKS : int = 32
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -44,7 +44,71 @@ func _initialize() -> void:
 	await _test_dog_rules()
 	print("── Турель: под кабиной и наводится ──")
 	await _test_gun_under_belly()
+	print("── Сватовец смотрит туда, куда стреляет ──")
+	await _test_swat_mirror()
 	_finish()
+
+# ── ЗЕРКАЛО ПО ЦЕЛИ ────────────────────────────────────────────────────────
+# Боец нарисован смотрящим влево. Пока зеркала не было, Нормальдо мог зайти
+# справа, ствол разворачивался ему вслед, а голова продолжала смотреть в другую
+# сторону — человек, стреляющий у себя из-за спины.
+#
+# Проверяются ОБА направления: без второго можно было бы «починить» зеркало,
+# просто отразив бойца навсегда.
+func _test_swat_mirror() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+
+	var mark := Node2D.new()
+	game.add_child(mark)
+
+	var s := Area2D.new()
+	s.set_script(SWAT)
+	s.set("kind", "rifle")
+	s.set("target", mark)
+	s.position = Vector2(480.0, 215.0)
+	game.add_child(s)
+	await process_frame
+	# Живой, а не падающий: зеркало считается в ходовом состоянии.
+	s.call("enter_from_edge")
+
+	var head : Sprite2D = null
+	for c in s.get_children():
+		if c is Sprite2D and (c as Sprite2D).texture == SWAT.SWAT_TEX:
+			head = c
+	if head == null:
+		_check(false, "у сватовца нашлась голова")
+		game.queue_free()
+		return
+
+	mark.position = Vector2(100.0, 215.0)      # цель СЛЕВА
+	await process_frame
+	await process_frame
+	_check(not head.flip_h, "цель слева — смотрит влево, как нарисован")
+
+	mark.position = Vector2(900.0, 215.0)      # цель СПРАВА
+	await process_frame
+	await process_frame
+	_check(head.flip_h, "цель справа — отзеркалился")
+
+	# И ЩИТОНОСЕЦ НЕ ЗЕРКАЛИТСЯ НИКОГДА. Он не целится, он идёт, и щит у него
+	# всегда спереди по ходу; развернувшийся щитоносец подставил бы спину, и
+	# правило «его не обойти в лоб» сломалось бы само собой.
+	var sh := Area2D.new()
+	sh.set_script(SWAT)
+	sh.set("kind", "shield")
+	sh.set("target", mark)
+	sh.position = Vector2(480.0, 215.0)
+	game.add_child(sh)
+	await process_frame
+	sh.call("enter_from_edge")
+	for _i in 4:
+		await process_frame
+	_check(not bool(sh.get("_facing_right")), "а щитоносец не разворачивается никогда")
+
+	game.queue_free()
+	await process_frame
 
 # ── ВЕСЬ БОЙ ОТ ВХОДА ДО ФИНАЛА ────────────────────────────────────────────
 func _test_fight() -> void:
@@ -96,6 +160,9 @@ func _test_fight() -> void:
 	var drop_x : Dictionary = {}
 	# И сколько их стояло на арене разом за всё время боя.
 	var max_swat : int = 0
+	# Столько же про собак и про горящие полосы.
+	var max_dogs  : int = 0
+	var max_lanes : int = 0
 	var t := 0.0
 	while t < 95.0 and is_instance_valid(boss):
 		get_root().get_tree().paused = false
@@ -103,11 +170,13 @@ func _test_fight() -> void:
 		t += 1.0 / 60.0
 		var lanes : Dictionary = {}
 		var swat_now : int = 0
+		var dogs_now : int = 0
 		for c in game.get_children():
 			if not is_instance_valid(c):
 				continue
 			if c.is_in_group("police_dog"):
 				seen["собака"] = true
+				dogs_now += 1
 			elif c.is_in_group("swat"):
 				seen["сват"] = true
 				swat_now += 1
@@ -127,7 +196,11 @@ func _test_fight() -> void:
 			elif c.get_script() != null and \
 					String(c.get_script().resource_path).ends_with("police_heli.gd"):
 				seen["вертолёт"] = true
-		max_swat = maxi(max_swat, swat_now)
+		max_swat  = maxi(max_swat, swat_now)
+		max_dogs  = maxi(max_dogs, dogs_now)
+		# Полос СЧИТАЕМ ПО РАЗНЫМ y: огни одной полосы стоят на одной высоте, и
+		# считать их поштучно значило бы считать не полосы, а пламя.
+		max_lanes = maxi(max_lanes, lanes.size())
 		if not lane_ready:
 			for key in lanes:
 				# Считаем РАЗНЫЕ места, а не огни: два захода по одной полосе кладут
@@ -187,6 +260,20 @@ func _test_fight() -> void:
 	_check(max_swat <= POLICE.SQUAD_SIZE,
 		"на арене разом не больше одной группы: пик %d при группе в %d"
 			% [max_swat, POLICE.SQUAD_SIZE])
+
+	# ── БОЛЬШЕ ДВУХ ГОРЯЩИХ ПОЛОС НЕ БЫВАЕТ ─────────────────────────────────
+	# Полоса горит десять секунд, заходов три — и они складывались: к третьему
+	# на поле оставалось две свободные линии из пяти, и это при живом отряде.
+	_check(max_lanes <= POLICE.MAX_BURNING,
+		"горящих полос разом не больше %d: пик %d" % [POLICE.MAX_BURNING, max_lanes])
+
+	# ── ВОЛНЫ СОБАК РАСТУТ ДО ТРЁХ ──────────────────────────────────────────
+	# Ровно до трёх, и это надо проверять с ОБЕИХ сторон. Меньше — значит волны
+	# не выросли (например, акт кончается по таймеру и третью волну обрывает);
+	# больше — значит волны наложились друг на друга, а каждая обязана дождаться
+	# своих собак.
+	_check(max_dogs == POLICE.DOG_WAVES,
+		"самая большая стая — ровно %d собаки: пик %d" % [POLICE.DOG_WAVES, max_dogs])
 
 	# И НИЧЕГО НЕ ОСТАЛОСЬ. Сватовец, переживший бой, стрелял бы по уже
 	# победившему игроку; огонь — жёг бы полосу до конца забега.
