@@ -15,8 +15,10 @@ extends Node2D
 #                      стен; восьмой — к хозяину. Учит смотреть на стены.
 #   Акт 2 «ОТРЯД»    — «отдай полосу». Вертолёт проходит над кадром и роняет
 #                      СВАТ: щит, ствол, граната. Они медленно идут влево.
-#   Акт 3 «ШТУРМОВКА»— «полосы кончаются». Вертолёт зависает у верхнего края и
-#                      выжигает полосу очередью; огонь держится десять секунд и
+#   Акт 3 «ШТУРМОВКА»— «полосы кончаются». Вертолёт подходит к верхнему краю,
+#                      НАВОДИТ ТУРЕЛЬ НА НАЧАЛО ПОЛОСЫ, держит паузу — и ведёт
+#                      очередь справа налево, доворачивая ствол за ней и
+#                      сносясь вместе с ней. Огонь держится десять секунд и
 #                      гаснет справа налево. Три раза, каждый — новая полоса.
 #                      Между заходами сыплется отряд, и садится он МИМО горящей.
 #   Акт 4 «ВСЁ РАЗОМ»— собака, отряд и штурмовка вместе. Ничего нового: это
@@ -95,6 +97,30 @@ const STRAFE_RUNS    : int   = 3      # заходов штурмовки
 const FIRE_LIVE_T    : float = 10.0   # сколько горит полоса
 const FIRE_FADE_T    : float = 1.6    # и сколько гаснет, справа налево
 const STRAFE_SWEEP_T : float = 1.30   # очередь идёт справа налево
+const AIM_HOLD_T     : float = 0.45   # навёлся на начало полосы и держит
+# Откуда и докуда идёт вертолёт за очередь — доли ширины экрана. Он ЛЕТИТ ВДОЛЬ
+# ПОЛОСЫ вместе со своей очередью, а не висит на месте: висящий к концу очереди
+# целится почти горизонтально назад, и турель на подвесе так не ходит.
+const HELI_X_FROM    : float = 0.875
+const HELI_X_TO      : float = 0.135
+# На какой высоте он висит, ведя очередь. Отсюда же считается, по каким полосам
+# он вообще может стрелять (см. STRAFE_LANES), поэтому число — именованное.
+const HELI_HOVER_Y   : float = 18.0
+
+# ── ШТУРМУЮТСЯ ТОЛЬКО ТРИ НИЖНИЕ ПОЛОСЫ ────────────────────────────────────
+# Турель висит под брюхом, то есть НИЖЕ вертолёта: ось ствола приходится на 150,
+# а верхние полосы — на 43 и 129. Стрелять по ним значит стрелять СНИЗУ ВВЕРХ,
+# из-под собственного вертолёта.
+#
+# Пока ствол не поворачивался, этого не было видно — он смотрел в одну сторону
+# при любой полосе, и врал одинаково. Стоило навести его честно, и верхние полосы
+# сразу показали, что там не так.
+#
+# Опустить вертолёт нельзя: чтобы оказаться над верхней полосой, он должен уйти
+# за кадр целиком вместе с турелью. Поэтому штурмуются нижние три — и обещание
+# акта от этого не страдает: заходов ровно три, и игроку остаются те же ДВЕ
+# полосы из пяти, что и раньше.
+const STRAFE_LANES : Array = [2, 3, 4]
 const ACT_GAP        : float = 1.10
 
 # ── ШАГ МЕЖДУ ОГНЯМИ ───────────────────────────────────────────────────────
@@ -347,9 +373,7 @@ func _drop_one(heli: Node2D, kind: String, avoid: Array) -> void:
 # полосе — это одна атака, повторённая трижды; по трём разным — сжимающееся
 # поле, и к третьему заходу игроку остаётся две полосы из пяти.
 func _act_strafe() -> void:
-	var lanes : Array = []
-	for i in LANES:
-		lanes.append(i)
+	var lanes : Array = STRAFE_LANES.duplicate()
 	lanes.shuffle()
 	var burning : Array = []
 
@@ -375,10 +399,14 @@ func _act_strafe() -> void:
 
 func _strafe_lane(lane: int) -> void:
 	var vp := get_viewport_rect().size
+	var y := lane_y(lane)
+	var x_from : float = vp.x - FIRE_X_FROM
+	var x_to   : float = FIRE_X_TO
+
 	var heli := Node2D.new()
 	heli.set_script(HELI_SCRIPT)
 	# ВИСИТ НАПОЛОВИНУ ЗА КАДРОМ: видно брюхо с турелью, и только.
-	heli.position = Vector2(vp.x * 0.72, -60.0)
+	heli.position = Vector2(vp.x * HELI_X_FROM, -60.0)
 	_game_root.add_child(heli)
 	_units.append(heli)
 	heli.call("set_gun_visible", true)
@@ -386,9 +414,20 @@ func _strafe_lane(lane: int) -> void:
 	# Подходит к краю — это и есть телеграф: игрок видит турель до первой
 	# очереди и успевает понять, что сейчас будет.
 	var tw_in := heli.create_tween()
-	tw_in.tween_property(heli, "position:y", 18.0, 0.55)\
+	tw_in.tween_property(heli, "position:y", HELI_HOVER_Y, 0.55)\
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	await tw_in.finished
+	if not _alive():
+		if is_instance_valid(heli):
+			heli.queue_free()
+		return
+
+	# ── СНАЧАЛА НАВОДИТСЯ НА НАЧАЛО ПУТИ, И ТОЛЬКО ПОТОМ СТРЕЛЯЕТ ───────────
+	# Ствол разворачивается к правому краю полосы и держит паузу. Это второй
+	# телеграф, и он точнее первого: первый говорит «сейчас будет стрельба»,
+	# этот — «вот отсюда и вот по какой полосе».
+	heli.call("aim_at", Vector2(x_from, y))
+	await get_tree().create_timer(AIM_HOLD_T).timeout
 	if not _alive():
 		if is_instance_valid(heli):
 			heli.queue_free()
@@ -397,30 +436,49 @@ func _strafe_lane(lane: int) -> void:
 	heli.call("set_firing", true)
 	SCREEN_SHAKE.play(_game_root, 6.0, 10)
 
+	# ── И ИДЁТ ВДОЛЬ ПОЛОСЫ ВМЕСТЕ СО СВОЕЙ ОЧЕРЕДЬЮ ───────────────────────
+	# Не ради красоты. Вертолёт, висящий на месте и выжигающий полосу от края до
+	# края, к концу очереди целится почти горизонтально назад — турель на подвесе
+	# так не ходит, и сцена читается как «пулемёт вывернуло».
+	#
+	# Идя вровень с очередью, он всё время держит ствол ВНИЗ: сначала вниз-вперёд,
+	# в середине отвесно, к концу вниз-назад. Ствол проходит градусов шестьдесят,
+	# и каждый из них — вниз. Заодно из этого получается настоящий ЗАХОД: пришёл,
+	# прошёл вдоль полосы, ушёл.
+	var tw_run := heli.create_tween()
+	tw_run.tween_property(heli, "position:x", vp.x * HELI_X_TO, STRAFE_SWEEP_T)\
+		.set_trans(Tween.TRANS_LINEAR)
+
 	# Очередь идёт СПРАВА НАЛЕВО, и огонь встаёт за ней. Не разом по всей
 	# полосе: игрок должен успеть увидеть, куда она едет, и уйти вперёд неё.
-	var y := lane_y(lane)
-	var x_from : float = vp.x - FIRE_X_FROM
-	var x_to   : float = FIRE_X_TO
 	var steps : int = int(ceil(absf(x_from - x_to) / FIRE_STEP_PX)) + 1
 	var made : Array = []
 	for i in steps:
 		if not _alive():
 			break
 		var k := float(i) / float(steps - 1)
-		var x := lerpf(x_from, x_to, k)
-		_tracer(heli.call("muzzle"), Vector2(x, y))
-		var f := _light_fire(Vector2(x, y))
+		var at := Vector2(lerpf(x_from, x_to, k), y)
+		# ПОРЯДОК ВАЖЕН: сперва довернуть, потом спросить дуло. Наоборот — и
+		# линия выйдет из того места, куда ствол смотрел на прошлом шаге.
+		if is_instance_valid(heli):
+			heli.call("aim_at", at)
+			_tracer(heli.call("muzzle"), at)
+		var f := _light_fire(at)
 		if f != null:
 			made.append(f)
 		await get_tree().create_timer(STRAFE_SWEEP_T / float(steps)).timeout
 
+	# И УХОДИТ — влево и вверх, тем же курсом, каким шёл. Уход вертикально вверх
+	# из точки, до которой он долетел, читался бы как «его выдернули».
 	if is_instance_valid(heli):
 		heli.call("set_firing", false)
 		var tw_out := heli.create_tween()
-		tw_out.tween_property(heli, "position:y", -220.0, 0.5)\
+		tw_out.set_parallel(true)
+		tw_out.tween_property(heli, "position:y", -220.0, 0.6)\
 			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
-		tw_out.tween_callback(heli.queue_free)
+		tw_out.tween_property(heli, "position:x", -180.0, 0.6)\
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+		tw_out.chain().tween_callback(heli.queue_free)
 
 	_burn_out(made)
 
@@ -470,7 +528,7 @@ func _burn_out(made: Array) -> void:
 
 # ── Акт 4: ВСЁ РАЗОМ ────────────────────────────────────────────────────────
 func _act_all() -> void:
-	var lane : int = randi() % LANES
+	var lane : int = int(STRAFE_LANES[randi() % STRAFE_LANES.size()])
 	_strafe_lane(lane)                       # не ждём — идёт параллельно
 	await get_tree().create_timer(1.1).timeout
 	if not _alive():

@@ -23,7 +23,7 @@ const FIRE_W : float = 59.0
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 22
+const EXPECTED_CHECKS : int = 25
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -42,7 +42,7 @@ func _initialize() -> void:
 	await _test_dog_returns()
 	print("── Собака: не крутится, разгоняется, ест снаряды ──")
 	await _test_dog_rules()
-	print("── Турель висит под кабиной ──")
+	print("── Турель: под кабиной и наводится ──")
 	await _test_gun_under_belly()
 	_finish()
 
@@ -336,6 +336,46 @@ func _test_gun_under_belly() -> void:
 	_check(mz.y > gun.global_position.y,
 		"дуло смотрит вниз от крепления: %.0f против %.0f"
 			% [mz.y, gun.global_position.y])
+
+	# ── СТВОЛ И ОЧЕРЕДЬ — ОДНА ПРЯМАЯ ────────────────────────────────────────
+	# Очередь рисуется ОТ ДУЛА В ТОЧКУ, и пока турель не поворачивалась, линия
+	# уезжала вдоль полосы, а ствол оставался смотреть в одну сторону: на экране
+	# это выглядело как жёлтая палка, приставленная к пулемёту сбоку.
+	#
+	# Проверяются ДВЕ РАЗНЫЕ точки. С одной совпасть можно случайно — например,
+	# если наводка не работает вовсе, а точка выбрана там, куда ствол и так
+	# смотрел.
+	# ── И СТРЕЛЯЕТ ТОЛЬКО ПО ТОМУ, ЧТО НИЖЕ ЕЁ ───────────────────────────────
+	# Турель висит ПОД вертолётом, и её ось приходится ниже двух верхних полос.
+	# Пока ствол не поворачивался, это было незаметно — он смотрел в одну сторону
+	# при любой полосе. Стоило навести его честно, и по верхним полосам он начал
+	# бы бить снизу вверх, из-под собственного вертолёта.
+	#
+	# Проверка идёт ПО СПИСКУ ПОЛОС, который босс реально штурмует: список — часть
+	# правила, а не пожелание, и вернуть в него верхнюю полосу можно только вместе
+	# с переносом вертолёта.
+	heli.position = Vector2(600.0, POLICE.HELI_HOVER_Y)
+	await process_frame
+	var vp : Vector2 = get_root().get_visible_rect().size
+	var bad : Array = []
+	for i in POLICE.STRAFE_LANES:
+		var ly : float = vp.y / float(POLICE.LANES) * (float(i) + 0.5)
+		if ly <= gun.global_position.y:
+			bad.append(i)
+	_check(bad.is_empty(),
+		"все штурмуемые полосы ниже турели (ось %.0f): лишние %s"
+			% [gun.global_position.y, bad])
+
+	for at in [Vector2(900.0, 200.0), Vector2(80.0, 380.0)]:
+		heli.call("aim_at", at)
+		await process_frame
+		var m : Vector2 = heli.call("muzzle")
+		var to_muzzle : Vector2 = m - gun.global_position
+		var to_target : Vector2 = at - gun.global_position
+		var da : float = absf(wrapf(to_muzzle.angle() - to_target.angle(), -PI, PI))
+		_check(da < 0.02,
+			"навёлся в (%.0f, %.0f) — ствол и очередь на одной прямой: расхождение %.3f рад"
+				% [at.x, at.y, da])
 
 	game.queue_free()
 	await process_frame

@@ -68,6 +68,11 @@ func _initialize() -> void:
 		func() -> bool: return _count(game, "police_dog") > 0)
 	await _shot(game, "squad", "отряд",
 		func() -> bool: return _count(game, "swat") > 0)
+	# СЕРЕДИНА ОЧЕРЕДИ — там, где ствол уже довернул и трассер жив. Это
+	# единственный момент, когда видно главное: дуло и жёлтая линия на одной
+	# прямой. На разгоревшейся полосе стрельба уже кончилась и проверять нечего.
+	await _shot(game, "burst", "очередь на середине",
+		func() -> bool: return _count(game, "fire") >= 5 and _tracer_alive(game))
 	# Полосу ждём РАЗГОРЕВШУЮСЯ, а не первый язык: кадр с тремя огнями из
 	# девятнадцати сказал бы про плотность ровно обратное правде.
 	await _shot(game, "strafe", "штурмовка",
@@ -107,6 +112,27 @@ func _count(game: Node, group: String) -> int:
 		if is_instance_valid(c) and c.is_in_group(group):
 			n += 1
 	return n
+
+# Трассер — короткая Line2D из двух точек. Трос финала тоже Line2D, но он длинный
+# и живёт до конца боя; на штурмовке его ещё нет, так что двух точек довольно.
+#
+# ЯРКОСТЬ ПРОВЕРЯЕТСЯ ОТДЕЛЬНО. Трассер гаснет за 0.16 c и только потом
+# убирается: узел, который ещё в дереве, на экране может быть уже прозрачным. По
+# одному лишь «Line2D существует» кадр вышел без единой жёлтой линии.
+func _tracer_alive(game: Node) -> bool:
+	for c in game.get_children():
+		if not (is_instance_valid(c) and c is Line2D):
+			continue
+		var l := c as Line2D
+		if l.get_point_count() != 2 or l.modulate.a <= 0.75:
+			continue
+		# И НЕ ОГРЫЗОК. Вертолёт идёт вровень со своей очередью, поэтому трассер
+		# короткий по устройству — но в самом начале, когда ствол ещё над целью,
+		# он совсем крошечный и прячется за пламенем: кадр формально «с
+		# трассером», а посмотреть на нём нечего.
+		if l.get_point_position(0).distance_to(l.get_point_position(1)) > 120.0:
+			return true
+	return false
 
 func _rope(game: Node) -> Node:
 	for c in game.get_children():
