@@ -14,10 +14,16 @@ extends SceneTree
 const POLICE := preload("res://scripts/police_boss.gd")
 const SWAT   := preload("res://scripts/police_swat.gd")
 const DOG    := preload("res://scripts/police_dog.gd")
+const HELI   := preload("res://scripts/police_heli.gd")
+const SHOT   := preload("res://scripts/skill_projectile.gd")
+
+# Ширина языка пламени на экране: 71 пиксель рисунка в масштабе 0.83. По ней и
+# меряется, сплошная ли горящая полоса.
+const FIRE_W : float = 59.0
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 15
+const EXPECTED_CHECKS : int = 22
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -34,6 +40,10 @@ func _initialize() -> void:
 	await _test_squad_kinds()
 	print("── Собака возвращается к хозяину ──")
 	await _test_dog_returns()
+	print("── Собака: не крутится, разгоняется, ест снаряды ──")
+	await _test_dog_rules()
+	print("── Турель висит под кабиной ──")
+	await _test_gun_under_belly()
 	_finish()
 
 # ── ВЕСЬ БОЙ ОТ ВХОДА ДО ФИНАЛА ────────────────────────────────────────────
@@ -66,11 +76,15 @@ func _test_fight() -> void:
 
 	# Кто побывал на арене за бой.
 	var seen : Dictionary = {}
+	# И как густо стоял огонь: полосу берём в тот момент, когда она догорела до
+	# конца, то есть когда огней на ней больше всего.
+	var best_lane : Array = []
 	var t := 0.0
 	while t < 95.0 and is_instance_valid(boss):
 		get_root().get_tree().paused = false
 		await process_frame
 		t += 1.0 / 60.0
+		var lanes : Dictionary = {}
 		for c in game.get_children():
 			if not is_instance_valid(c):
 				continue
@@ -80,11 +94,18 @@ func _test_fight() -> void:
 				seen["сват"] = true
 			elif c.is_in_group("fire"):
 				seen["огонь"] = true
+				var key : int = int(round((c as Node2D).position.y))
+				if not lanes.has(key):
+					lanes[key] = []
+				(lanes[key] as Array).append((c as Node2D).position.x)
 			elif c is Line2D:
 				seen["трос"] = true
 			elif c.get_script() != null and \
 					String(c.get_script().resource_path).ends_with("police_heli.gd"):
 				seen["вертолёт"] = true
+		for key in lanes:
+			if (lanes[key] as Array).size() > best_lane.size():
+				best_lane = (lanes[key] as Array).duplicate()
 
 	_check(not is_instance_valid(boss), "и бой дошёл до конца за %.0f c" % t)
 	# Минута — не «сколько получилось»: столько же длится бой с крокодилом, и
@@ -92,6 +113,18 @@ func _test_fight() -> void:
 	_check(t > 30.0, "бой не оборвался на середине: %.0f c" % t)
 	for who in ["собака", "сват", "вертолёт", "огонь", "трос"]:
 		_check(seen.has(who), "на арене побывал: %s" % who)
+
+	# ── ГОРЯЩАЯ ПОЛОСА ОБЯЗАНА БЫТЬ СПЛОШНОЙ ────────────────────────────────
+	# Иначе она ничего не отбирает: между редкими кострами свободно проходит и
+	# Нормальдо, и сватовец, и обещание «полоса выключена на десять секунд»
+	# оказывается враньём. Меряем самый широкий просвет между соседями.
+	best_lane.sort()
+	var gap : float = 0.0
+	for i in range(1, best_lane.size()):
+		gap = maxf(gap, float(best_lane[i]) - float(best_lane[i - 1]))
+	_check(best_lane.size() >= 2 and gap <= FIRE_W,
+		"горящая полоса сплошная: %d огня, самый широкий просвет %.0f px при ширине пламени %.0f"
+			% [best_lane.size(), gap, FIRE_W])
 
 	# И НИЧЕГО НЕ ОСТАЛОСЬ. Сватовец, переживший бой, стрелял бы по уже
 	# победившему игроку; огонь — жёг бы полосу до конца забега.
@@ -190,6 +223,133 @@ func _test_dog_returns() -> void:
 
 	game.queue_free()
 	await process_frame
+
+# ── ТРИ ПРАВИЛА СОБАКИ ─────────────────────────────────────────────────────
+# Все три ЛОМАЮТСЯ ТИХО. Крутящийся спрайт — это одна строка, которую легко
+# вернуть «чтобы живее»; разгон — поле, которое кто-нибудь заменит константой
+# при первой же правке скорости; перехват снарядов вообще невидим, пока не
+# выстрелишь в неё именно тем скином, у которого снаряд летит медленно.
+func _test_dog_rules() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+
+	var dog := Area2D.new()
+	dog.set_script(DOG)
+	dog.set("target", null)
+	dog.position = Vector2(480.0, 210.0)
+	game.add_child(dog)
+	await process_frame
+
+	var v0 : float = float((dog.get("_vel") as Vector2).length())
+	var t := 0.0
+	while t < 2.0 and is_instance_valid(dog):
+		get_root().get_tree().paused = false
+		await process_frame
+		t += 1.0 / 60.0
+	if not is_instance_valid(dog):
+		_check(false, "собака дожила до замера разгона")
+		_check(false, "собака дожила до замера разгона")
+		game.queue_free()
+		await process_frame
+		return
+
+	var spr := (dog as Node).get_child(0) as Sprite2D
+	_check(is_instance_valid(spr) and absf(spr.rotation) < 0.001,
+		"собака не крутится: поворот %.3f" % [spr.rotation if is_instance_valid(spr) else -1.0])
+
+	var v1 : float = float((dog.get("_vel") as Vector2).length())
+	# Не «стало больше нуля», а стало больше ИМЕННО НА СТОЛЬКО, сколько обещает
+	# ускорение: скорость, подросшая на пару пикселей от округлений, прошла бы
+	# проверку «v1 > v0» и не была бы разгоном.
+	_check(v1 > v0 + 100.0, "и разгоняется: %.0f → %.0f px/c за %.1f c" % [v0, v1, t])
+
+	# СНАРЯД ЛЮБОГО СКИНА. Берём тот самый узел, который спавнит `normaldo`, —
+	# он один на все скины, и проверять каждый скин отдельно значило бы проверять
+	# одно и то же двенадцать раз.
+	var shot := Area2D.new()
+	shot.set_script(SHOT)
+	game.add_child(shot)
+	shot.set("radius", 26.0)
+	shot.set("velocity", Vector2.ZERO)
+	shot.set("life", 5.0)
+	shot.call("setup", null)
+	(shot as Node2D).global_position = (dog as Node2D).global_position
+	for _i in 4:
+		get_root().get_tree().paused = false
+		await process_frame
+	_check(not is_instance_valid(shot), "снаряд гаснет у неё в зубах")
+
+	# И САМА ОНА СПЕЛЛОМ НЕ БЬЁТСЯ. Иначе получилось бы, что один и тот же
+	# батаранг то гаснет в зубах, то убивает — смотря кто успел первым.
+	(dog as Node).call("on_hit")
+	for _i in 4:
+		get_root().get_tree().paused = false
+		await process_frame
+	_check(is_instance_valid(dog) and not bool(dog.get("_done")),
+		"а спелл её не берёт")
+
+	game.queue_free()
+	await process_frame
+
+# ── ТУРЕЛЬ ПОД БРЮХОМ, А НЕ НА КРЫШЕ ───────────────────────────────────────
+# Пулемёт нарисован в углу своего кадра, и посаженный «по центру кадра» он
+# уезжает вверх — на глаз это читается как «вертолёт везёт пулемёт на крыше».
+# Проверка меряет РИСУНКИ, а не позиции узлов: именно рисунок и разъезжается.
+func _test_gun_under_belly() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+
+	var heli := Node2D.new()
+	heli.set_script(HELI)
+	heli.position = Vector2(600.0, 120.0)
+	game.add_child(heli)
+	heli.call("set_gun_visible", true)
+	await process_frame
+
+	var body : Sprite2D = null
+	var gun  : Sprite2D = null
+	for c in heli.get_children():
+		if not (c is Sprite2D):
+			continue
+		var s := c as Sprite2D
+		if s.texture == HELI.GUN1_TEX or s.texture == HELI.GUN2_TEX:
+			gun = s
+		elif s.texture == HELI.BODY_TEX or s.texture == HELI.DOOR_TEX:
+			body = s
+	if body == null or gun == null:
+		_check(false, "у вертолёта нашлись корпус и турель")
+		game.queue_free()
+		await process_frame
+		return
+
+	var rb := _drawn_rect(body)
+	var rg := _drawn_rect(gun)
+	# Весь ствол — ниже середины корпуса. Кабина нарисована в нижней половине,
+	# так что «ниже середины» и значит «под кабиной».
+	_check(rg.position.y >= rb.get_center().y,
+		"верх турели ниже середины корпуса: %.0f против %.0f"
+			% [rg.position.y, rb.get_center().y])
+	# И дуло — ещё ниже её крепления: очередь уходит вниз, к полосе.
+	var mz : Vector2 = heli.call("muzzle")
+	_check(mz.y > gun.global_position.y,
+		"дуло смотрит вниз от крепления: %.0f против %.0f"
+			% [mz.y, gun.global_position.y])
+
+	game.queue_free()
+	await process_frame
+
+# Прямоугольник РИСУНКА спрайта в координатах его родителя. Sprite2D рисует кадр
+# центром в своей точке, поэтому от позиции надо отнять полкадра, прибавить
+# offset (которым и двигает `anchor_sprite`) и место рисунка внутри кадра — и всё
+# это в масштабе спрайта.
+func _drawn_rect(s: Sprite2D) -> Rect2:
+	var sz := s.texture.get_size()
+	var r  := ItemSizing.content_rect(s.texture)
+	var tl : Vector2 = s.position \
+		+ (Vector2(r.position) - sz * 0.5 + s.offset) * s.scale
+	return Rect2(tl, Vector2(r.size) * s.scale)
 
 func _finish() -> void:
 	print("")

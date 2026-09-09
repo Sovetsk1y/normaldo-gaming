@@ -33,8 +33,21 @@ const ROTOR_SPIN : float = 22.0
 
 # Куда сажать винт относительно центра корпуса — доля кадра.
 const ROTOR_OFF : Vector2 = Vector2(0.02, -0.16)
-# И турель: она висит под брюхом.
-const GUN_OFF : Vector2 = Vector2(-0.10, 0.26)
+
+# ── ТУРЕЛЬ ВИСИТ ПОД КАБИНОЙ, А ДЕРЖИТСЯ ЗА СВОЙ РИСУНОК ───────────────────
+# Пулемёт нарисован в УГЛУ своего кадра: казённик вверху справа, стволы уходят
+# вниз-влево, и добрая треть кадра под ними пустая. Центр кадра приходится мимо
+# рисунка — и посаженный «по центру», как все прочие спрайты, пулемёт уезжал на
+# треть своей высоты ВВЕРХ и садился кабине НА КРЫШУ. Смещение вниз это лечило
+# бы на глаз и разъезжалось бы при любой смене размера.
+#
+# Поэтому точка крепления берётся ПО РИСУНКУ и приходится на казённик: от него
+# турель висит вниз, как ей и положено.
+const GUN_ANCHOR : Vector2 = Vector2(0.86, 0.10)
+# А само место крепления — низ кабины. Кабина нарисована в нижней половине
+# корпуса (вертолёт виден в лоб, хвост уходит вверх), её низ — примерно 0.44
+# длинной стороны от центра.
+const GUN_OFF : Vector2 = Vector2(-0.02, 0.44)
 
 const GUN_FRAME_T : float = 0.05    # мельтешение ствола на очереди
 
@@ -66,9 +79,9 @@ func _ready() -> void:
 	_gun.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_gun.z_index        = 2
 	_gun.visible        = false
-	ItemSizing.fit_sprite_content(_gun, GUN_PX)
 	_gun.position       = Vector2(GUN_OFF.x * HELI_PX, GUN_OFF.y * HELI_PX)
 	add_child(_gun)
+	_fit_gun()
 
 func _process(delta: float) -> void:
 	if is_instance_valid(_rotor):
@@ -79,6 +92,10 @@ func _process(delta: float) -> void:
 		if _gun_t >= GUN_FRAME_T:
 			_gun_t = 0.0
 			_gun.texture = GUN2_TEX if _gun.texture == GUN1_TEX else GUN1_TEX
+			# Пересадка обязательна на КАЖДОЙ смене кадра: рисунок в двух кадрах
+			# стоит в рамке чуть по-разному, и турель, посаженная один раз,
+			# подпрыгивала бы двадцать раз в секунду.
+			_fit_gun()
 
 func set_door_open(on: bool) -> void:
 	if is_instance_valid(_body):
@@ -93,10 +110,20 @@ func set_firing(on: bool) -> void:
 	_firing = on
 	if is_instance_valid(_gun) and not on:
 		_gun.texture = GUN1_TEX
-		ItemSizing.fit_sprite_content(_gun, GUN_PX)
+		_fit_gun()
 
-# Мировая точка дула — оттуда и рисуются очереди.
+# Размер и посадка турели в одном месте: их нельзя делать порознь, потому что
+# опора считается от рисунка, а рисунок у двух кадров разный.
+func _fit_gun() -> void:
+	if not is_instance_valid(_gun):
+		return
+	ItemSizing.fit_sprite_content(_gun, GUN_PX)
+	ItemSizing.anchor_sprite(_gun, GUN_ANCHOR.x, GUN_ANCHOR.y)
+
+# Мировая точка дула — оттуда и рисуются очереди. Считается от КРЕПЛЕНИЯ (узел
+# теперь сидит на казённике), поэтому смещение до срезов стволов — почти вся
+# длина рисунка вниз-влево.
 func muzzle() -> Vector2:
 	if is_instance_valid(_gun):
-		return _gun.global_position + Vector2(-GUN_PX * 0.28, GUN_PX * 0.20)
+		return _gun.global_position + Vector2(-GUN_PX * 0.86, GUN_PX * 0.78)
 	return global_position

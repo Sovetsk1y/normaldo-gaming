@@ -45,7 +45,15 @@ const FIRE_SCENE   := preload("res://scenes/fire.tscn")
 const COP_TEX    := preload("res://assets/bosses/police/cop.png")
 const RADIO_TEX  := preload("res://assets/bosses/police/radio.png")
 const BANNER_TEX := preload("res://assets/bosses/police/banner.png")
-const PIZZA_TEX  := preload("res://assets/items/pizza.png")
+# ── ПИЦЦА НА ЛИЦО — ДРУГАЯ, НЕ ТА, ЧТО ЛЕТАЕТ В ПОТОКЕ ─────────────────────
+# Здесь стояла обычная пицца из потока, и знак читался неверно: «в капитана
+# прилетел предмет». Победная пицца нарисована отдельно и РАЗМАЗАННОЙ — она
+# садится боссу на морду, а не падает ему на голову.
+#
+# Рисунок общий с крокодилом и пиратом, и это принципиально: «босс кончился —
+# сверху пицца» уже выучено игроком на двух боссах, и свой знак для третьего
+# означал бы, что учить надо заново.
+const PIZZA_TEX  := preload("res://assets/bosses/leatherhead/pizza_face.png")
 const UI_FONT    := preload("res://assets/fonts/RussoOne-Regular.ttf")
 
 const BOSS_STINGER := preload("res://assets/audio/boss_fight.mp3")
@@ -59,6 +67,20 @@ const RADIO_PX : float = 62.0
 # Отступ больше половины головы: ровно половина прижала бы её к самому краю, и
 # фуражка срезалась бы рамкой экрана.
 const COP_X_PAD : float = 108.0
+
+# ── КУДА САДИТСЯ ПОБЕДНАЯ ПИЦЦА ────────────────────────────────────────────
+# НЕ на макушку, а на лицо, и это считано, а не подобрано на глаз. Капитан
+# нарисован в кадре 500×500 фигурой 341×312, поднятой над центром кадра на 29
+# пикселей; в игре фигура высотой COP_PX*312/341 ≈ 137 и её верх приходится на
+# −81 от узла. Фуражка — верхняя треть фигуры, лицо начинается ниже, и центр
+# лица ложится чуть НИЖЕ узла, а не выше.
+#
+# Первым заходом пицца стояла на −0.40 COP_PX и садилась ровно на козырёк:
+# получалось «ему на фуражку что-то уронили», а не «ему конец».
+const PIZZA_FACE_Y : float = 0.04
+# И размером в лицо: пицца, закрывающая пол-лица, читается как прилетевший
+# предмет, а не как печать на морде.
+const PIZZA_PX_K   : float = 0.72
 
 # Полос пять — те же, что у потока.
 const LANES : int = 5
@@ -74,6 +96,22 @@ const FIRE_LIVE_T    : float = 10.0   # сколько горит полоса
 const FIRE_FADE_T    : float = 1.6    # и сколько гаснет, справа налево
 const STRAFE_SWEEP_T : float = 1.30   # очередь идёт справа налево
 const ACT_GAP        : float = 1.10
+
+# ── ШАГ МЕЖДУ ОГНЯМИ ───────────────────────────────────────────────────────
+# Пламя нарисовано шириной 71 пиксель и живёт в масштабе 0.83 — на экране это
+# 59 пикселей. Шаг взят ЧУТЬ МЕНЬШЕ ширины: языки должны стоять впритык и
+# перекрываться краями, а не висеть отдельными кострами.
+#
+# Сначала здесь было девять огней на полосу и шаг под 110 — вдвое шире самого
+# пламени. Между ними свободно проходил и Нормальдо, и сватовец, и «полоса
+# выключена на десять секунд» оказывалась полосой, по которой можно ходить.
+# Горящая полоса обязана быть СПЛОШНОЙ, иначе она не отбирает ничего.
+#
+# Число огней при этом НЕ ЗАДАНО ЧИСЛОМ, а считается из ширины экрана: на другом
+# разрешении шаг остался бы тем же, а вот девять костров разъехались бы.
+const FIRE_STEP_PX : float = 52.0
+const FIRE_X_FROM  : float = 30.0     # отступ справа
+const FIRE_X_TO    : float = 40.0     # и слева
 
 const COL_BG     : Color = Color(0.07, 0.10, 0.20, 0.96)
 const COL_BORDER : Color = Color(0.45, 0.62, 1.00, 0.95)
@@ -362,13 +400,15 @@ func _strafe_lane(lane: int) -> void:
 	# Очередь идёт СПРАВА НАЛЕВО, и огонь встаёт за ней. Не разом по всей
 	# полосе: игрок должен успеть увидеть, куда она едет, и уйти вперёд неё.
 	var y := lane_y(lane)
-	var steps : int = 9
+	var x_from : float = vp.x - FIRE_X_FROM
+	var x_to   : float = FIRE_X_TO
+	var steps : int = int(ceil(absf(x_from - x_to) / FIRE_STEP_PX)) + 1
 	var made : Array = []
 	for i in steps:
 		if not _alive():
 			break
 		var k := float(i) / float(steps - 1)
-		var x := lerpf(vp.x - 30.0, 40.0, k)
+		var x := lerpf(x_from, x_to, k)
 		_tracer(heli.call("muzzle"), Vector2(x, y))
 		var f := _light_fire(Vector2(x, y))
 		if f != null:
@@ -497,11 +537,12 @@ func _finale() -> void:
 	pizza.texture        = PIZZA_TEX
 	pizza.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	pizza.z_index        = 60
-	ItemSizing.fit_sprite_content(pizza, COP_PX * 0.52)
+	# Во всю морду, а не шапочкой на макушке: она садится НА ЛИЦО.
+	ItemSizing.fit_sprite_content(pizza, COP_PX * PIZZA_PX_K)
 	pizza.position       = Vector2(0.0, -vp.y)
 	add_child(pizza)
 	var tw_p := pizza.create_tween()
-	tw_p.tween_property(pizza, "position:y", -COP_PX * 0.40, 0.42)\
+	tw_p.tween_property(pizza, "position:y", COP_PX * PIZZA_FACE_Y, 0.42)\
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	await tw_p.finished
 	if not _alive():
