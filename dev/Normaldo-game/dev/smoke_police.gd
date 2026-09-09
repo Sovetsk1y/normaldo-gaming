@@ -23,7 +23,7 @@ const FIRE_W : float = 59.0
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 26
+const EXPECTED_CHECKS : int = 27
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -94,12 +94,15 @@ func _test_fight() -> void:
 		- POLICE.FIRE_X_FROM) - POLICE.FIRE_X_TO) / POLICE.FIRE_STEP_PX)) + 1
 	# Где отделялся от вертолёта каждый сватовец — по одному числу на бойца.
 	var drop_x : Dictionary = {}
+	# И сколько их стояло на арене разом за всё время боя.
+	var max_swat : int = 0
 	var t := 0.0
 	while t < 95.0 and is_instance_valid(boss):
 		get_root().get_tree().paused = false
 		await process_frame
 		t += 1.0 / 60.0
 		var lanes : Dictionary = {}
+		var swat_now : int = 0
 		for c in game.get_children():
 			if not is_instance_valid(c):
 				continue
@@ -107,6 +110,7 @@ func _test_fight() -> void:
 				seen["собака"] = true
 			elif c.is_in_group("swat"):
 				seen["сват"] = true
+				swat_now += 1
 				# ГДЕ ИМЕННО он появился. Запоминаем по первому кадру жизни: дальше
 				# боец идёт влево сам, и через секунду он будет где угодно.
 				var sid : int = c.get_instance_id()
@@ -123,6 +127,7 @@ func _test_fight() -> void:
 			elif c.get_script() != null and \
 					String(c.get_script().resource_path).ends_with("police_heli.gd"):
 				seen["вертолёт"] = true
+		max_swat = maxi(max_swat, swat_now)
 		if not lane_ready:
 			for key in lanes:
 				# Считаем РАЗНЫЕ места, а не огни: два захода по одной полосе кладут
@@ -169,6 +174,19 @@ func _test_fight() -> void:
 	_check(not drop_x.is_empty() and nearest >= vpx * 2.0 / 3.0,
 		"весь отряд высадился в дальней трети: ближайший прыжок x=%.0f при границе %.0f"
 			% [nearest, vpx * 2.0 / 3.0])
+
+	# ── ОТРЯД НА АРЕНЕ ОДИН ЗА РАЗ ──────────────────────────────────────────
+	# Капитан сыпал новую тройку после КАЖДОГО захода штурмовки, а боец живёт до
+	# ухода за край семнадцать секунд: к третьему заходу на экране стояла шеренга
+	# из десятка при двух горящих полосах, и пройти это было нельзя — не потому
+	# что сложно, а потому что некуда деться.
+	#
+	# Меряется ПИК за весь бой, а не число вызовов: важно, сколько их стояло
+	# ОДНОВРЕМЕННО, а вызвать капитан может сколько угодно раз, если каждый раз
+	# предыдущие успели кончиться.
+	_check(max_swat <= POLICE.SQUAD_SIZE,
+		"на арене разом не больше одной группы: пик %d при группе в %d"
+			% [max_swat, POLICE.SQUAD_SIZE])
 
 	# И НИЧЕГО НЕ ОСТАЛОСЬ. Сватовец, переживший бой, стрелял бы по уже
 	# победившему игроку; огонь — жёг бы полосу до конца забега.
