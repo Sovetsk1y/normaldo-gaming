@@ -6495,10 +6495,9 @@ func _exit_run_to_menu() -> void:
 	get_tree().reload_current_scene()
 
 func _build_dev_btn() -> void:
-	var vp     := get_viewport().get_visible_rect().size
 	const SZ   := 44.0
 	_dev_btn          = Node2D.new()
-	_dev_btn.position = Vector2(8.0, vp.y - SZ - 8.0)
+	_dev_btn.position = _dev_col_pos(1)
 	add_child(_dev_btn)
 
 	var bg    := ColorRect.new()
@@ -6683,12 +6682,10 @@ func _build_dev_thief_btn() -> void:
 	root.add_child(btn)
 
 func _build_dev_immortal_btn() -> void:
-	var vp     := get_viewport().get_visible_rect().size
 	const SZ   := 44.0
-	const GAP  := 6.0
 	# Sit directly above the mutagen dev button.
 	_dev_immortal_btn          = Node2D.new()
-	_dev_immortal_btn.position = Vector2(8.0, vp.y - SZ * 2.0 - 8.0 - GAP)
+	_dev_immortal_btn.position = _dev_col_pos(2)
 	add_child(_dev_immortal_btn)
 
 	_dev_immortal_bg = ColorRect.new()
@@ -6727,11 +6724,9 @@ func _build_dev_immortal_btn() -> void:
 # visibility on Normaldo + every spawned item so you can eyeball the hit
 # boxes without restarting with --debug-collisions.
 func _build_dev_collisions_btn() -> void:
-	var vp     := get_viewport().get_visible_rect().size
 	const SZ   := 44.0
-	const GAP  := 6.0
 	_dev_collisions_btn          = Node2D.new()
-	_dev_collisions_btn.position = Vector2(8.0, vp.y - SZ * 3.0 - 8.0 - GAP * 2.0)
+	_dev_collisions_btn.position = _dev_col_pos(3)
 	add_child(_dev_collisions_btn)
 
 	_dev_collisions_bg = ColorRect.new()
@@ -6778,6 +6773,24 @@ func _build_dev_collisions_btn() -> void:
 # накрыла бы их.
 const DEV_SZ  : float = 44.0
 const DEV_GAP : float = 6.0
+
+# ── ЛЕВЫЙ СТОЛБЕЦ ДЕВ-КНОПОК: КАРТА МЕСТ ────────────────────────────────────
+# Место в столбце считается снизу вверх: 1 — самая нижняя кнопка. Раньше каждая
+# кнопка считала свой y сама, той же формулой, и один и тот же номер достался
+# сразу двум: «МИНИ» встала на пятое место, где уже стояла «ФЗ», и та просто
+# накрыла её собой — кнопки в игре не было вовсе.
+#
+# Занято:
+#   1 — мутаген      4 — «БОССЫ»
+#   2 — бессмертие   5 — «ФЗ» (только в кампании)
+#   3 — коллизии     6 — «МИНИ»
+#
+# Номер «ФЗ» не переиспользуется в бесконечном режиме, хотя кнопки там нет:
+# столбец должен выглядеть одинаково в обоих режимах, иначе кнопка, которую
+# ищешь пальцем, в разных режимах в разных местах.
+func _dev_col_pos(slot: int) -> Vector2:
+	var vp := get_viewport().get_visible_rect().size
+	return Vector2(8.0, vp.y - (DEV_SZ + DEV_GAP) * float(slot) - 8.0 + DEV_GAP)
 
 var _boss_menu_btn : Node2D = null
 var _boss_menu_row : Node2D = null
@@ -6831,9 +6844,8 @@ func _dev_chip(text: String, tint: Color, on_press: Callable,
 	return root
 
 func _build_dev_boss_btn() -> void:
-	var vp := get_viewport().get_visible_rect().size
 	_boss_menu_btn = _dev_chip("БОССЫ", Color(1.0, 0.55, 0.55), _toggle_boss_menu)
-	_boss_menu_btn.position = Vector2(8.0, vp.y - DEV_SZ * 4.0 - 8.0 - DEV_GAP * 3.0)
+	_boss_menu_btn.position = _dev_col_pos(4)
 	add_child(_boss_menu_btn)
 
 func _toggle_boss_menu() -> void:
@@ -6920,12 +6932,11 @@ const MINI_ICONS : Dictionary = {
 }
 
 func _build_dev_mini_btn() -> void:
-	var vp := get_viewport().get_visible_rect().size
 	# Подпись «МИНИ», а не «МИНИБОССЫ»: чип 44 пикселя шириной, и девять букв в
 	# него не влезают — обрезаются на последней. Что именно за «мини», говорит
 	# раскрытый ряд.
 	_mini_menu_btn = _dev_chip("МИНИ", Color(1.0, 0.80, 0.45), _toggle_mini_menu)
-	_mini_menu_btn.position = Vector2(8.0, vp.y - DEV_SZ * 5.0 - 8.0 - DEV_GAP * 4.0)
+	_mini_menu_btn.position = _dev_col_pos(6)
 	add_child(_mini_menu_btn)
 
 func _toggle_mini_menu() -> void:
@@ -7067,11 +7078,9 @@ func _build_dev_phase_btn() -> void:
 	var spawner := get_parent().get_node_or_null("Spawner")
 	if not spawner or not is_instance_valid(spawner) or not spawner.campaign_mode:
 		return
-	var vp     := get_viewport().get_visible_rect().size
 	const SZ   := 44.0
-	const GAP  := 6.0
 	_dev_phase_btn          = Node2D.new()
-	_dev_phase_btn.position = Vector2(8.0, vp.y - SZ * 5.0 - 8.0 - GAP * 4.0)
+	_dev_phase_btn.position = _dev_col_pos(5)
 	add_child(_dev_phase_btn)
 
 	var bg := ColorRect.new()

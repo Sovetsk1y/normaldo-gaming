@@ -42,6 +42,8 @@ func _initialize() -> void:
 	await _test_cone_tap()
 	print("── Дев-выпадашка мини-боссов ──")
 	await _test_dev_mini_bosses()
+	print("── Дев-кнопки не стоят одна на другой ──")
+	_test_dev_column_slots()
 	print("── Мешок выкладывает знак валюты ──")
 	await _test_money_bag_glyph()
 	print("── Тапы по мешку замедляют время ──")
@@ -356,6 +358,36 @@ func _test_dev_mini_bosses() -> void:
 
 	game.queue_free()
 	await process_frame
+
+# ЛЕВЫЙ СТОЛБЕЦ ДЕВ-КНОПОК: КАЖДОЙ СВОЁ МЕСТО.
+#
+# «МИНИ» получила номер, уже занятый «ФЗ». «ФЗ» строится позже — и просто
+# накрыла новую кнопку собой: в игре её не было вовсе. Ни один тест этого не
+# заметил, потому что спавн мини-боссов работал прекрасно, а кнопки, которая его
+# зовёт, никто не искал глазами.
+#
+# Проверка идёт ПО ТЕКСТУ hud.gd, а не по собранному экрану, и намеренно.
+# Кнопки столбца висят на двух рубильниках DevFlags, «ФЗ» вдобавок только в
+# кампании, а строится всё это внутри `_start_game` — то есть собранный столбец
+# в тесте почти всегда неполон, и как раз без той кнопки, из-за которой всё
+# случилось. Номер места — свойство исходника, там его и надо смотреть.
+func _test_dev_column_slots() -> void:
+	var src : String = FileAccess.get_file_as_string("res://scripts/hud.gd")
+	_check(not src.is_empty(), "исходник HUD прочитан: %d байт" % src.length())
+
+	var re := RegEx.new()
+	re.compile("_dev_col_pos\\((\\d+)\\)")
+	var slots : Dictionary = {}   # номер места → сколько кнопок его заняли
+	for m in re.search_all(src):
+		var slot : int = int(m.get_string(1))
+		slots[slot] = int(slots.get(slot, 0)) + 1
+	_check(slots.size() >= 6, "мест в столбце занято: %s" % [slots.keys()])
+
+	var taken_twice : Array = []
+	for slot in slots.keys():
+		if int(slots[slot]) > 1:
+			taken_twice.append("№%d: %d кнопки" % [int(slot), int(slots[slot])])
+	_check(taken_twice.is_empty(), "и ни одно не занято дважды: %s" % [taken_twice])
 
 func _test_money_bag_glyph() -> void:
 	var game : Node = load("res://scenes/game.tscn").instantiate()
