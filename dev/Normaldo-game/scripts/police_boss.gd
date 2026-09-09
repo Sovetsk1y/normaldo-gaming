@@ -90,7 +90,23 @@ const LANES : int = 5
 # ── Тайминги актов ──────────────────────────────────────────────────────────
 const DOG_WAVES      : int   = 2      # сколько раз спускает собаку в первом акте
 const SQUAD_SIZE     : int   = 3      # сколько бойцов за один заход вертолёта
-const DROP_INTERVAL  : float = 0.55   # пауза между прыжками бойцов
+
+# ── ВЫСАДКА ИДЁТ В ДАЛЬНЕЙ ТРЕТИ ЭКРАНА ────────────────────────────────────
+# Доли ширины, между которыми прыгают бойцы. Третья треть — это 0.67..1.0, и весь
+# отряд обязан уложиться в неё.
+#
+# Раньше прыжки шли ПО СЕКУНДОМЕРУ: пауза 0.65 после входа вертолёта и дальше по
+# 0.55 между бойцами. На бумаге аккуратно, на экране — первый прыгал на x=888,
+# второй на 640, третий на 392, то есть последний высаживался за серединой,
+# почти у Нормальдо под носом. Реакции на него не оставалось никакой: боец
+# приземлялся, разворачивался и уже был рядом.
+#
+# Теперь прыжок привязан к МЕСТУ, а не ко времени: вертолёт летит, и боец
+# отделяется, когда тот проходит свою отметку. Правило «отряд высаживается в
+# дальней трети» держится само собой при любой скорости захода — а с
+# секундомером его пришлось бы пересчитывать при каждой правке HELI_PASS_T.
+const DROP_X_FROM_K  : float = 0.96
+const DROP_X_TO_K    : float = 0.70
 const HELI_PASS_T    : float = 3.20   # сколько вертолёт идёт через кадр
 const SQUAD_LIVE_T   : float = 6.0    # сколько отряд живёт до следующего акта
 const STRAFE_RUNS    : int   = 3      # заходов штурмовки
@@ -329,17 +345,33 @@ func _heli_drop(avoid: Array) -> void:
 	tw.tween_property(heli, "position:x", -260.0, HELI_PASS_T)\
 		.set_trans(Tween.TRANS_LINEAR)
 
-	# Бойцы прыгают, пока вертолёт идёт: первый — когда он вошёл в кадр,
-	# остальные через паузу. Прыгать они обязаны ИЗ НЕГО, а не появляться
-	# сверху, иначе вертолёт в кадре не нужен вовсе.
-	await get_tree().create_timer(0.65).timeout
+	# Бойцы прыгают, пока вертолёт идёт, и прыгать они обязаны ИЗ НЕГО, а не
+	# появляться сверху: иначе вертолёт в кадре не нужен вовсе.
 	var kinds := ["shield", "rifle", "grenade"]
 	kinds.shuffle()
+	var marks : Array = []
 	for i in SQUAD_SIZE:
+		var k : float = 0.0 if SQUAD_SIZE <= 1 \
+			else float(i) / float(SQUAD_SIZE - 1)
+		marks.append(vp.x * lerpf(DROP_X_FROM_K, DROP_X_TO_K, k))
+
+	var next : int = 0
+	# Ждём КАЖДУЮ отметку, но с потолком: если вертолёт по какой-то причине не
+	# доедет (твин убили, сцену снесли), цикл обязан кончиться сам, а не держать
+	# акт до конца забега.
+	#
+	# Потолок по ЧАСАМ, а не по накопленной дельте кадров. Накопление дельт уже
+	# однажды подвесило тут всё намертво (см. police_grenade.gd): в headless кадры
+	# идут в микросекундах, и сумма до нужных секунд не доползает никогда.
+	var deadline : int = Time.get_ticks_msec() + int((HELI_PASS_T + 1.0) * 1000.0)
+	while next < marks.size() and Time.get_ticks_msec() < deadline:
 		if not _alive() or not is_instance_valid(heli):
 			break
-		_drop_one(heli, String(kinds[i % kinds.size()]), avoid)
-		await get_tree().create_timer(DROP_INTERVAL).timeout
+		if heli.position.x <= float(marks[next]):
+			_drop_one(heli, String(kinds[next % kinds.size()]), avoid)
+			next += 1
+			continue
+		await get_tree().process_frame
 	if not _alive():
 		return
 	if is_instance_valid(heli):

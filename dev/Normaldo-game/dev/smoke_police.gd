@@ -23,7 +23,7 @@ const FIRE_W : float = 59.0
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 25
+const EXPECTED_CHECKS : int = 26
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -76,9 +76,24 @@ func _test_fight() -> void:
 
 	# Кто побывал на арене за бой.
 	var seen : Dictionary = {}
-	# И как густо стоял огонь: полосу берём в тот момент, когда она догорела до
-	# конца, то есть когда огней на ней больше всего.
+	# ── КАК ГУСТО ВСТАЁТ ОГОНЬ ──────────────────────────────────────────────
+	# Берём полосу В МОМЕНТ, КОГДА ОНА ТОЛЬКО ЧТО ВСТАЛА ЦЕЛИКОМ, и больше не
+	# трогаем. Сначала здесь бралась просто «полоса, где огней больше всего», и
+	# проверка оказалась плавающей: если два захода приходятся на ОДНУ полосу,
+	# в выборку попадает момент, когда первый огонь уже догорает, а второй ещё
+	# кладётся, — и дыра там честная, но говорит она не про плотность, а про
+	# догорание. Тест то проходил (38 огней, просвет 49), то падал (36 и 99).
+	#
+	# Правило, которое мы проверяем, звучит как «полоса ВСТАЁТ сплошной», поэтому
+	# и мерить надо ровно вставшую.
 	var best_lane : Array = []
+	var lane_ready : bool = false
+	# Сколько огней кладёт один заход: тот же расчёт, что и у босса. Считаем, а не
+	# пишем числом, чтобы проверка пережила правку шага и ширины экрана.
+	var full_lane : int = int(ceil(absf((get_root().get_visible_rect().size.x
+		- POLICE.FIRE_X_FROM) - POLICE.FIRE_X_TO) / POLICE.FIRE_STEP_PX)) + 1
+	# Где отделялся от вертолёта каждый сватовец — по одному числу на бойца.
+	var drop_x : Dictionary = {}
 	var t := 0.0
 	while t < 95.0 and is_instance_valid(boss):
 		get_root().get_tree().paused = false
@@ -92,6 +107,11 @@ func _test_fight() -> void:
 				seen["собака"] = true
 			elif c.is_in_group("swat"):
 				seen["сват"] = true
+				# ГДЕ ИМЕННО он появился. Запоминаем по первому кадру жизни: дальше
+				# боец идёт влево сам, и через секунду он будет где угодно.
+				var sid : int = c.get_instance_id()
+				if not drop_x.has(sid):
+					drop_x[sid] = (c as Node2D).position.x
 			elif c.is_in_group("fire"):
 				seen["огонь"] = true
 				var key : int = int(round((c as Node2D).position.y))
@@ -103,9 +123,18 @@ func _test_fight() -> void:
 			elif c.get_script() != null and \
 					String(c.get_script().resource_path).ends_with("police_heli.gd"):
 				seen["вертолёт"] = true
-		for key in lanes:
-			if (lanes[key] as Array).size() > best_lane.size():
-				best_lane = (lanes[key] as Array).duplicate()
+		if not lane_ready:
+			for key in lanes:
+				# Считаем РАЗНЫЕ места, а не огни: два захода по одной полосе кладут
+				# огонь в те же самые точки, и по числу огней полоса выглядела бы
+				# вдвое плотнее, чем она есть.
+				var seen_x : Dictionary = {}
+				for x in (lanes[key] as Array):
+					seen_x[int(round(float(x)))] = true
+				if seen_x.size() >= full_lane:
+					best_lane = seen_x.keys()
+					lane_ready = true
+					break
 
 	_check(not is_instance_valid(boss), "и бой дошёл до конца за %.0f c" % t)
 	# Минута — не «сколько получилось»: столько же длится бой с крокодилом, и
@@ -122,9 +151,24 @@ func _test_fight() -> void:
 	var gap : float = 0.0
 	for i in range(1, best_lane.size()):
 		gap = maxf(gap, float(best_lane[i]) - float(best_lane[i - 1]))
-	_check(best_lane.size() >= 2 and gap <= FIRE_W,
-		"горящая полоса сплошная: %d огня, самый широкий просвет %.0f px при ширине пламени %.0f"
-			% [best_lane.size(), gap, FIRE_W])
+	_check(lane_ready and gap <= FIRE_W,
+		"горящая полоса встала сплошной: %d мест из %d, самый широкий просвет %.0f px при ширине пламени %.0f"
+			% [best_lane.size(), full_lane, gap, FIRE_W])
+
+	# ── ОТРЯД ВЫСАЖИВАЕТСЯ В ДАЛЬНЕЙ ТРЕТИ ──────────────────────────────────
+	# Прыжки шли по секундомеру, и третий боец отделялся на x=392 — за серединой
+	# экрана, почти у Нормальдо под носом: реакции на него не оставалось никакой.
+	#
+	# Проверяется САМЫЙ БЛИЖНИЙ прыжок из всех за бой, а не средний и не первый:
+	# средний спрячет одного заехавшего, а первый по устройству всегда у самого
+	# края и потому не значит ничего.
+	var vpx : float = get_root().get_visible_rect().size.x
+	var nearest : float = vpx * 2.0
+	for sid in drop_x:
+		nearest = minf(nearest, float(drop_x[sid]))
+	_check(not drop_x.is_empty() and nearest >= vpx * 2.0 / 3.0,
+		"весь отряд высадился в дальней трети: ближайший прыжок x=%.0f при границе %.0f"
+			% [nearest, vpx * 2.0 / 3.0])
 
 	# И НИЧЕГО НЕ ОСТАЛОСЬ. Сватовец, переживший бой, стрелял бы по уже
 	# победившему игроку; огонь — жёг бы полосу до конца забега.
