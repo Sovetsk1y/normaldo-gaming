@@ -4,8 +4,13 @@ extends SceneTree
 #   godot --headless --path . --script res://dev/smoke_transition.gd
 #
 # Переходов ДВА, и включён один (`LevelTransition.STYLE`):
-#   money   — облако денег во весь экран, без шторки вовсе;
-#   curtain — прежняя зубчатая шторка, под ней дождь из купюр.
+#   curtain — ЭТОТ: зубчатая шторка с ЧЁРНОЙ подложкой, под ней дождь из купюр;
+#   money   — облако денег во весь экран, без шторки вовсе.
+#
+# Проверяется в первую очередь ВКЛЮЧЁННЫЙ. Тест, который целиком гоняет
+# выключенную ветку, зелен ровно настолько, насколько это никому не нужно:
+# сломать можно то, что видит игрок, а смотрит тест в другую сторону. Отложенный
+# стиль проверяется тем, что он жив и собирается, — не больше.
 #
 # У перехода одна обязанность, и она не про красоту: ПОД НИМ МЕНЯЮТ ЭПИЗОД.
 # Значит проверять надо две вещи, и обе ломаются молча:
@@ -18,15 +23,18 @@ extends SceneTree
 #      момент, когда за ними подменяют фон. Здесь это меряется покрытием сетки,
 #      а не на глаз.
 #
-# И третья, общая обоим: оба стиля обязаны ОСТАВАТЬСЯ рабочими. Старый не
-# удалён намеренно — он гарантирует закрытие сплошной заливкой, и вернуться к
-# нему это одна константа.
+#   3. НАДПИСЬ ВИСИТ ДОСТАТОЧНО, ЧТОБЫ ЕЁ ПРОЧИТАЛИ. На занавесе две строки, на
+#      карточке уровня три, и полторы секунды на них — это «успел заметить, что
+#      что-то написано». Число тут не украшение, и уехать вниз оно может от
+#      любой правки таймингов.
+#
+# И четвёртая, общая обоим: отложенный стиль обязан ОСТАВАТЬСЯ рабочим.
 
 const TRANSITION := preload("res://scripts/level_transition.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 14
+const EXPECTED_CHECKS : int = 23
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -42,15 +50,43 @@ func _initialize() -> void:
 	await process_frame
 	var vp : Vector2 = get_root().get_visible_rect().size
 
-	print("── Оба стиля на месте ──")
-	_check(TRANSITION.STYLE in ["money", "curtain"],
-		"включён известный стиль: %s" % TRANSITION.STYLE)
-	# Старый НЕ УДАЛЁН: он рабочий и гарантирует закрытие сплошной заливкой.
-	# Вернуться к нему — одна константа, но только если функция ещё жива.
+	print("── Включён занавес с чёрной подложкой ──")
+	_check(TRANSITION.STYLE == "curtain",
+		"включён занавес, а не облако: %s" % TRANSITION.STYLE)
+	# ЧЁРНАЯ, А НЕ ПРОСТО ТЁМНАЯ. У облака подложка была зелёная, «цвета денег»,
+	# и вернуться к ней незаметно можно одной правкой цвета.
+	var cc : Color = TRANSITION.COL_CURTAIN
+	_check(cc.r < 0.12 and cc.g < 0.12 and cc.b < 0.12
+			and absf(cc.r - cc.g) < 0.05 and absf(cc.g - cc.b) < 0.05,
+		"подложка занавеса чёрная и без оттенка: %s" % [cc])
+
+	print("── Надпись висит достаточно, чтобы её прочитать ──")
+	# Две строки на занавесе и три на карточке уровня. Порог 3 c — это не «как
+	# сейчас», а сколько нужно на чтение: ниже него надпись успевают заметить, но
+	# не прочесть.
+	_check(float(TRANSITION.HOLD_T) >= 3.0,
+		"занавес держит надпись %.1f c" % float(TRANSITION.HOLD_T))
+	var hud_src : String = FileAccess.get_file_as_string("res://scripts/hud.gd")
+	var card_t : float = _const_of(hud_src, "LEVEL_CARD_T")
+	# И КАРТОЧКА УРОВНЯ ЗАКРЫВАЕТ ЭКРАН НАСМЕРТЬ. Стояло 0.85, и это была не
+	# мягкость, а дырка: карточка обещает закрыть подмену полосы фона, а на
+	# пятнадцать процентов подмена сквозь неё была видна. Глазами такое почти не
+	# ловится, поэтому ловим числом.
+	_check(hud_src.contains("tween_property(dim, \"color:a\", 1.0"),
+		"карточка уровня доводит подложку до непрозрачной")
+	_check(card_t >= 3.0, "карточка уровня держит свою %.1f c" % card_t)
+	# И ОДИНАКОВО. Игрок видит их как одно место игры; разная задержка читается
+	# как «тут почему-то торопят».
+	_check(absf(card_t - float(TRANSITION.HOLD_T)) < 1.0,
+		"и оба держат примерно поровну: %.1f и %.1f"
+			% [float(TRANSITION.HOLD_T), card_t])
+	# Отложенный стиль НЕ УДАЛЁН: вернуться к нему — одна константа, но только
+	# если функция ещё жива.
+	print("── Отложенный стиль жив ──")
 	var t0 : Node = TRANSITION.new()
 	get_root().add_child(t0)
-	_check(t0.has_method("_run_curtain"), "прежняя шторка никуда не делась")
-	_check(t0.has_method("_run_money"), "и новое облако есть")
+	_check(t0.has_method("_run_curtain"), "занавес на месте")
+	_check(t0.has_method("_run_money"), "и отложенное облако тоже")
 	t0.queue_free()
 
 	# ── Облако кроет экран ──────────────────────────────────────────────────
@@ -114,8 +150,49 @@ func _initialize() -> void:
 		"купюры перекрывают экран с запасом: ×%.1f" % overdraw)
 	cloud.queue_free()
 
-	# ── Смена эпизода отдаётся ЗАКРЫТОМУ экрану ─────────────────────────────
-	print("── on_covered ──")
+	# ── ЗАНАВЕС: смена эпизода отдаётся ЗАКРЫТОМУ экрану ────────────────────
+	# Это ВКЛЮЧЁННЫЙ путь, и здесь проверка стоит на том же, на чём у облака:
+	# `on_covered` обязан прийти, когда шторка сомкнулась полностью. У занавеса
+	# «полностью» — это не положение узла, а `factor` шейдера: при единице
+	# треугольники сошлись и экрана под ними не видно.
+	print("── Занавес: on_covered ──")
+	var tc : Node = TRANSITION.new()
+	get_root().add_child(tc)
+	var c_done  := [false]
+	var c_factor := [-1.0]
+	tc.call("_run_curtain", "НЕМНОГО ПОЗДНЕЕ…", func() -> void:
+		c_done[0] = true
+		var r : ColorRect = tc.get("_rect")
+		if is_instance_valid(r) and r.material != null:
+			c_factor[0] = float((r.material as ShaderMaterial)
+				.get_shader_parameter("factor")),
+		"Найди дорогу к клубу")
+	var c_wait := await _await_flag(c_done, 6.0)
+	_check(c_done[0], "занавес отдал смену эпизода через %.1f c" % c_wait)
+	_check(c_factor[0] > 0.99,
+		"и ровно когда шторка сомкнулась: factor=%.3f" % c_factor[0])
+
+	# ПОДЛОЖКА ЗАНАВЕСА — та самая чёрная, и берёт её шейдер из COL_CURTAIN.
+	# Проверяется не константа (её сверили выше), а то, что она ДОЕХАЛА до
+	# материала: разъехаться эти двое могут молча.
+	var crect : ColorRect = tc.get("_rect")
+	var base : Color = Color(1, 0, 1)
+	if is_instance_valid(crect) and crect.material != null:
+		base = (crect.material as ShaderMaterial).get_shader_parameter("base_color")
+	_check(base.is_equal_approx(TRANSITION.COL_CURTAIN),
+		"и шейдер красит её тем же чёрным: %s" % [base])
+
+	# Деньги летят ПОД закрытым занавесом, а не поверх живого забега.
+	var cbills := 0
+	for ch in tc.get_children():
+		if ch is Sprite2D:
+			cbills += 1
+	_check(cbills > 100, "и под ней летят деньги: %d купюр" % cbills)
+	tc.queue_free()
+	await process_frame
+
+	# ── Смена эпизода отдаётся ЗАКРЫТОМУ экрану (отложенное облако) ─────────
+	print("── Облако: on_covered ──")
 	var covered := [false]
 	var when_x  := [0.0]
 	t.call("_run_money", "НЕМНОГО ПОЗДНЕЕ…", func() -> void:
@@ -153,6 +230,16 @@ func _initialize() -> void:
 	_check(labels.size() >= 2, "надписи лежат В ОБЛАКЕ: %d" % labels.size())
 
 	_finish()
+
+# Достать число из константы по исходнику. Числа таймингов живут в hud.gd, а
+# preload'ить его в тесте-SceneTree нельзя: он ссылается на автолоады, которых в
+# этот момент ещё нет, и тест не падает, а тихо разваливается.
+func _const_of(src: String, name: String) -> float:
+	for line in src.split("\n"):
+		var t := String(line).strip_edges()
+		if t.begins_with("const " + name):
+			return float(t.get_slice("=", 1).strip_edges())
+	return -1.0
 
 func _cloud_of(t: Node) -> Node2D:
 	for c in t.get_children():

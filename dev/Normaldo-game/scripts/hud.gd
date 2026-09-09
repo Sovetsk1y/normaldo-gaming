@@ -7455,7 +7455,16 @@ func _show_shout(big: String, small: String, hold: float,
 #
 # Заодно она отбивает ритм кампании: уровни подряд без единой паузы
 # читались бы как один бесконечный, а игрок должен знать, сколько он прошёл.
-const LEVEL_CARD_T : float = 1.7
+#
+# ── ДЕРЖИТСЯ ТРИ С ПОЛОВИНОЙ СЕКУНДЫ, А НЕ ПОЛТОРЫ ──────────────────────────
+# На карточке ТРИ строки: номер уровня, название локации и зачем игрок сюда
+# бежит. За полторы секунды успеваешь прочитать номер — то есть ровно ту
+# строку, которая и так понятна из счётчика.
+#
+# Число держится вровень с `LevelTransition.HOLD_T`: это два разных перехода —
+# занавес между эпизодами и карточка между уровнями, — но игрок видит их как
+# одно место игры, и разная задержка читалась бы как «тут почему-то торопят».
+const LEVEL_CARD_T : float = 3.7
 
 func _show_level_card(next_level: int) -> void:
 	var game_root := get_parent() as Node2D
@@ -7471,8 +7480,15 @@ func _show_level_card(next_level: int) -> void:
 	var cl := CanvasLayer.new()
 	cl.layer = 96
 	add_child(cl)
+	# ПОДЛОЖКА ТА ЖЕ, ЧТО У ЗАНАВЕСА, И ДОВОДИТСЯ ДО НЕПРОЗРАЧНОЙ.
+	#
+	# Стояло 0.85 — и это была не «мягкость», а дырка: карточка обещает закрыть
+	# подмену полосы фона, а на пятнадцать процентов подмена сквозь неё видна.
+	# Заметить такое глазами почти нельзя, поверить в это как в «мягкий затемняющий
+	# слой» — легко, и потому оно и стояло.
 	var dim := ColorRect.new()
-	dim.color = Color(0.02, 0.02, 0.04, 0.0)
+	dim.color = Color(LevelTransition.COL_CURTAIN.r, LevelTransition.COL_CURTAIN.g,
+		LevelTransition.COL_CURTAIN.b, 0.0)
 	dim.size  = vp
 	cl.add_child(dim)
 
@@ -7515,7 +7531,7 @@ func _show_level_card(next_level: int) -> void:
 	cl.add_child(st)
 
 	var tw := dim.create_tween()
-	tw.tween_property(dim, "color:a", 0.85, 0.30)
+	tw.tween_property(dim, "color:a", 1.0, 0.30)
 	await tw.finished
 
 	# Подмена ПОД карточкой: и полоса фона, и уровень спавнера меняются, пока
