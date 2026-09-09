@@ -814,16 +814,43 @@ const SLOW_MO_DURATION : float = 5.0
 var world_speed_mult : float = 1.0
 var _slow_mo_token   : int   = 0
 
+# ── ЕДИНСТВЕННАЯ ДВЕРЬ К СКОРОСТИ МИРА ─────────────────────────────────────
+# Замедлений в игре теперь два и они разной формы: песочные часы (и венец мага)
+# ставят фиксированный множитель на фиксированный срок, а мешок денег ведёт свой
+# ПЛАВНО, кадр за кадром, пока по нему тапают. Писать `world_speed_mult` порознь
+# они не могут: тот, кто выходит из своего замедления, вернул бы мир к единице
+# посреди чужого.
+#
+# Поэтому значение ставится только здесь, и живым предметам скорость домножается
+# НА ОТНОШЕНИЕ старого к новому. Отношение — это то, что делает переход верным из
+# ЛЮБОГО состояния в любое: и с единицы вниз, и с 0.6 на 0.55, и обратно. Прежний
+# код умел только «включить» и «выключить» и потому спрашивал, не включено ли уже.
+func set_world_speed(mult: float) -> void:
+	mult = clampf(mult, 0.15, 1.0)
+	if is_equal_approx(mult, world_speed_mult):
+		return
+	_scale_live_speeds(mult / world_speed_mult)
+	world_speed_mult = mult
+	_set_background_mult(mult)
+	_refresh_slow_fx()
+
+# Чёрно-белый экран и замедленная музыка следуют ЗА ЗНАЧЕНИЕМ, а не за тем, кто
+# его поставил. Иначе часы, кончившись посреди тапов по мешку, вернули бы цвет
+# при всё ещё замедленном мире.
+const SLOW_FX_FROM : float = 0.92
+var _slow_fx_on : bool = false
+
+func _refresh_slow_fx() -> void:
+	var want : bool = world_speed_mult < SLOW_FX_FROM
+	if want == _slow_fx_on:
+		return
+	_slow_fx_on = want
+	_set_slow_mo_fx(want, world_speed_mult)
+
 func apply_slow_mo(factor: float = SLOW_MO_FACTOR, duration: float = SLOW_MO_DURATION) -> void:
 	_slow_mo_token += 1
 	var tok := _slow_mo_token
-	# Если поток уже стоит — значит идёт мини-игра или босс, и пауза/возобновление
-	# принадлежат им. Тогда только замедляем то, что уже летит.
-	if is_equal_approx(world_speed_mult, 1.0):
-		_scale_live_speeds(factor)
-	world_speed_mult = factor
-	_set_background_mult(factor)
-	_set_slow_mo_fx(true, factor)
+	set_world_speed(factor)
 	# Паузу берём ВСЕГДА и всегда же отпускаем — «владение» больше не считается
 	# (см. комментарий у `pause_for_event`). Отпускаем и на раннем выходе: пауза
 	# наша, и уйти, не вернув её, значит заморозить поток навсегда.
@@ -838,10 +865,10 @@ func apply_slow_mo(factor: float = SLOW_MO_FACTOR, duration: float = SLOW_MO_DUR
 	if tok != _slow_mo_token:
 		resume_after_event()
 		return
-	_scale_live_speeds(1.0 / factor)
-	world_speed_mult = 1.0
-	_set_background_mult(1.0)
-	_set_slow_mo_fx(false, 1.0)
+	# К ЕДИНИЦЕ, А НЕ К «ЧТО БЫЛО»: если мешок денег в этот момент держит своё
+	# замедление, он вернёт своё значение следующим же кадром — он пишет его
+	# каждый кадр. Тянуть его состояние сюда значило бы дублировать его правила.
+	set_world_speed(1.0)
 	resume_after_event()
 
 # Обвязка замедления: мир в чёрно-белом и музыка в замедленном темпе. Ставится

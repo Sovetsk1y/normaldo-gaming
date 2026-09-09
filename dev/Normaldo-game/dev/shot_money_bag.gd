@@ -67,4 +67,33 @@ func _initialize() -> void:
 		get_root().get_texture().get_image().save_png("%s/%s.png" % [out, shot["name"]])
 		print("saved ", shot["name"], " (тапов ", shot["taps"], ", выплата ",
 			int(bag.call("payout")), ")")
+
+	# ── ЗАМЕДЛЕНИЕ ОТ ТАПОВ ──────────────────────────────────────────────────
+	# Кадр снимается С ЖИВОЙ ОБРАБОТКОЙ мешка: замедление ведёт он сам, кадр за
+	# кадром, и с `set_process(false)`, как в снимках выше, его бы просто не было.
+	# Поток тоже оставляем идти — иначе не видно, ЧТО именно замедлилось.
+	sp.call("clear_items")
+	sp.set_process(true)
+	await process_frame
+	sp.call("dev_spawn_money_bag")
+	await process_frame
+	var slow_bag : Node2D = null
+	for c in sp.get_children():
+		if c.is_in_group("money_bag"):
+			slow_bag = c
+	if slow_bag != null:
+		slow_bag.position = Vector2(vp.x * 0.62, vp.y * 0.5)
+		var t := 0.0
+		var f := 0
+		while t < 1.4:
+			f += 1
+			if f % 7 == 0:                 # по-человечески, ~8 тапов в секунду
+				slow_bag.call("tap")
+			get_root().get_tree().paused = false
+			await process_frame
+			t += 1.0 / 60.0
+		await RenderingServer.frame_post_draw
+		get_root().get_texture().get_image().save_png("%s/bag_slow.png" % out)
+		print("saved bag_slow (время ×%.2f, выплата %d)"
+			% [float(sp.get("world_speed_mult")), int(slow_bag.call("payout"))])
 	quit(0)

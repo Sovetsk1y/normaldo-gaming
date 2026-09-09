@@ -42,6 +42,8 @@ func _initialize() -> void:
 	await _test_cone_tap()
 	print("── Мешок выкладывает знак валюты ──")
 	await _test_money_bag_glyph()
+	print("── Тапы по мешку замедляют время ──")
+	await _test_money_bag_slowmo()
 	print("── Тачка копов ──")
 	await _test_police_car()
 	print("── Рыжий и седой бомж ──")
@@ -386,6 +388,87 @@ func _test_money_bag_glyph() -> void:
 	_check(plain != null and int(plain.call("burst", 1, null)) == 0,
 		"нетронутый мешок сгорает без выплаты")
 	_check(plain != null and bool(plain.get("_spent")), "и после огня уже потрачен")
+
+	game.queue_free()
+	await process_frame
+
+# ── ТАПЫ ПО МЕШКУ ЗАМЕДЛЯЮТ ВРЕМЯ ──────────────────────────────────────────
+# Три поведения, и все три обязаны выйти из ОДНОГО заряда, а не из трёх правил:
+# частый стук держит замедление, редкий его отпускает, и отпущенным мир обязан
+# вернуться ровно к единице.
+#
+# Последнее — самое опасное. Мешок берёт паузу потока и вычитает её обратно; не
+# вернуть её значит заморозить поток до конца забега, а такое лечится только
+# следующим боссом и выглядит не как баг, а как «игра кончилась».
+func _test_money_bag_slowmo() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var sp : Node = game.get_node_or_null("Spawner")
+	sp.call("clear_items")
+
+	sp.call("dev_spawn_money_bag")
+	await process_frame
+	var bag : Node2D = null
+	for c in sp.get_children():
+		if c.is_in_group("money_bag"):
+			bag = c
+	if bag == null:
+		_check(false, "мешок появился для замера времени")
+		game.queue_free()
+		return
+
+	# СТУЧИМ ПО-ЧЕЛОВЕЧЕСКИ — раз в семь кадров, это около восьми тапов в секунду.
+	# Каждый кадр — не проверка механики, а проверка машины: живой палец так не
+	# умеет, и заряд, который держится только от такой частоты, в руках не
+	# удержался бы.
+	var t := 0.0
+	var f := 0
+	while t < 0.9:
+		f += 1
+		if f % 7 == 0:
+			bag.call("tap")
+		await process_frame
+		t += 1.0 / 60.0
+	var fast : float = float(sp.get("world_speed_mult"))
+	_check(fast < 0.75, "от тапов время замедлилось: ×%.2f" % fast)
+
+	# ДЕРЖИМ ЕЩЁ, ПОКА МЕШОК РАСТЁТ — и оно не отползает обратно.
+	t = 0.0
+	while t < 0.6 and not bool(bag.call("is_maxed")):
+		f += 1
+		if f % 7 == 0:
+			bag.call("tap")
+		await process_frame
+		t += 1.0 / 60.0
+	var held : float = float(sp.get("world_speed_mult"))
+	_check(held <= fast + 0.05, "и держится, пока стучат: ×%.2f" % held)
+
+	# ── А УПЁРШИЙСЯ В ПОТОЛОК ВРЕМЯ ОТПУСКАЕТ ────────────────────────────────
+	# Мешок перестаёт расти, платить и тянуть время одновременно. Иначе стук по
+	# доросшему мешку держал бы мир замедленным и поток на паузе сколько угодно,
+	# ничего не давая взамен, — то есть игрок мог бы просто выключить игру
+	# пальцем.
+	while not bool(bag.call("is_maxed")):
+		bag.call("tap")
+		await process_frame
+	t = 0.0
+	while t < 3.0 and float(sp.get("world_speed_mult")) < 0.999:
+		bag.call("tap")            # стучим ДАЛЬШЕ — и это уже ничего не даёт
+		await process_frame
+		t += 1.0 / 60.0
+	_check(is_equal_approx(float(sp.get("world_speed_mult")), 1.0),
+		"доросший мешок время отпускает, сколько по нему ни стучи")
+
+	# ПЕРЕСТАЛИ — возвращается само, без чужой помощи.
+	t = 0.0
+	while t < 3.0 and float(sp.get("world_speed_mult")) < 0.999:
+		await process_frame
+		t += 1.0 / 60.0
+	_check(is_equal_approx(float(sp.get("world_speed_mult")), 1.0),
+		"перестали стучать — время вернулось за %.1f c" % t)
+	# И ПОТОК СНОВА ИДЁТ. Пауза, взятая мешком, обязана быть отдана.
+	_check(not bool(sp.get("_frozen")), "и поток снова идёт, а не стоит замороженным")
 
 	game.queue_free()
 	await process_frame
