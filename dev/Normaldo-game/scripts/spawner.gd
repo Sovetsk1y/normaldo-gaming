@@ -832,25 +832,20 @@ func set_world_speed(mult: float) -> void:
 	_scale_live_speeds(mult / world_speed_mult)
 	world_speed_mult = mult
 	_set_background_mult(mult)
-	_refresh_slow_fx()
 
-# Чёрно-белый экран и замедленная музыка следуют ЗА ЗНАЧЕНИЕМ, а не за тем, кто
-# его поставил. Иначе часы, кончившись посреди тапов по мешку, вернули бы цвет
-# при всё ещё замедленном мире.
-const SLOW_FX_FROM : float = 0.92
-var _slow_fx_on : bool = false
-
-func _refresh_slow_fx() -> void:
-	var want : bool = world_speed_mult < SLOW_FX_FROM
-	if want == _slow_fx_on:
-		return
-	_slow_fx_on = want
-	_set_slow_mo_fx(want, world_speed_mult)
-
+# ── ЧБ И МУЗЫКА — ЭТО ЗНАК ЧАСОВ, А НЕ ЗНАК ЛЮБОГО ЗАМЕДЛЕНИЯ ──────────────
+# Обвязку включает и выключает ТОТ, КТО ЕЁ ЗАВЁЛ, — песочные часы и венец мага.
+# Мешок денег замедляет мир тоже, но своей обвязки не поднимает: чёрно-белый
+# экран на каждый тап по мешку — это не «дали передышку», а мигание.
+#
+# Одно время обвязка следовала за самим значением скорости, и получалось, что
+# мешок красит экран чужим знаком: игрок видит ЧБ, ждёт часов и не находит их.
+# Знак должен значить одно и то же всегда, иначе он не знак.
 func apply_slow_mo(factor: float = SLOW_MO_FACTOR, duration: float = SLOW_MO_DURATION) -> void:
 	_slow_mo_token += 1
 	var tok := _slow_mo_token
 	set_world_speed(factor)
+	_set_slow_mo_fx(true, factor)
 	# Паузу берём ВСЕГДА и всегда же отпускаем — «владение» больше не считается
 	# (см. комментарий у `pause_for_event`). Отпускаем и на раннем выходе: пауза
 	# наша, и уйти, не вернув её, значит заморозить поток навсегда.
@@ -869,6 +864,7 @@ func apply_slow_mo(factor: float = SLOW_MO_FACTOR, duration: float = SLOW_MO_DUR
 	# замедление, он вернёт своё значение следующим же кадром — он пишет его
 	# каждый кадр. Тянуть его состояние сюда значило бы дублировать его правила.
 	set_world_speed(1.0)
+	_set_slow_mo_fx(false, 1.0)
 	resume_after_event()
 
 # Обвязка замедления: мир в чёрно-белом и музыка в замедленном темпе. Ставится
