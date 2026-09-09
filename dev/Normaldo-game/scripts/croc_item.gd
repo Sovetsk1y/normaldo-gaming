@@ -41,9 +41,17 @@ const SFX_RELOAD := preload("res://assets/audio/leatherhead/reload.mp3")
 
 @export var speed : float = 240.0
 
-# Размер — как у ниндзя в потоке. Он тут не босс, а угроза среди угроз, и
-# крокодил в свой боевой рост занял бы пол-экрана.
-const CROC_PX : float = 86.0
+# ── РАЗМЕР: МЕРИТЬ НАДО ВЫСОТУ ─────────────────────────────────────────────
+# Крокодил нарисован ЛЁЖА: рисунок 253 × 123, вдвое шире, чем выше. Пока размер
+# считался по длинной стороне — «86 пикселей, как у ниндзя», — длинной стороной
+# была ШИРИНА, и на экран он выходил высотой в 42 пикселя при линии в 86. То
+# есть вдвое ниже своей полосы: не угроза, а ящерица на её фоне.
+#
+# Поэтому здесь высота, а не длинная сторона. 78 при линии 86 — это «почти во
+# всю линию»: остаётся зазор, по которому видно, что он идёт ПО полосе, а не
+# растёт из её краёв. Ширина при этом выходит около 160 — он и должен быть
+# длинным, он крокодил.
+const CROC_H_PX : float = 78.0
 
 const ENTER_SPEED_MULT : float = 1.7    # въезд быстрее потока
 const PARK_X_RATIO     : float = 0.78   # где тормозит (доля ширины экрана)
@@ -85,12 +93,15 @@ func _ready() -> void:
 	_sprite.texture        = LEATHERHEAD.F_RELOAD_UP[0]
 	_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_sprite.z_index        = 2
-	ItemSizing.fit_sprite_content(_sprite, CROC_PX)
+	ItemSizing.fit_sprite_content(_sprite, CROC_H_PX, ItemSizing.AXIS_H)
 	add_child(_sprite)
 
+	# Хитбокс считается ОТ НАРИСОВАННОГО, а не от константы: крокодил вдвое шире,
+	# чем выше, и квадрат «по росту» оставил бы половину туши насквозь проходимой.
+	var drawn := Vector2(ItemSizing.content_rect(_sprite.texture).size) * _sprite.scale
 	var cs   := CollisionShape2D.new()
 	var rect := RectangleShape2D.new()
-	rect.size = Vector2(CROC_PX * 0.62, CROC_PX * 0.66)
+	rect.size = Vector2(drawn.x * 0.62, drawn.y * 0.72)
 	cs.shape  = rect
 	add_child(cs)
 

@@ -44,6 +44,10 @@ func _initialize() -> void:
 	await _test_dev_mini_bosses()
 	print("── Дев-кнопки не стоят одна на другой ──")
 	_test_dev_column_slots()
+	print("── СВАТ в потоке ──")
+	await _test_swat_in_stream()
+	print("── Крокодил в потоке ростом в линию ──")
+	await _test_croc_size()
 	print("── Мешок выкладывает знак валюты ──")
 	await _test_money_bag_glyph()
 	print("── Тапы по мешку замедляют время ──")
@@ -388,6 +392,143 @@ func _test_dev_column_slots() -> void:
 		if int(slots[slot]) > 1:
 			taken_twice.append("№%d: %d кнопки" % [int(slot), int(slots[slot])])
 	_check(taken_twice.is_empty(), "и ни одно не занято дважды: %s" % [taken_twice])
+
+# ── СВАТ В ПОТОКЕ: ИДЁТ ПО ЛИНИИ СО СКОРОСТЬЮ ПОТОКА ───────────────────────
+# Правило простое и оттого легко ломающееся молча: боец едет РОВНО со скоростью
+# потока — не своим боевым шагом в 46 px/c и не быстрее соседей, — а разница
+# между тремя видами только в том, что он при этом делает.
+#
+# Щитоносец не делает НИЧЕГО: он и есть проверка того, что скорость — это
+# скорость, а не побочный эффект стрельбы.
+func _test_swat_in_stream() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var sp : Node   = game.get_node_or_null("Spawner")
+	var nd : Node2D = game.get_node_or_null("Normaldo")
+	sp.call("clear_items")
+	sp.set_process(false)
+	get_root().get_tree().paused = false
+	var vp : Vector2 = get_root().get_visible_rect().size
+	await process_frame
+
+	# ВСЕ ТРИ ВИДА ДОСТИЖИМЫ. Вид, который не выпадает, всё равно что не написан.
+	var seen : Dictionary = {}
+	for i in 200:
+		sp.call("_spawn_swat", vp.y * 0.5, vp.x, 250.0)
+	for c in sp.get_children():
+		if c.is_in_group("swat"):
+			seen[String(c.get("kind"))] = true
+	_check(seen.size() == 3, "поток выдаёт все три вида: %s" % str(seen.keys()))
+	sp.call("clear_items")
+	await process_frame
+
+	# СКОРОСТЬ. Меряется перемещением за секунду, а не полем `walk_speed`: поле
+	# можно поставить и не использовать, и ровно так этот баг и выглядел бы.
+	var stream_v : float = 250.0
+	var slow : Array = []
+	for kind in ["shield", "rifle", "grenade"]:
+		var s : Node2D = _put_swat(sp, kind, nd, vp, stream_v)
+		var x0 : float = s.position.x
+		await _tick(0.60)
+		if not is_instance_valid(s):
+			slow.append("%s исчез" % kind)
+			continue
+		var v : float = (x0 - s.position.x) / 0.60
+		# Отдача стрелка дёргает его на 6 px туда-обратно — допуск шире неё.
+		if absf(v - stream_v) > 24.0:
+			slow.append("%s: %.0f px/c" % [kind, v])
+		sp.call("clear_items")
+		await process_frame
+	_check(slow.is_empty(), "и каждый идёт со скоростью потока: отстают %s" % [slow])
+
+	# ЩИТОНОСЕЦ ПРОСТО ИДЁТ. Полторы секунды — дольше, чем первый выстрел
+	# стрелка (1.05) и бросок гранатомётчика (0.85): будь у щита хоть один из
+	# этих ходов, он бы к этому моменту уже случился.
+	var shield : Node2D = _put_swat(sp, "shield", nd, vp, stream_v)
+	await _tick(1.60)
+	_check(_swat_shots(sp) == 0 and is_instance_valid(shield),
+		"щитоносец за полторы секунды не выпустил ничего: %d" % _swat_shots(sp))
+	sp.call("clear_items")
+	await process_frame
+
+	# А ОСТАЛЬНЫЕ ДВОЕ — СО СВОИМИ ЭФФЕКТАМИ, и это тот же ход, что в бою.
+	_put_swat(sp, "rifle", nd, vp, stream_v)
+	await _tick(1.60)
+	_check(_swat_shots(sp) > 0, "стрелок на ходу стреляет: %d" % _swat_shots(sp))
+	sp.call("clear_items")
+	await process_frame
+
+	_put_swat(sp, "grenade", nd, vp, stream_v)
+	await _tick(1.30)
+	_check(_swat_shots(sp) > 0, "гранатомётчик на ходу бросает: %d" % _swat_shots(sp))
+
+	game.queue_free()
+	await process_frame
+
+# Боец в потоке ставится тем же путём, что и спавнером: kind ДО add_child,
+# скорость потока, цель — Нормальдо, вход без вертолёта.
+func _put_swat(sp: Node, kind: String, nd: Node2D, vp: Vector2,
+		speed: float) -> Node2D:
+	var node := Area2D.new()
+	node.set_script(load("res://scripts/police_swat.gd"))
+	node.set("kind", kind)
+	node.set("walk_speed", speed)
+	node.set("target", nd)
+	node.position = Vector2(vp.x * 0.80, vp.y * 0.5)
+	sp.add_child(node)
+	node.call("enter_from_edge")
+	return node
+
+# Всё, что боец выпустил из рук: пули по группе, граната — по своему полю.
+func _swat_shots(sp: Node) -> int:
+	var n : int = 0
+	for c in sp.get_children():
+		if c.is_in_group("bullet") or c.get("from_pos") != null:
+			n += 1
+	return n
+
+# ── КРОКОДИЛ РОСТОМ ПОЧТИ В ЛИНИЮ ──────────────────────────────────────────
+# Он нарисован ЛЁЖА — вдвое шире, чем выше, — и пока размер считался по длинной
+# стороне, на экран он выходил высотой в 42 пикселя при линии в 86. Проверяется
+# поэтому именно ВЫСОТА РИСУНКА относительно полосы, а не константа: константу
+# можно поставить какую угодно и снова померить не ту сторону.
+func _test_croc_size() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var sp : Node = game.get_node_or_null("Spawner")
+	sp.call("clear_items")
+	sp.set_process(false)
+	var vp : Vector2 = get_root().get_visible_rect().size
+	var lane : float = vp.y / 5.0
+	sp.call("dev_send_hazard", "croc")
+	await process_frame
+
+	var croc : Node2D = null
+	for c in sp.get_children():
+		if c.is_in_group("croc"):
+			croc = c
+	_check(croc != null, "крокодил в потоке появился")
+	if croc != null:
+		var spr : Sprite2D = null
+		for k in croc.get_children():
+			if k is Sprite2D:
+				spr = k
+		var drawn := Vector2(ItemSizing.content_rect(spr.texture).size) * spr.scale
+		_check(drawn.y >= lane * 0.85 and drawn.y <= lane,
+			"и ростом почти в линию: %.0f при линии %.0f" % [drawn.y, lane])
+		# Хитбокс обязан ехать за ростом: крокодил длинный, и коробка «по росту»
+		# оставила бы половину туши проходимой насквозь.
+		var box : RectangleShape2D = null
+		for k in croc.get_children():
+			if k is CollisionShape2D:
+				box = (k as CollisionShape2D).shape as RectangleShape2D
+		_check(box != null and box.size.x > drawn.y,
+			"а хитбокс шире, чем высок: %s" % [box.size if box != null else Vector2.ZERO])
+
+	game.queue_free()
+	await process_frame
 
 func _test_money_bag_glyph() -> void:
 	var game : Node = load("res://scenes/game.tscn").instantiate()
