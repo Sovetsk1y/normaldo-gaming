@@ -1335,6 +1335,19 @@ func _spawn_homeless(y: float, vp_w: float, speed: float, solo: bool = false) ->
 	add_child(hm)
 
 # Dev: заспавнить вора вручную (кнопка в HUD).
+# ── ВЫЗВАТЬ ЛЮБУЮ УГРОЗУ ПО ИМЕНИ ──────────────────────────────────────────
+# Одна дверь вместо шести отдельных `dev_send_*`. Имена те же, что в таблицах
+# HAZ_LEVEL, и разбирает их тот же `_spawn_level_hazard`, что и настоящий поток:
+# дев-вызов обязан идти ровно тем же путём, иначе он показывает не то, что игра.
+#
+# Полоса случайная — как в потоке. Фиксированная (скажем, средняя) врала бы про
+# то, где угроза появляется на самом деле.
+func dev_send_hazard(kind: String) -> void:
+	var vp_w  := get_viewport_rect().size.x
+	var lanes := _lane_centers()
+	var speed : float = _campaign_item_speed() if campaign_mode else 250.0
+	_spawn_level_hazard(kind, lanes[randi() % LANE_COUNT], vp_w, speed)
+
 func dev_send_thief() -> void:
 	var vp_w  := get_viewport_rect().size.x
 	var lanes := _lane_centers()

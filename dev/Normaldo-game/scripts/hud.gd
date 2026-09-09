@@ -6215,6 +6215,7 @@ func _start_game() -> void:
 		# хозяина клуба игрой идти два и три уровня, и без кнопки посмотреть на
 		# них нельзя ничем.
 		_build_dev_boss_btn()
+		_build_dev_mini_btn()
 	if DevFlags.ENABLED and DevFlags.TOOLBOX:
 		_build_dev_btn()
 		_build_dev_pizza_btn()
@@ -6877,6 +6878,94 @@ func _dev_summon_boss() -> void:
 	_play_btn_sfx()
 	_drop_boss_menu()
 	_on_boss_time()
+
+# ── Дев-чипы: выпадашка «МИНИБОССЫ» ─────────────────────────────────────────
+# Рядом с «БОССЫ» и устроена так же, но зовёт СЛОЙ НИЖЕ: не тех пятерых, кем
+# кончается эпизод, а именные встречи внутри потока — ниндзя, крокодил и сват
+# (камео побеждённых боссов), шаман, вор, тачка копов и сейф.
+#
+# Зачем отдельная кнопка. Половину этого списка руками не поймать вовсе: ниндзя
+# приходит в поток только со второго уровня, крокодил с третьего, сват с пятого,
+# а шаман и сейф лежат в раскладке своих эпизодов с весом 6–8 из полутора сотен.
+# Чтобы посмотреть, как крокодил ведёт стволом, приходилось доигрывать до
+# третьего эпизода и надеяться.
+#
+# ── ЧЕМ ОТЛИЧАЕТСЯ ОТ «БОССЫ» ──────────────────────────────────────────────
+# Та выпадашка после вызова УЕЗЖАЕТ: второго босса за забег звать некуда.
+# Эта — остаётся. Мини-боссы летят в потоке пачками, и «вызвал одного, кнопка
+# пропала» означало бы, что дев-панель врёт про саму механику.
+var _mini_menu_btn : Node2D = null
+var _mini_menu_row : Node2D = null
+
+# Имена — те же, что в таблицах HAZ_LEVEL спавнера: подпись на чипе и ключ в
+# раскладке обязаны совпадать, иначе кнопка зовёт не то, что обещает.
+const MINI_BOSSES : Array = [
+	["НИНДЗЯ", "ninja",      Color(1.00, 0.55, 0.55)],
+	["КРОК",   "croc",       Color(0.60, 1.00, 0.50)],
+	["СВАТ",   "swat",       Color(0.55, 0.75, 1.00)],
+	["ШАМАН",  "shaman",     Color(0.85, 0.60, 1.00)],
+	["ВОР",    "thief",      Color(1.00, 0.80, 0.45)],
+	["ТАЧКА",  "police_car", Color(0.50, 0.85, 1.00)],
+	["СЕЙФ",   "safe",       Color(0.90, 0.90, 0.60)],
+]
+
+const MINI_ICONS : Dictionary = {
+	"ninja":      preload("res://assets/bosses/ninja_foot/ninja_foot1.png"),
+	"shaman":     preload("res://assets/items/shaman.png"),
+	"thief":      preload("res://assets/items/thief1.png"),
+	"police_car": preload("res://assets/items/police_car.png"),
+	"safe":       preload("res://assets/items/safe.png"),
+	"croc":       preload("res://assets/bosses/leatherhead/idle.png"),
+	"swat":       preload("res://assets/bosses/police/swat.png"),
+}
+
+func _build_dev_mini_btn() -> void:
+	var vp := get_viewport().get_visible_rect().size
+	# Подпись «МИНИ», а не «МИНИБОССЫ»: чип 44 пикселя шириной, и девять букв в
+	# него не влезают — обрезаются на последней. Что именно за «мини», говорит
+	# раскрытый ряд.
+	_mini_menu_btn = _dev_chip("МИНИ", Color(1.0, 0.80, 0.45), _toggle_mini_menu)
+	_mini_menu_btn.position = Vector2(8.0, vp.y - DEV_SZ * 5.0 - 8.0 - DEV_GAP * 4.0)
+	add_child(_mini_menu_btn)
+
+func _toggle_mini_menu() -> void:
+	_play_btn_sfx()
+	if is_instance_valid(_mini_menu_row):
+		_close_mini_menu()
+		return
+	if not is_instance_valid(_mini_menu_btn):
+		return
+	_mini_menu_row = Node2D.new()
+	_mini_menu_row.position = _mini_menu_btn.position
+	add_child(_mini_menu_row)
+
+	for i in MINI_BOSSES.size():
+		var it : Array = MINI_BOSSES[i]
+		var kind : String = String(it[1])
+		# Замыкание по kind, а не по индексу: индекс к моменту нажатия уже уедет.
+		var chip : Node2D = _dev_chip(String(it[0]), it[2],
+			func() -> void: _dev_send_mini(kind),
+			MINI_ICONS.get(kind, null) as Texture2D)
+		chip.position = Vector2((DEV_SZ + DEV_GAP) * float(i + 1), 0.0)
+		_mini_menu_row.add_child(chip)
+
+	var close_chip : Node2D = _dev_chip("✕", Color(0.75, 0.75, 0.80), _close_mini_menu)
+	close_chip.position = Vector2(
+		(DEV_SZ + DEV_GAP) * float(MINI_BOSSES.size() + 1), 0.0)
+	_mini_menu_row.add_child(close_chip)
+
+func _close_mini_menu() -> void:
+	if is_instance_valid(_mini_menu_row):
+		_mini_menu_row.queue_free()
+	_mini_menu_row = null
+
+# Вызов идёт ЧЕРЕЗ СПАВНЕР, тем же путём, что и обычный поток: дев-кнопка,
+# собирающая предмет сама, показывала бы не игру, а себя.
+func _dev_send_mini(kind: String) -> void:
+	_play_btn_sfx()
+	var spawner := get_parent().get_node_or_null("Spawner")
+	if spawner != null and spawner.has_method("dev_send_hazard"):
+		spawner.call("dev_send_hazard", kind)
 
 func _on_croc_tapped() -> void:
 	_play_btn_sfx()

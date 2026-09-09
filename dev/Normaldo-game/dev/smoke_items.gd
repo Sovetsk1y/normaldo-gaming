@@ -40,6 +40,8 @@ func _initialize() -> void:
 	await _test_ninja_kinds()
 	print("── Конус просит тапать ──")
 	await _test_cone_tap()
+	print("── Дев-выпадашка мини-боссов ──")
+	await _test_dev_mini_bosses()
 	print("── Мешок выкладывает знак валюты ──")
 	await _test_money_bag_glyph()
 	print("── Тапы по мешку замедляют время ──")
@@ -305,6 +307,56 @@ func _test_cone_tap() -> void:
 #    себя, и это худший вид несправедливости у ресурса;
 #  • поимка платит РОВНО столько, сколько на боку, и второй раз не платит;
 #  • раздутый мешок НЕ СГОРАЕТ. Он таран, и горящий предмет ломает сам.
+# ── КАЖДЫЙ ПУНКТ ВЫПАДАШКИ И ПРАВДА КОГО-ТО ЗОВЁТ ──────────────────────────
+# Чипы подписаны словами, а зовут по КЛЮЧУ из таблиц HAZ_LEVEL. Ключ — обычная
+# строка, и разъезжается она молча: переименовали угрозу в спавнере, забыли в
+# списке — и кнопка жмётся, звук играет, а на арене ничего. Именно так дев-панель
+# и врёт: не падает, а тихо перестаёт работать.
+#
+# Список берётся ИЗ САМОГО HUD, а не переписывается сюда: копия рядом с
+# оригиналом разошлась бы с ним на первой же правке, и тест продолжил бы
+# проверять то, чего в игре уже нет.
+#
+# `hud.gd` тут не грузится через preload намеренно — он ссылается на автолоады, и
+# в тесте-SceneTree такой preload молча не компилируется. Берём карту констант у
+# ЖИВОГО скрипта из собранной сцены.
+func _test_dev_mini_bosses() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var hud : Node = game.get_node_or_null("HUD")
+	var sp  : Node = game.get_node_or_null("Spawner")
+	sp.call("clear_items")
+	sp.set_process(false)
+	await process_frame
+
+	var consts : Dictionary = hud.get_script().get_script_constant_map()
+	var list : Array = consts.get("MINI_BOSSES", [])
+	_check(not list.is_empty(), "список мини-боссов взят из HUD: %d штук" % list.size())
+
+	var silent : Array = []
+	for it in list:
+		var kind : String = String((it as Array)[1])
+		sp.call("clear_items")
+		await process_frame
+		var before : int = sp.get_child_count()
+		sp.call("dev_send_hazard", kind)
+		await process_frame
+		if sp.get_child_count() <= before:
+			silent.append(kind)
+	_check(silent.is_empty(), "и все они действительно спавнятся: молчат %s" % [silent])
+
+	# И У КАЖДОГО ЕСТЬ ПОДПИСЬ И ЦВЕТ. Пустая подпись даёт чип-невидимку: он есть,
+	# он нажимается, и понять, кто это, нельзя.
+	var noname : Array = []
+	for it in list:
+		if String((it as Array)[0]).strip_edges() == "":
+			noname.append(String((it as Array)[1]))
+	_check(noname.is_empty(), "и у каждого подпись словом: %s" % [noname])
+
+	game.queue_free()
+	await process_frame
+
 func _test_money_bag_glyph() -> void:
 	var game : Node = load("res://scenes/game.tscn").instantiate()
 	get_root().add_child(game)
