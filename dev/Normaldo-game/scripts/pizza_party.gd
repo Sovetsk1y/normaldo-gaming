@@ -26,6 +26,9 @@ const ITEM_SCENE     := preload("res://scenes/item.tscn")
 const HOMELESS_SCENE := preload("res://scenes/homeless.tscn")
 const DOG_SCENE      := preload("res://scenes/dog.tscn")
 const SNAKE_SCENE    := preload("res://scenes/snake.tscn")
+# Ключ к мини-игре: светящаяся коробка пиццы, летящая в потоке. См.
+# scripts/pizza_box.gd
+const BOX_SCENE      := preload("res://scenes/pizza_box.tscn")
 
 const PIZZA_TEX  := preload("res://assets/items/pizza.png")
 const TRASH_TEX  := preload("res://assets/items/trash_bin.png")
@@ -46,7 +49,11 @@ const TAP_EDGE    : float = 12.0     # и не подходит к краю эк
 # сложности см. /Концепция/Эпизод 1 — прогрессия предметов (редизайн).md
 @export var first_delay    : float = 105.0   # run grace before the pack can appear
 @export var repeat_interval: float = 60.0    # cooldown after a mini-game
-@export var pizza_chance   : float = 0.004   # per-frame chance to send the pack
+# Шанс за кадр ОТПРАВИТЬ КЛЮЧ — светящуюся коробку, — а не включить мини-игру.
+# Он вдвое выше прежнего, и это не «стало чаще»: раньше бросок кубика сразу
+# запускал игру, теперь он только выпускает коробку, а поймает её игрок или нет
+# — его дело. Половина ключей улетает за край мимо.
+@export var pizza_chance   : float = 0.008
 
 const PACK_SCALE   : float = 0.24            # ~3× the in-run pizza pack (0.08)
 const FLY_SPEED    : float = 900.0           # pack glide-in speed
@@ -96,6 +103,7 @@ var _pulse_t   : float = 0.0
 var _open_t    : float = 0.0   # >0 while the pack shows its OPEN frame after a spit
 var _event_frozen : bool = false
 
+var _box      : Node2D = null   # летящий ключ (коробка пиццы)
 var _pack     : Node2D = null
 var _pack_spr : Sprite2D = null
 var _glow     : Sprite2D = null
@@ -128,10 +136,16 @@ func _ready() -> void:
 	add_child(_spit_sfx)
 	if is_instance_valid(_normaldo) and _normaldo.has_signal("died"):
 		_normaldo.died.connect(_on_normaldo_died)
+	if is_instance_valid(_normaldo) and _normaldo.has_signal("pizza_box_caught"):
+		_normaldo.pizza_box_caught.connect(_on_box_caught)
 
 # If Normaldo dies mid-game (he's vulnerable here), drop our visuals immediately
 # so nothing lingers over the game-over screen before the scene reloads.
 func _on_normaldo_died(_total_pizzas: int, _death_pos: Vector2) -> void:
+	# Ключ убираем ВСЕГДА, даже если игра не шла: он наш ребёнок, зачистка
+	# спавнера его не трогает, и светящаяся коробка осталась бы летать поверх
+	# экрана смерти.
+	_drop_box()
 	if _state == State.IDLE or _state == State.OUTRO:
 		return
 	if _normaldo.has_method("clear_left_region"):
@@ -170,19 +184,60 @@ func _process(delta: float) -> void:
 			_dismiss_move_prompt()
 	match _state:
 		State.IDLE:
+			# Кубик БОЛЬШЕ НЕ ЗАПУСКАЕТ ИГРУ — он выпускает ключ. Пока ключ на
+			# экране, второй не шлём: две светящиеся коробки разом читались бы
+			# как «набери побольше», а он ровно один и включает ровно одно.
 			if _run_active():
 				if _arm_timer > 0.0:
 					_arm_timer -= delta
-				elif randf() < pizza_chance:
-					_start()
+				elif not is_instance_valid(_box) and randf() < pizza_chance:
+					_send_box()
 		State.FLY_IN:
 			_tick_fly_in(delta)
 		State.PLAY:
 			_tick_play(delta)
 
+func _drop_box() -> void:
+	if is_instance_valid(_box):
+		_box.queue_free()
+	_box = null
+
+# ── КЛЮЧ ЛЕТИТ ЧЕРЕЗ ЭКРАН ──────────────────────────────────────────────────
+# Одна светящаяся коробка в случайной полосе, справа налево, на скорости потока —
+# как любой предмет. Ничего не замораживает: не поймали — улетела за край.
+#
+# Родителем берём СЕБЯ, а не спавнер: спавнер чистят на событиях (босс, чужая
+# мини-игра, стена пицц), и ключ выметало бы вместе с мусором.
+func _send_box() -> void:
+	if not is_instance_valid(_spawner):
+		return
+	if _spawner.has_method("current_phase_speed"):
+		_base_item_speed = _spawner.current_phase_speed()
+	_box = BOX_SCENE.instantiate()
+	var vp := get_viewport_rect().size
+	var lane_y := vp.y / 5.0 * ((randi() % 5) + 0.5)
+	_box.position    = Vector2(vp.x + 80.0, lane_y)
+	_box.target_node = _normaldo   # для реакции на близость
+	_box.speed       = _base_item_speed
+	add_child(_box)
+
+# Поймали ключ — вот теперь мини-игра. Сам ключ к этому моменту уже съеден
+# (`normaldo._on_area_entered`), нам остаётся забыть ссылку.
+func _on_box_caught() -> void:
+	_box = null
+	if _state != State.IDLE:
+		return
+	if not _run_active():
+		return
+	_start()
+
 func _start() -> void:
 	if not is_instance_valid(_spawner) or not is_instance_valid(_background):
 		return
+	# Второй ключ на экране игре не нужен: поймать его во время неё нельзя
+	# (состояние уже не IDLE), а летать сквозь замороженный забег он будет.
+	# Случай живой — дев-кнопка запускает игру, пока ключ в воздухе.
+	_drop_box()
 	AchievementManager.on_minigame("pizza_party")
 	if _spawner.has_method("current_phase_speed"):
 		_base_item_speed = _spawner.current_phase_speed()

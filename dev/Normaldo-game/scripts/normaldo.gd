@@ -6,6 +6,7 @@ signal dollars_changed(count: int)
 signal unique_ability_changed(ready: bool)
 signal wizard_state_changed(pizzas_done: int, bonus_active: bool, bonus_type: int, bonus_remaining: float)
 signal mutagen_caught
+signal pizza_box_caught      # ПИЦЦА-ПАТИ: ключ ловят так же, как мутаген
 signal slot_machine_caught   # СЛОТЫ mini-game trigger (caught like the mutagen)
 # ЖИРОБОСС mini-game: a good item touched the giant. fat_boss.gd tallies it into
 # the local counter (NOT the run score) and credits it all at the end.
@@ -1979,8 +1980,8 @@ func _area_tag(area: Area2D) -> String:
 # доллар, мешок и мэджик бокс своего тега не имеют (резистить их незачем), и
 # только для них названы группы.
 const COUNT_GROUPS : Array = ["pizza", "pizza_pack", "dollar", "money_bag",
-	"magic_box", "magnet", "mutagen", "slot_machine", "cola", "casey_mask",
-	"magic_hat", "hourglass", "casino_chip", "molotov", "bomb"]
+	"magic_box", "magnet", "mutagen", "pizza_box", "slot_machine", "cola",
+	"casey_mask", "magic_hat", "hourglass", "casino_chip", "molotov", "bomb"]
 
 func _count_tag(area: Area2D) -> String:
 	var t := _area_tag(area)
@@ -2756,7 +2757,7 @@ func _throw_shovel(dir: Vector2) -> void:
 const WEB_BAD_GROUPS : Array = ["obstacle", "slowing", "fire", "bomb", "molotov"]
 const WEB_GOOD_GROUPS : Array = ["pizza", "pizza_pack", "dollar", "money_bag",
 	"magnet", "magic_box", "casey_mask", "magic_hat", "cola", "hourglass",
-	"casino_chip", "mutagen"]
+	"casino_chip", "mutagen", "pizza_box"]
 
 func _web_handler() -> Callable:
 	return func(node: Node) -> bool:
@@ -4238,6 +4239,13 @@ func _on_area_entered(area: Area2D) -> void:
 		# FatBoss owns the freeze/mini-game; we just consume the pickup and signal.
 		area.queue_free()
 		mutagen_caught.emit()
+		return
+	if area.is_in_group("pizza_box"):
+		# Заморозку и саму игру ведёт PizzaParty; здесь только съедаем ключ и
+		# говорим об этом. Ровно как с мутагеном — и намеренно теми же тремя
+		# строками: у двух ключей обязан быть один договор.
+		area.queue_free()
+		pizza_box_caught.emit()
 		return
 	if area.is_in_group("slot_machine"):
 		area.queue_free()

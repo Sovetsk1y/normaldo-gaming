@@ -10,6 +10,19 @@ extends Area2D
 const TEX       := preload("res://assets/items/mutagen.png")
 const SHINE_SFX := preload("res://assets/audio/shine.mp3")
 
+# Свечение — ОБЩИЙ КИРПИЧ (scripts/minigame_glow.gd), тот же, что у коробки
+# пиццы. Разница между ними ровно одна — цвет: зелёный зовёт в ЖИРОБОССА,
+# оранжевый в ПИЦЦА-ПАТИ. Всё остальное — число лучей, скорость вращения,
+# размер фонтана — обязано совпадать, иначе «предмет-ключ» перестаёт быть
+# одним узнаваемым знаком и распадается на два похожих красивых предмета.
+const GLOW := preload("res://scripts/minigame_glow.gd")
+
+const COL_GLOW  : Color = Color(0.45, 1.00, 0.55)
+const COL_PP    : Color = Color(0.40, 1.00, 0.50)
+# Цвет вспышки самого лица на пике биения. Зелёный ВЫШЕ единицы — это пересвет,
+# и он тут намеренный: предмет должен вспыхивать, а не просто зеленеть.
+const COL_BLINK : Color = Color(0.35, 1.70, 0.55)
+
 @export var speed       : float = 240.0
 
 # Proximity reaction window: at PROX_FAR (px) it's the calm baseline, at
@@ -26,9 +39,7 @@ var _pulse_t : float = 0.0
 var _spin_t  : float = 0.0
 
 @onready var _sprite : Sprite2D = $Sprite2D
-var _glow  : Sprite2D = null
-var _rays  : Node2D   = null
-var _pp    : CPUParticles2D = null
+var _fx    : Node2D = null
 var _shine : AudioStreamPlayer = null
 
 func _ready() -> void:
@@ -56,67 +67,8 @@ func _ready() -> void:
 	# Not played here — _process starts it only once Normaldo is close enough.
 
 func _build_light() -> void:
-	var add_mat := CanvasItemMaterial.new()
-	add_mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
-
-	# Rotating rays — thin additive spikes radiating outward in all directions.
-	# NB: keep all fx at z_index 0 (NOT negative) — negative z renders them behind
-	# the background wall, which made them invisible. The face sits at z 1.
-	_rays = Node2D.new()
-	_rays.z_index = 0
-	add_child(_rays)
-	for i in 12:
-		var spike := Polygon2D.new()
-		spike.color    = Color(0.45, 1.0, 0.55, 0.22)
-		spike.polygon  = PackedVector2Array([Vector2(0.0, -4.0), Vector2(0.0, 4.0), Vector2(78.0, 0.0)])
-		spike.rotation = TAU * float(i) / 12.0
-		spike.material = add_mat
-		_rays.add_child(spike)
-
-	# Soft radial glow behind the sprite.
-	var grad := Gradient.new()
-	grad.set_color(0, Color(0.45, 1.0, 0.55, 0.8))
-	grad.set_color(1, Color(0.45, 1.0, 0.55, 0.0))
-	var gt := GradientTexture2D.new()
-	gt.gradient  = grad
-	gt.fill      = GradientTexture2D.FILL_RADIAL
-	gt.fill_from = Vector2(0.5, 0.5)
-	gt.fill_to   = Vector2(0.5, 0.0)
-	gt.width     = 128
-	gt.height    = 128
-	_glow = Sprite2D.new()
-	_glow.texture  = gt
-	_glow.material = add_mat
-	_glow.z_index  = 0
-	add_child(_glow)
-
-	# Soft round dot texture so the particles are actually visible (textureless
-	# CPUParticles2D draw as ~1 px points — that's why they "weren't there").
-	var dot_grad := Gradient.new()
-	dot_grad.set_color(0, Color(1.0, 1.0, 1.0, 1.0))
-	dot_grad.set_color(1, Color(1.0, 1.0, 1.0, 0.0))
-	var dot_tex := GradientTexture2D.new()
-	dot_tex.gradient  = dot_grad
-	dot_tex.fill      = GradientTexture2D.FILL_RADIAL
-	dot_tex.fill_from = Vector2(0.5, 0.5)
-	dot_tex.fill_to   = Vector2(0.5, 0.0)
-	dot_tex.width     = 24
-	dot_tex.height    = 24
-
-	# Green radioactive particles streaming out evenly in every direction
-	# (spread 180° = full circle). Velocity + scale are driven each frame by
-	# Normaldo's proximity (slight leak → big fountain).
-	_pp = CPUParticles2D.new()
-	_pp.z_index   = 0
-	_pp.texture   = dot_tex
-	_pp.amount    = 60
-	_pp.lifetime  = 0.8
-	_pp.emitting  = true
-	_pp.spread    = 180.0
-	_pp.direction = Vector2(0.0, -1.0)
-	_pp.gravity   = Vector2.ZERO
-	_pp.color     = Color(0.40, 1.0, 0.50)
-	add_child(_pp)
+	_fx = GLOW.make(COL_GLOW, COL_PP)
+	add_child(_fx)
 
 func _process(delta: float) -> void:
 	# Just sails right→left like any item; frees itself once fully off-screen.
@@ -130,12 +82,7 @@ func _process(delta: float) -> void:
 	_spin_t  += delta * 3.0
 	var p := 0.5 + 0.5 * sin(_pulse_t)
 	_sprite.scale = Vector2.ONE * lerpf(0.09, 0.13, p)
-	modulate = Color(1.0, 1.0, 1.0).lerp(Color(0.35, 1.7, 0.55), p)
-	if is_instance_valid(_rays):
-		_rays.rotation += delta * 0.8
-		_rays.scale     = Vector2.ONE * lerpf(0.9, 1.15, p)
-	if is_instance_valid(_glow):
-		_glow.scale = Vector2.ONE * lerpf(1.4, 1.9, p)
+	modulate = Color(1.0, 1.0, 1.0).lerp(COL_BLINK, p)
 
 	# ── Proximity reaction ────────────────────────────────────────────────────
 	# The closer Normaldo flies, the bigger the green fountain, the harder the
@@ -145,11 +92,8 @@ func _process(delta: float) -> void:
 	if is_instance_valid(target_node):
 		dist = global_position.distance_to(target_node.global_position)
 		prox = clampf(inverse_lerp(PROX_FAR, PROX_NEAR, dist), 0.0, 1.0)
-	if is_instance_valid(_pp):
-		_pp.initial_velocity_min = lerpf(22.0, 140.0, prox)
-		_pp.initial_velocity_max = lerpf(55.0, 300.0, prox)
-		_pp.scale_amount_min     = lerpf(0.30, 0.90, prox)
-		_pp.scale_amount_max     = lerpf(0.60, 1.80, prox)
+	if is_instance_valid(_fx):
+		_fx.call("tick", delta, p, prox)
 	var shake := lerpf(0.0, 7.0, prox)
 	_sprite.position = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * shake
 	_sprite.rotation = sin(_spin_t) * 0.22 + randf_range(-1.0, 1.0) * 0.16 * prox
