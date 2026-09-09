@@ -30,7 +30,7 @@ const LEVELS : int = 5
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 55
+const EXPECTED_CHECKS : int = 64
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -55,6 +55,10 @@ func _initialize() -> void:
 	await _test_chain()
 	print("── Хвост бесконечного ──")
 	await _test_hardcore()
+	print("── Побеждённые боссы в потоке ──")
+	await _test_past_bosses()
+	print("── Крокодил в потоке отыгрывает свой ход ──")
+	await _test_croc_item()
 	_finish()
 
 # ── Таблица ──────────────────────────────────────────────────────────────────
@@ -487,3 +491,127 @@ func _finish() -> void:
 	else:
 		print("ПРОВАЛОВ: ", _fails)
 	quit(1 if _fails > 0 else 0)
+
+# ── ПОБЕЖДЁННЫЕ БОССЫ ВОЗВРАЩАЮТСЯ В ПОТОК ─────────────────────────────────
+# Правило простое, и потому его легко нарушить молча: босс попадает в поток
+# ТОЛЬКО НА ЭПИЗОДАХ ПОСЛЕ СВОЕГО БОЯ. Встретить в потоке того, с кем ещё не
+# дрался, значит увидеть непонятную фигуру, которая почему-то останавливается
+# посреди экрана, — ровно то, от чего ниндзю когда-то убрали с первого эпизода.
+#
+# И ОТДЕЛЬНО — СТАРОГО ПИРАТА В ПОТОКЕ БЫТЬ НЕ ДОЛЖНО. Не по недосмотру:
+# остальные боссы дерутся в кадре забега, и их ход вырезается в поток как есть,
+# а пират разворачивает АРЕНУ — ринг, толпу, полосы ХП, бой на двойное нажатие.
+# Вынуть оттуда «один ход» нельзя. Строка в раскладке добавляется одним словом,
+# и без этой проверки она однажды появится «для симметрии».
+func _test_past_bosses() -> void:
+	var e : Dictionary = await _boot()
+	var sp : Node = e["sp"]
+	# Кто на каком эпизоде БОСС — по той же таблице, что и бой.
+	var boss_at : Dictionary = {}      # имя босса → номер эпизода (0-based)
+	for i in (sp.CAMPAIGN_LEVELS as Array).size():
+		var b := String((sp.CAMPAIGN_LEVELS[i] as Dictionary)["boss"])
+		if not boss_at.has(b):
+			boss_at[b] = i
+
+	var early : Array = []
+	var pirate : Array = []
+	for lvl in (sp.HAZ_LEVEL as Array).size():
+		var pool : Dictionary = sp.HAZ_LEVEL[lvl]
+		for key in pool.keys():
+			var k := String(key)
+			if k == "bum_king":
+				pirate.append(lvl + 1)
+			if not boss_at.has(k):
+				continue
+			# Босс в потоке — только ПОСЛЕ своего эпизода.
+			if lvl <= int(boss_at[k]):
+				early.append("%s на эпизоде %d, а бой на %d"
+					% [k, lvl + 1, int(boss_at[k]) + 1])
+	_check(early.is_empty(), "боссы в потоке только после своего боя: %s" % [early])
+	_check(pirate.is_empty(), "а Старого пирата в потоке нет вовсе: %s" % [pirate])
+
+	# И они ТАМ ЕСТЬ. Проверка выше зелена и на пустой раскладке — вся правка
+	# могла бы просто не доехать.
+	var with_boss := 0
+	for lvl in (sp.HAZ_LEVEL as Array).size():
+		var pool : Dictionary = sp.HAZ_LEVEL[lvl]
+		for key in pool.keys():
+			if boss_at.has(String(key)):
+				with_boss += 1
+				break
+	_check(with_boss >= 4, "и на скольких-то эпизодах они есть: %d" % with_boss)
+
+	# ВЕС МЕНЬШЕ, ЧЕМ У ОБЫЧНОЙ УГРОЗЫ. Босс в потоке — сет-пис на три секунды,
+	# и всё это время лейн под ним занят: два подряд превращают забег в очередь
+	# из мини-сцен.
+	var heavy : Array = []
+	for lvl in (sp.HAZ_LEVEL as Array).size():
+		var pool : Dictionary = sp.HAZ_LEVEL[lvl]
+		var avg := 0.0
+		for key in pool.keys():
+			avg += float(pool[key])
+		avg /= maxf(1.0, float(pool.size()))
+		for key in pool.keys():
+			if boss_at.has(String(key)) and float(pool[key]) >= avg:
+				heavy.append("%s на %d: вес %d при среднем %.0f"
+					% [key, lvl + 1, int(pool[key]), avg])
+	_check(heavy.is_empty(), "и они реже обычных угроз: %s" % [heavy])
+	e["game"].queue_free()
+	await process_frame
+
+# ── КРОКОДИЛ В ПОТОКЕ ОТЫГРЫВАЕТ СВОЙ ХОД ──────────────────────────────────
+# Он не пролетает мимо, как камень: въезжает, тормозит, ВЕДЁТ СТВОЛОМ, стреляет
+# один раз и уходит. Сломаться это может тихо — например, корутина умрёт на
+# первом же `await`, и крокодил повиснет на месте навсегда, ничем не отличаясь
+# от декорации.
+#
+# Проверяются три вещи: затормозил, вёл стволом, выстрелил ровно раз и убрался.
+func _test_croc_item() -> void:
+	var e : Dictionary = await _boot()
+	var sp  : Node = e["sp"]
+	var nrm : Node = (e["game"] as Node).get_node_or_null("Normaldo")
+	# `_boot` глушит спавнеру `_process`, а нам нужен ЖИВОЙ кадр: сет-пис
+	# крокодила едет своим `_process`, но пули и уборка идут в общем такте.
+	sp.set_process(true)
+	if nrm != null and nrm.has_method("set_dev_immortal"):
+		nrm.call("set_dev_immortal", true)
+	sp.call("clear_items")
+	var vp : Vector2 = get_root().get_visible_rect().size
+	sp.call("_spawn_level_hazard", "croc", vp.y * 0.5, vp.x, 250.0)
+	await process_frame
+
+	var croc : Node2D = null
+	for c in sp.get_children():
+		if c.is_in_group("croc"):
+			croc = c
+	_check(croc != null, "крокодил вылетел в поток")
+	if croc == null:
+		e["game"].queue_free()
+		return
+
+	var parked  := false
+	var aimed   := false
+	var shots   := 0
+	var t       := 0.0
+	while t < 8.0:
+		await process_frame
+		t += 1.0 / 60.0
+		# Пули считаем ДО проверки жизни крокодила: он уходит раньше, чем
+		# долетает его пуля, и посчитать её после значило бы не посчитать.
+		for c in sp.get_children():
+			if is_instance_valid(c) and c.is_in_group("bullet"):
+				shots += 1
+				c.queue_free()
+		if not is_instance_valid(croc):
+			break
+		if int(croc.get("_state")) == 1:
+			parked = true
+		if bool(croc.get("_tracking")):
+			aimed = true
+
+	_check(parked, "затормозил посреди экрана, а не пролетел мимо")
+	_check(aimed, "и вёл стволом за головой")
+	_check(shots == 1, "выстрелил РОВНО раз: %d" % shots)
+	_check(not is_instance_valid(croc), "и ушёл сам, не остался висеть")
+	e["game"].queue_free()
+	await process_frame
