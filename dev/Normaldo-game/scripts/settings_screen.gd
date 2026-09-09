@@ -208,9 +208,7 @@ func _build(vp: Vector2) -> void:
 	# каждый тап сначала попадает в строку переключателя.
 	_page_scroll.set("scroll_deadzone", 18)
 	UiKit.place(_slide_root, _page_scroll, body.position, body.size)
-	_page_body = Control.new()
-	_page_body.mouse_filter = Control.MOUSE_FILTER_PASS
-	_page_scroll.add_child(_page_body)
+	_page_body = UiKit.scroll_body(_page_scroll)
 
 	_rebuild()
 

@@ -491,12 +491,20 @@ const FACE_TURN_DEADZONE : float = 0.6
 # Покачивание при этом ничего не теряет: оно колеблется вокруг `_head_home`,
 # а не вокруг нуля (см. `_physics_process`), — то есть вокруг правильной
 # посадки.
+#
+# ЯКОРЬ ТОЖЕ ЗЕРКАЛИТСЯ. Он ищется от посадки обратно к центру головы: «где
+# сидит спрайт плюс где голова внутри кадра». А `flip_h` отражает кадр вокруг
+# центра САМОГО спрайта — значит внутри отражённого кадра голова лежит по
+# другую сторону, и прибавлять надо со знаком минус. Без этого якорь при
+# взгляде влево уезжал на ДВЕ ширины сдвига вместо нуля, и всё, что к нему
+# прикалывается, ехало вместе с ним.
 func _recalc_head_anchor(tex: Texture2D, pos: Vector2) -> void:
 	var sz  : Vector2 = tex.get_size()
 	var off := SkinMetrics.offset_for(SaveData.active_skin, fat_state)
+	var mx : float = -1.0 if _facing_left else 1.0
 	_head_idle_pos = pos
 	_head_anchor   = _head_idle_pos + Vector2(
-		off.x * sz.x * _base_scale.x, off.y * sz.y * _base_scale.y)
+		mx * off.x * sz.x * _base_scale.x, off.y * sz.y * _base_scale.y)
 	_head_home     = _head_idle_pos
 
 # Swap the sprite to the current fat-state texture + recompute _base_scale, WITHOUT
@@ -1386,9 +1394,14 @@ func _physics_process(delta: float) -> void:
 		self.modulate  = Color(1.0, 1.0, 1.0).lerp(Color(0.72, 0.30, 1.40), strength)
 		_sway_t += delta * 3.5
 		_sprite.rotation = sin(_sway_t) * 0.13 * strength
+		# Расфокус идёт ПО ТОЙ ЖЕ огибающей, что оттенок и качание: у пива теперь
+		# три признака, и разъехаться они не должны — иначе экран «трезвеет»
+		# отдельно от героя.
+		_set_drunk_blur(strength if _slow_source == "beer" else 0.0)
 	else:
 		self.modulate    = Color(1.0, 1.0, 1.0)
 		_sprite.rotation = lerp(_sprite.rotation, 0.0, 0.12)
+		_set_drunk_blur(0.0)
 
 # ── Slow visual feedback ─────────────────────────────────────────────────────
 
@@ -1398,6 +1411,26 @@ func _on_slow_start() -> void:
 
 func _on_slow_end() -> void:
 	_status_off("slow")
+	_slow_source = ""
+
+# ── Расфокус от пива ─────────────────────────────────────────────────────────
+# Слой экранный и живёт под корнем сцены забега, рядом с обесцвечиванием
+# (`world_gray`). Собирается ЛЕНИВО, при первой же кружке: игроку, который за
+# весь забег не подобрал пива, лишний BackBufferCopy не нужен.
+const WORLD_BLUR := preload("res://scripts/world_blur.gd")
+
+var _blur_layer : Node = null
+
+func _set_drunk_blur(v: float) -> void:
+	if v <= 0.0 and _blur_layer == null:
+		return          # ещё ни разу не пили — и собирать нечего
+	if _blur_layer == null or not is_instance_valid(_blur_layer):
+		var root := get_parent()
+		if root == null:
+			return
+		_blur_layer = WORLD_BLUR.ensure(root)
+	if _blur_layer != null and _blur_layer.has_method("set_amount"):
+		_blur_layer.call("set_amount", v)
 
 # ── Proximity (mouth open/close) ──────────────────────────────────────────────
 
@@ -1465,7 +1498,13 @@ func _place_head(tex: Texture2D, variant: String) -> void:
 		var off := SkinMetrics.pose_off(SaveData.active_skin, variant, fat_state)
 		var sz  : Vector2 = tex.get_size()
 		var sc  : Vector2 = _base_scale * _head_k
-		_head_home = _head_anchor - Vector2(off.x * sz.x * sc.x, off.y * sz.y * sc.y)
+		# И ЗДЕСЬ ЗЕРКАЛО — по той же причине, что у обычного кадра. Пока его не
+		# было, при взгляде ВЛЕВО кадр каста всё равно съезжал ВПРАВО: на первом
+		# жире классики это 26 px туда и 26 обратно, по разу за выстрел. На
+		# экране это читается не как «поза», а как дёрганье головы — «глючит
+		# туда-сюда, а картинка выстрела стоит в правую сторону».
+		var mx : float = -1.0 if _facing_left else 1.0
+		_head_home = _head_anchor - Vector2(mx * off.x * sz.x * sc.x, off.y * sz.y * sc.y)
 	_sprite.position.x = _head_home.x
 	if changed:
 		_sprite.position.y = _head_home.y
@@ -1509,7 +1548,16 @@ func _hold_pose(variant: String, duration: float) -> void:
 
 # ── Collisions ────────────────────────────────────────────────────────────────
 
-func apply_slow(duration: float) -> void:
+# ЗАМЕДЛЕНИЕ ЗНАЕТ, ОТ ЧЕГО ОНО. Раньше не знало: банан, пиво и наручники ставили
+# один и тот же таймер, и отличить их было нечем. Пиву этого мало — у него свой
+# признак, расфокус экрана, и он про ОПЬЯНЕНИЕ, а не про «поскользнулся».
+# Замутить экран от банана значило бы соврать про предмет.
+#
+# Источник — строка, а не флаг «пиво/не пиво»: следующему замедляющему предмету
+# со своим лицом не придётся ломать сигнатуру ещё раз.
+var _slow_source : String = ""
+
+func apply_slow(duration: float, source: String = "") -> void:
 	# Шляпа мага гасит замедление целиком, а не сокращает — иначе за 3 секунды
 	# эффект не читается.
 	if _slow_immune_remaining > 0.0:
@@ -1518,6 +1566,7 @@ func apply_slow(duration: float) -> void:
 	if duration >= _slow_remaining:
 		_slow_total     = duration
 		_slow_remaining = duration
+		_slow_source    = source
 
 # ── Эффекты новых предметов ───────────────────────────────────────────────────
 
@@ -1750,7 +1799,11 @@ func _touch_on_tappable(pos: Vector2) -> bool:
 				return true
 	return false
 
-const COMPASS_MIRROR_SEC : float = 5.0
+# Компас переворачивает РУКИ (пять секунд), зеркало — МИР (пять секунд). Числа
+# одинаковые не случайно: это две половины одной идеи, и разная длительность
+# читалась бы как «одно из них хуже».
+const COMPASS_INVERT_SEC : float = 5.0
+const MIRROR_SEC         : float = 5.0
 const SHROOM_SEC : float = 8.0
 
 # ── ГРИБ: ОТРАВЛЕНИЕ ─────────────────────────────────────────────────────────
@@ -1770,7 +1823,10 @@ const SHROOM_SEC : float = 8.0
 func apply_shroom(duration: float = SHROOM_SEC) -> void:
 	var fresh := _shroom_remaining <= 0.0
 	_shroom_remaining = maxf(_shroom_remaining, duration)
-	apply_invert(duration)          # управление + музыка задом наперёд
+	# РЕВЕРСА УПРАВЛЕНИЯ ЗДЕСЬ БОЛЬШЕ НЕТ. Гриб и так делает три вещи разом —
+	# цвета наизнанку, шаг медленнее, всё вокруг пицца, — и четвёртой, ломающей
+	# руку, он превращался в «игра сломалась». Реверс вернулся туда, где он и
+	# читается как своё: на компас.
 	apply_slow(duration)            # шаг; шляпа мага гасит его целиком
 	if not fresh:
 		return
@@ -1792,23 +1848,22 @@ func _end_shroom() -> void:
 	if sp != null and sp.has_method("set_pizza_storm"):
 		sp.call("set_pizza_storm", false)
 
-# ── КОМПАС: ЗЕРКАЛО МИРА ─────────────────────────────────────────────────────
-# Раньше компас переворачивал УПРАВЛЕНИЕ и музыку. Теперь он переворачивает МИР:
-# фон отражается по горизонтали, а поток предметов идёт слева направо — и те,
+# ── ЗЕРКАЛО: ОТРАЖЁННЫЙ МИР ──────────────────────────────────────────────────
+# Фон отражается по горизонтали, а поток предметов идёт слева направо — и те,
 # что уже летят, разворачиваются вместе с новыми.
 #
-# Разница для игрока принципиальная. Реверс управления ломает руку: пальцы
+# Разница с реверсом управления принципиальная. Реверс ломает РУКУ: пальцы
 # делают не то, что просят, и переждать это можно только замерев. Зеркало руку
 # не трогает — оно ломает ЧТЕНИЕ КАДРА: угроза приходит не с той стороны, с
 # которой её ждут весь забег. Играть можно, но заново учишься смотреть.
 #
-# Реверс управления никуда не делся — он теперь у гриба (см. `apply_invert`),
-# где стоит рядом с ещё тремя порчами и читается как отравление, а не как
-# сломавшаяся игра.
+# Делает это ЗЕРКАЛО, а не компас. Какое-то время это висело на компасе, и по
+# смыслу неверно: компас — про направление, которое держишь сам, и его дело
+# сбивать руку. Отражает мир зеркало, и другого предмета для этого не нужно.
 func apply_mirror(duration: float) -> void:
 	var fresh := _mirror_remaining <= 0.0
 	_mirror_remaining = maxf(_mirror_remaining, duration)
-	start_skill_cd("compass", _mirror_remaining)
+	start_skill_cd("mirror", _mirror_remaining)
 	if not fresh:
 		return
 	_show_floating_text("ЗЕРКАЛО!", Color(0.55, 0.85, 1.0))
@@ -1823,10 +1878,12 @@ func _end_mirror() -> void:
 	if bg != null and bg.has_method("set_mirrored"):
 		bg.call("set_mirrored", false)
 
-# Гриб: реверс управления на `duration` секунд.
-func apply_invert(duration: float) -> void:
+# Реверс управления на `duration` секунд. `badge` — чей это кружок в интерфейсе:
+# эффект один, а предметов, которые его дают, может быть несколько, и игрок
+# должен видеть, ОТ ЧЕГО у него перевернулись руки.
+func apply_invert(duration: float, badge: String = "compass") -> void:
 	_invert_remaining = maxf(_invert_remaining, duration)
-	start_skill_cd("shroom", _invert_remaining)   # кружок-кулдаун в HUD
+	start_skill_cd(badge, _invert_remaining)   # кружок-кулдаун в HUD
 	_show_floating_text("РЕВЕРС!", Color(0.85, 0.5, 1.0))
 	# Строка уезжает за полсекунды, а управление перевёрнуто три: всё время
 	# между этим игрок думал, что игра сломалась. Значок висит ровно столько,
@@ -4303,7 +4360,12 @@ func _on_area_entered(area: Area2D) -> void:
 	elif area.is_in_group("compass"):
 		if _invincible:
 			return
-		apply_mirror(COMPASS_MIRROR_SEC)
+		apply_invert(COMPASS_INVERT_SEC, "compass")
+		area.queue_free()
+	elif area.is_in_group("mirror"):
+		if _invincible:
+			return
+		apply_mirror(MIRROR_SEC)
 		area.queue_free()
 	elif area.is_in_group("slowing"):
 		# Под невидимостью предмет пролетает насквозь: спелл обещает «пролетают
@@ -4317,7 +4379,8 @@ func _on_area_entered(area: Area2D) -> void:
 			return
 		_audio.stream = area.get_meta("slow_sound")
 		_audio.play()
-		apply_slow(float(area.get_meta("slow_duration", 4.0)))
+		# Метку кладёт сам предмет (`slowing_item._ready`): «beer» или «banana».
+		apply_slow(float(area.get_meta("slow_duration", 4.0)), stag)
 		area.queue_free()
 	elif area.is_in_group("obstacle") or area.is_in_group("fire"):
 		if _scars_active:
@@ -4392,9 +4455,11 @@ func _handle_obstacle(area: Area2D) -> void:
 		apply_slow(float(area.get_meta("slow_duration")))
 	if area.has_meta("invert_duration"):
 		# Реверс от ШАМАНА (у компаса своя ветка выше): достижение «Мимо шамана»
-		# закрывается тем, что за время проклятия игрок не потерял жизнь.
+		# закрывается тем, что за время проклятия игрок не потерял жизнь. Кружок
+		# у него компасный — не потому, что это компас, а потому что компас и
+		# есть знак «руки наоборот»: один эффект — один знак.
 		AchievementManager.on_curse_started(float(area.get_meta("invert_duration")))
-		apply_invert(float(area.get_meta("invert_duration")))
+		apply_invert(float(area.get_meta("invert_duration")), "compass")
 		_show_floating_text("ПРОКЛЯТИЕ!", Color(0.55, 1.00, 0.45))
 	_crack_or_kill(area)
 

@@ -328,8 +328,7 @@ func _build(vp: Vector2) -> void:
 	_scroll.set("scroll_deadzone", 18)
 	_slide_root.add_child(_scroll)
 
-	_content = Control.new()
-	_scroll.add_child(_content)
+	_content = UiKit.scroll_body(_scroll)
 
 	# Своя строка закреплена внизу и видна всегда: раньше на вопрос «где я»
 	# экран отвечал только после нажатия и прокрутки.

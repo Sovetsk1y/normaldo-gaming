@@ -52,6 +52,8 @@ func _initialize() -> void:
 	await _test_slowers_dont_hit()
 	print("── Люди покачиваются ──")
 	await _test_human_sway()
+	print("── Пиво мутит экран ──")
+	await _test_beer_blur()
 
 	print("")
 	if _fails == 0:
@@ -1236,3 +1238,74 @@ func _test_spans() -> void:
 
 	_check(overlaps == 0, "наложений среди %d предметов: %d" % [placed.size(), overlaps])
 	host.queue_free()
+
+# ── ПИВО МУТИТ ЭКРАН ─────────────────────────────────────────────────────────
+# У пива было два признака, и оба на самом герое: фиолетовый оттенок и качание
+# головы. Размером с ладонь, среди летящих предметов их не видно — на слух
+# эффект есть, на глаз его нет. Расфокус берёт весь кадр.
+#
+# Проверяется ДВЕ вещи, и вторая важнее первой:
+#   1. от пива экран мутнеет;
+#   2. ОТ БАНАНА — НЕТ. Банан роняет так же, но он не про опьянение, и общий
+#      таймер замедления сам по себе не должен ничего мутить. Забыть про это
+#      легко: код замедления у них один.
+func _test_beer_blur() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var n : Node2D = game.get_node_or_null("Normaldo")
+	get_root().get_tree().paused = false
+
+	# Банан — сначала: он обязан НЕ поднимать слой вовсе.
+	n.call("apply_slow", 3.0, "banana")
+	await _tick(0.2)
+	var after_banana : Node = game.get_node_or_null("WorldBlur")
+	_check(after_banana == null,
+		"от банана слой расфокуса даже не собирается")
+
+	n.set("_slow_remaining", 0.0)
+	await _tick(0.1)
+	n.call("apply_slow", 3.0, "beer")
+	await _tick(0.2)
+	var layer : Node = game.get_node_or_null("WorldBlur")
+	_check(layer != null and bool(layer.call("is_blurred")),
+		"а от пива экран мутнеет: %.2f" % (float(layer.call("amount")) if layer != null else -1.0))
+
+	# И ОТПУСКАЕТ. Эффект, который включается и не выключается, — это не эффект,
+	# а сломанный кадр до конца забега.
+	n.set("_slow_remaining", 0.0)
+	await _tick(0.3)
+	_check(layer != null and not bool(layer.call("is_blurred")),
+		"и отпускает вместе с замедлением: %.2f" % (float(layer.call("amount")) if layer != null else -1.0))
+
+	game.queue_free()
+	await process_frame
+
+	# ── А ТЕПЕРЬ НАСТОЯЩАЯ КРУЖКА ────────────────────────────────────────────
+	# Всё выше проверяло связку начиная с `apply_slow`. Но метку кладёт САМ
+	# ПРЕДМЕТ, а читает её ветка подбора, и порваться цепочка может именно там:
+	# переименовали звук — метка стала «banana», и расфокус тихо исчез, пока
+	# каждая отдельная проверка остаётся зелёной.
+	var game2 : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game2)
+	await process_frame
+	var n2 : Node2D = game2.get_node_or_null("Normaldo")
+	var sp2 : Node = game2.get_node_or_null("Spawner")
+	get_root().get_tree().paused = false
+	sp2.call("clear_items")
+	sp2.set_process(false)
+	n2.set("_dev_immortal", true)
+
+	var beer : Node2D = load("res://scenes/beer.tscn").instantiate()
+	beer.set("speed", 0.0)
+	sp2.add_child(beer)
+	await process_frame
+	beer.position = n2.position
+	await _tick(0.4)
+
+	var layer2 : Node = game2.get_node_or_null("WorldBlur")
+	_check(layer2 != null and bool(layer2.call("is_blurred")),
+		"и подобранная В ЗАБЕГЕ кружка мутит экран так же")
+
+	game2.queue_free()
+	await process_frame

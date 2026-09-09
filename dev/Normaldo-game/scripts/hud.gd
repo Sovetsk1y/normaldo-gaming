@@ -2648,8 +2648,7 @@ func _show_shop(restore_scroll: int = 0, from_slots: bool = false, skip_open_ani
 
 	var content := Control.new()
 	content.custom_minimum_size = Vector2(vp.x, maxf(content_h, grid_h))
-	content.mouse_filter        = Control.MOUSE_FILTER_PASS
-	scroll.add_child(content)
+	UiKit.scroll_body(scroll, content)
 
 	for i in n:
 		var col := i % cols
@@ -3049,8 +3048,7 @@ func _show_skill_detail_popup(skin_data: Dictionary, parent_overlay: Control) ->
 
 		var inner := Control.new()
 		inner.custom_minimum_size = Vector2(PW, content_h + 4.0)
-		inner.mouse_filter        = Control.MOUSE_FILTER_PASS
-		scroll.add_child(inner)
+		UiKit.scroll_body(scroll, inner)
 
 		var sy : float = 0.0
 		for sk in skills_list:
@@ -3469,8 +3467,7 @@ func _show_skin_info_popup(skin_data: Dictionary, parent_overlay: Control) -> vo
 
 		var scroll_inner := Control.new()
 		scroll_inner.custom_minimum_size = Vector2(PW, skill_content_h)
-		scroll_inner.mouse_filter        = Control.MOUSE_FILTER_PASS
-		scroll_con.add_child(scroll_inner)
+		UiKit.scroll_body(scroll_con, scroll_inner)
 
 		var type_chars3  := {SkinSkills.DODGE:"У", SkinSkills.ADAPT:"А",
 							 SkinSkills.COUNTER:"К", SkinSkills.TRANSFORM:"Т"}
@@ -3872,8 +3869,7 @@ func _build_shop_card(hbox: HBoxContainer, skin_data: Dictionary,
 
 	var skill_content := Control.new()
 	skill_content.custom_minimum_size = Vector2(cw - 4.0, 0.0)
-	skill_content.mouse_filter        = Control.MOUSE_FILTER_PASS
-	skill_scroll.add_child(skill_content)
+	UiKit.scroll_body(skill_scroll, skill_content)
 
 	var inner_y := 0.0
 	for sk in skills_list:
@@ -4500,8 +4496,7 @@ func _build_skins_cards(overlay: Control, vp: Vector2, top: float, height: float
 	var content := Control.new()
 	content.custom_minimum_size = Vector2(
 		SKC_GAP + skins.size() * (cw + SKC_GAP), ch)
-	content.mouse_filter        = Control.MOUSE_FILTER_PASS
-	scroll.add_child(content)
+	UiKit.scroll_body(scroll, content)
 
 	for i in skins.size():
 		_build_skin_card(content, Vector2(SKC_GAP + i * (cw + SKC_GAP), 4.0),
@@ -5095,7 +5090,7 @@ func _show_skin_detail(skin_data: Dictionary, from_slots: bool, shop_overlay: Co
 	desc_root.add_theme_constant_override("separation", 8)
 	desc_root.custom_minimum_size = Vector2(col_w - 24.0, 0.0)
 	desc_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	desc_scroll.add_child(desc_root)
+	UiKit.scroll_body(desc_scroll, desc_root)
 
 	# ── ЦЕНТР: прокачка ───────────────────────────────────────────────────────
 	var rewards_ctx : Dictionary = {}
@@ -5188,8 +5183,7 @@ func _build_rewards_column(parent: Control, x: float, y: float, w: float, h: flo
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
 	vbox.custom_minimum_size = Vector2(w, 0.0)
-	vbox.mouse_filter = Control.MOUSE_FILTER_PASS
-	scroll.add_child(vbox)
+	UiKit.scroll_body(scroll, vbox)
 
 	var cur_lvl := SaveData.get_skin_level_for(skin_id)
 	# Список идёт со 2-го уровня: на 1-м награды нет, скин уже куплен. Карточка

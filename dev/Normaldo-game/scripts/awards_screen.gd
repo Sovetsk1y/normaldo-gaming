@@ -268,8 +268,7 @@ func _build_spine() -> void:
 	scroll.set("scroll_deadzone", 18)
 	_slide_root.add_child(scroll)
 
-	var body := Control.new()
-	scroll.add_child(body)
+	var body := UiKit.scroll_body(scroll)
 
 	var row_h : float = 26.0
 	var gap   : float = 2.0
@@ -313,8 +312,7 @@ func _build_page() -> void:
 	_page_scroll.set("scroll_deadzone", 18)
 	_slide_root.add_child(_page_scroll)
 
-	_page_body = Control.new()
-	_page_scroll.add_child(_page_body)
+	_page_body = UiKit.scroll_body(_page_scroll)
 
 # ── Страница категории ───────────────────────────────────────────────────────
 

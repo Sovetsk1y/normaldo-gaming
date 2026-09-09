@@ -12,6 +12,7 @@ const UI_FONT  := preload("res://assets/fonts/RussoOne-Regular.ttf")
 const SMOKE_TEX := preload("res://assets/bosses/ninja_foot/smoke.png")
 const CASEY_TEX := preload("res://assets/items/casey_mask.png")
 const COMPASS_TEX := preload("res://assets/items/compass.png")
+const MIRROR_TEX  := preload("res://assets/items/mirror.png")
 const SHROOM_TEX  := preload("res://assets/items/mushroom.png")
 const HAT_TEX     := preload("res://assets/items/magic_hat.png")
 const COLA_TEX    := preload("res://assets/items/cola.png")
@@ -91,15 +92,19 @@ func setup(nrm: Node) -> void:
 			"mod": Color(1, 1, 1), "ring": RING_PASS, "dyn": true,
 			"title": "НЕУЯЗВИМОСТЬ", "desc": "Маска Кейси — неуязвимость к урону." })
 
-	# Компас-дебафф (зеркало мира) — динамический кружок для ЛЮБОГО скина,
-	# появляется только пока держится зеркало (ключ "compass" в normaldo._skill_cd).
-	specs.append({ "key": "compass", "tex": COMPASS_TEX, "sym": "",
+	# Зеркало — динамический кружок для ЛЮБОГО скина, появляется только пока
+	# держится отражение (ключ "mirror" в normaldo._skill_cd).
+	specs.append({ "key": "mirror", "tex": MIRROR_TEX, "sym": "",
 		"mod": Color(1, 1, 1), "ring": Color(0.45, 0.80, 1.00), "dyn": true,
-		"title": "ЗЕРКАЛО", "desc": "Компас отразил мир: поток идёт слева." })
-	# Гриб — тот же вид кружка. Реверс управления теперь у него (ключ "shroom").
+		"title": "ЗЕРКАЛО", "desc": "Мир отражён: поток идёт слева." })
+	# Компас — реверс управления, свой кружок с той же механикой показа.
+	specs.append({ "key": "compass", "tex": COMPASS_TEX, "sym": "",
+		"mod": Color(1, 1, 1), "ring": Color(0.85, 0.55, 1.00), "dyn": true,
+		"title": "РЕВЕРС", "desc": "Компас сбил направление: свайп работает наоборот." })
+	# Гриб — тот же вид кружка.
 	specs.append({ "key": "shroom", "tex": SHROOM_TEX, "sym": "",
 		"mod": Color(1, 1, 1), "ring": Color(0.95, 0.55, 0.25), "dyn": true,
-		"title": "ГРИБЫ", "desc": "Цвета наизнанку, руки наоборот, всё вокруг пицца." })
+		"title": "ГРИБЫ", "desc": "Цвета наизнанку, шаг медленнее, всё вокруг пицца." })
 
 	# Эффекты подобранных предметов — такие же динамические кружки: появляются
 	# только на время действия и для любого скина.

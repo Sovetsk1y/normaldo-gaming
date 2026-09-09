@@ -80,6 +80,12 @@ const CH_ROW_H_MAX : float = 52.0
 const CH_ROW_GAP   : float = 5.0
 const Q_ROW_GAP    : float = 8.0
 const Q_ROW_H_MAX  : float = 78.0
+# НИЖНЯЯ ГРАНИЦА СТРОКИ ЗАДАНИЯ. Без неё строки делили высоту страницы поровну и
+# сжимались до чего угодно: на телефоне, где панель низкая, глава из шести
+# заданий превращалась в шесть полосок с нечитаемым текстом — и прокрутки при
+# этом не было вовсе, потому что «всё влезло». Строка не короче этого, а не
+# влезло — значит список листается, как ему и положено.
+const Q_ROW_H_MIN  : float = 56.0
 const STATUS_W     : float = 120.0
 const RWD_W        : float = 150.0
 const BADGE_SZ     : float = 30.0
@@ -272,9 +278,7 @@ func _build(vp: Vector2) -> void:
 	var ch_rect : Rect2 = _lay["ch_list"]
 	_spine_scroll = _make_scroll(ch_rect)
 	_slide_root.add_child(_spine_scroll)
-	_spine_body = Control.new()
-	_spine_body.mouse_filter = Control.MOUSE_FILTER_PASS
-	_spine_scroll.add_child(_spine_body)
+	_spine_body = UiKit.scroll_body(_spine_scroll)
 
 	_page_head = Control.new()
 	_page_head.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -283,9 +287,7 @@ func _build(vp: Vector2) -> void:
 	var q_rect : Rect2 = _lay["q_list"]
 	_page_scroll = _make_scroll(q_rect)
 	_slide_root.add_child(_page_scroll)
-	_page_body = Control.new()
-	_page_body.mouse_filter = Control.MOUSE_FILTER_PASS
-	_page_scroll.add_child(_page_body)
+	_page_body = UiKit.scroll_body(_page_scroll)
 
 	# Какую главу открыть: ту, куда привёл переход по уведомлению; иначе первую
 	# с готовой наградой; иначе первую незакрытую; иначе просто первую.
@@ -736,8 +738,8 @@ func _build_page() -> void:
 	# выглядит обрезанной, а из четырёх помещается без скролла.
 	var list : Rect2 = _lay["q_list"]
 	var n : int = maxi(1, qs.size())
-	var row_h : float = minf(Q_ROW_H_MAX,
-		(list.size.y - Q_ROW_GAP * float(n - 1)) / float(n))
+	var row_h : float = maxf(Q_ROW_H_MIN, minf(Q_ROW_H_MAX,
+		(list.size.y - Q_ROW_GAP * float(n - 1)) / float(n)))
 	var y := 0.0
 	for qi in qs:
 		_build_quest_row(Vector2(0.0, y), Vector2(list.size.x, row_h), int(qi))

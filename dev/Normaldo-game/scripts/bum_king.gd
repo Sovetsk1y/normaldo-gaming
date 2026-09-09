@@ -75,8 +75,13 @@ const SFX_DOWN   : Array = [
 const SFX_PIZZA  := preload("res://assets/audio/super_pizza.mp3")
 
 # ЭТО СТИНГЕР, А НЕ ТЕМА БОЯ. Ровно так он и звучит у крокодила и ниндзя: одна
-# фанфара на выход босса. Зациклённым он превращался в шарманку — четыре такта
-# по кругу всю драку, из-за которых не слышно ни замаха, ни попадания.
+# фанфара на выход. Зациклённым он превращался в шарманку — четыре такта по
+# кругу всю драку, из-за которых не слышно ни замаха, ни попадания.
+#
+# ЗДЕСЬ ОН — ГОНГ, и звучит РОВНО НА ВЫХОД НОВОГО БОЙЦА, по разу на раунд. Это
+# бой на ринге из трёх раундов, и гонг в нём значит «следующий», а не «началось»:
+# сыгранный один раз на входе в бой, он молчал ровно там, где нужен, — когда из
+# кольца выходит новый противник.
 const BOSS_STINGER := preload("res://assets/audio/boss_fight.mp3")
 
 # Разовый звук. Игрок AudioStreamPlayer живёт ровно столько, сколько звучит:
@@ -816,7 +821,6 @@ const SPEECH : String = "Моя набережная, парень.\nПокаж�
 
 func _intro() -> void:
 	current_wave = "intro"
-	_sfx(BOSS_STINGER, -6.0)
 	await BOSS_SPEECH.show(self, _game_root, SPEECH, BOSS_PX,
 		Color(0.16, 0.13, 0.09, 0.96), Color(0.85, 0.72, 0.35, 0.95),
 		Color(1.00, 0.95, 0.82))
@@ -1784,6 +1788,7 @@ func _caption(text: String, col: Color) -> void:
 # «тапать опасно». Одна рейка.
 func _wave_grey() -> void:
 	current_wave = "grey"
+	_sfx(BOSS_STINGER, -6.0)   # гонг: вышел новый боец
 	foe_hp = FOE_HP
 	_foe_attacks = false
 	# ОДНА рейка — у него их и правда одна.
@@ -1814,6 +1819,7 @@ var _ginger_answers : int = 0
 
 func _wave_ginger() -> void:
 	current_wave = "ginger"
+	_sfx(BOSS_STINGER, -6.0)   # гонг: вышел новый боец
 	foe_hp = FOE_HP
 	_ginger_answers = 0
 	_foe_attacks = false   # сам не нападает: только отвечает на твой замах
@@ -1846,6 +1852,7 @@ const KING_CALL_TIME : float = 1.40
 
 func _wave_king() -> void:
 	current_wave = "king"
+	_sfx(BOSS_STINGER, -6.0)   # гонг: вышел новый боец
 	king_hp = KING_HP
 	_foe_attacks = true     # ЕДИНСТВЕННЫЙ, кто нападает сам
 	# ПЯТЬ реек — и они появляются ровно сейчас, вместе с ним.

@@ -26,6 +26,7 @@ const BUM_BARREL_SCRIPT  := preload("res://scripts/bum_barrel.gd")
 const MOLOTOV_SCENE      := preload("res://scenes/molotov.tscn")
 # Новые предметы (script-only Area2D).
 const COMPASS_SCRIPT       := preload("res://scripts/compass_item.gd")
+const MIRROR_SCRIPT        := preload("res://scripts/mirror_item.gd")
 const MUSHROOM_SCRIPT      := preload("res://scripts/mushroom_item.gd")
 const ROADSIGN_BUM_SCRIPT  := preload("res://scripts/roadsign_bum.gd")
 const CONE_SCRIPT          := preload("res://scripts/cone.gd")
@@ -1043,8 +1044,8 @@ const HAZ_LEVEL : Array = [
 	# пиво, костёр на берегу. Кобра приползла из канализации — река с ней рядом.
 	# Камень, банан и конус держат связь с первым эпизодом: набор обязан
 	# меняться, а не подменяться целиком, иначе переход читается как другая игра.
-	{ "helm": 14, "bottle": 14, "compass": 10, "beer": 12, "campfire": 12,
-	  "snake": 10, "stone": 10, "banana": 12, "cone": 8 },
+	{ "helm": 14, "bottle": 14, "compass": 10, "mirror": 8, "beer": 12,
+	  "campfire": 12, "snake": 10, "stone": 10, "banana": 12, "cone": 8 },
 	# 3. ПЛЯЖ — зонт, шезлонг, птица, коктейль; шаман тут же зовёт своих змей.
 	# Ниндзя приходит в поток начиная отсюда — после того, как игрок встретил его
 	# боссом в конце первого эпизода и успел про него забыть.
@@ -1117,6 +1118,7 @@ func _spawn_level_hazard(kind: String, y: float, vp_w: float, speed: float) -> v
 		"thief":        _spawn_scripted(THIEF_SCRIPT, y, vp_w, speed)
 		"roadsign":     _spawn_scripted(ROADSIGN_BUM_SCRIPT, y, vp_w, speed)
 		"compass":      _spawn_scripted(COMPASS_SCRIPT, y, vp_w, speed)
+		"mirror":       _spawn_scripted(MIRROR_SCRIPT, y, vp_w, speed)
 		"mushroom":     _spawn_scripted(MUSHROOM_SCRIPT, y, vp_w, speed)
 		"black_ace":    _spawn_effect_item("black_ace", y, vp_w, speed)
 		"ninja":        _spawn_ninja(y, vp_w, speed)

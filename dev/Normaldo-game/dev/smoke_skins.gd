@@ -42,6 +42,8 @@ func _initialize() -> void:
 	await _test_casts(reg, save)
 	print("── Паутина Спайдера ──")
 	await _test_web(save)
+	print("── Поза каста при взгляде влево ──")
+	await _test_pose_mirror(reg, save)
 
 	print("")
 	if _fails == 0:
@@ -685,3 +687,60 @@ func _test_web(save: Node) -> void:
 		_check(true, "добыча долетела до головы и подобрана")
 
 	game.queue_free()
+
+# ── ПОЗА КАСТА ПРИ ВЗГЛЯДЕ ВЛЕВО ─────────────────────────────────────────────
+# Кадры вариантов (каст, «доллары в глазах», «ест») нарисованы в СВОИХ рамках, и
+# при подмене спрайт сдвигают, чтобы голова осталась на месте. Сдвиг этот
+# считался всегда в одну сторону — а `flip_h` отражает кадр вокруг центра
+# спрайта, то есть при взгляде ВЛЕВО поправку надо зеркалить.
+#
+# Пока её не зеркалили, у классики на первом жире кадр выстрела уезжал на 26 px
+# ВПРАВО — туда и обратно, по разу за каст. Игрок это описал точно: «глючит туда
+# сюда, картинка выстрела стоит в правую сторону».
+#
+# Проверка ловит саму несимметричность, а не конкретное число: смотрим вправо и
+# влево, и сдвиг кадра обязан быть зеркальным. Так тест переживёт любую
+# перерисовку кадров.
+func _test_pose_mirror(reg: Node, save: Node) -> void:
+	var met  : Node = get_root().get_node_or_null("SkinMetrics")
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var n   : Node = game.get_node_or_null("Normaldo")
+	var spr : Sprite2D = n.get_node("Sprite2D")
+
+	var bad  : Array = []
+	var seen : int = 0
+	for s in reg.SKINS:
+		var id := String(s["id"])
+		save.active_skin = id
+		save.skin_level  = 10
+		n.call("reload_skin")
+		await process_frame
+		var poses : Array = n.get("_skin_spell_tex")
+		for fat in 4:
+			if fat >= poses.size() or poses[fat] == null:
+				continue
+			if not bool(met.call("has_pose_off", id, "_spell")):
+				continue
+			n.set("fat_state", fat)
+			n.call("_apply_skin_to_sprite")
+			await process_frame
+			var jump : Array = []
+			for left in [false, true]:
+				n.call("_set_facing", left, true)
+				n.call("_show_head", n.get("_skin_tex")[fat], "")
+				var idle_x : float = spr.position.x
+				n.call("_show_head", poses[fat], "_spell")
+				jump.append(spr.position.x - idle_x)
+			seen += 1
+			# Зеркально — значит сумма нулевая. Допуск 0.5 px: числа считаются
+			# из долей кадра, и точного нуля с плавающей точкой не бывает.
+			if absf(float(jump[0]) + float(jump[1])) > 0.5:
+				bad.append("%s/%d %+.0f и %+.0f" % [id, fat + 1, jump[0], jump[1]])
+	# Вернуть взгляд, чтобы следующий тест не начинал с зеркала.
+	n.call("_set_facing", false, true)
+	_check(seen > 0 and bad.is_empty(),
+		"кадр каста садится зеркально, проверено %d, съехали: %s" % [seen, bad])
+	game.queue_free()
+	await process_frame

@@ -24,7 +24,7 @@ const SPAWNER := preload("res://scripts/spawner.gd")
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 30
+const EXPECTED_CHECKS : int = 34
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -42,6 +42,8 @@ func _initialize() -> void:
 	_test_sources()
 	print("── Зеркало ──")
 	await _test_mirror()
+	print("── Компас ──")
+	await _test_compass()
 	print("── Гриб ──")
 	await _test_shroom()
 	_finish()
@@ -164,15 +166,15 @@ func _test_mirror() -> void:
 	var before : float = flying.position.x
 
 	nrm.call("apply_mirror", 5.0)
-	_check(FLOW.mirrored(), "компас развернул поток")
+	_check(FLOW.mirrored(), "зеркало развернуло поток")
 	_check(bg.call("trip_on", "mirror"), "и отразил фон")
 	_check(not bg.call("trip_on", "invert"), "цвет при этом не тронут")
 	FLOW.advance(flying, 100.0, 1.0)
 	_check(flying.position.x > before, "летящий развернулся: %.0f → %.0f"
 		% [before, flying.position.x])
 
-	# КОМПАС БОЛЬШЕ НЕ ТРОГАЕТ НИ РУКУ, НИ ЗВУК. Это половина всей правки, и
-	# случайный возврат старого поведения на глаз читается как «опять сломали».
+	# ЗЕРКАЛО НЕ ТРОГАЕТ НИ РУКУ, НИ ЗВУК — этим занимается компас, и путать их
+	# нельзя: у них разные предметы и разные обещания.
 	_check(float(nrm.get("_invert_remaining")) <= 0.0, "управление не перевёрнуто")
 	_check(not bool(nrm.get("_music_reversed")), "музыка не развёрнута")
 
@@ -190,10 +192,44 @@ func _test_mirror() -> void:
 	_check(cops == 0, "тачка копов в зеркале не выезжает: %d" % cops)
 	_check(sp.get_child_count() > before_kids, "но что-то вместо неё вылетело")
 
-	# Старт уровня обязан всё вернуть: иначе компас перед боссом достаётся
+	# Старт уровня обязан всё вернуть: иначе зеркало перед боссом достаётся
 	# следующему уровню.
 	sp.call("_start_level")
 	_check(not FLOW.mirrored(), "старт уровня вернул поток влево")
+
+	game.queue_free()
+	await process_frame
+	FLOW.reset()
+
+# ── Компас ───────────────────────────────────────────────────────────────────
+# Компас ВЕРНУЛСЯ К СТАРОМУ ПОВЕДЕНИЮ: он ломает РУКУ — пальцы делают не то, что
+# просят, — и разворачивает музыку. Мир при этом стоит как стоял.
+#
+# Отражает мир ЗЕРКАЛО, отдельный предмет. Пока эти двое жили в одном, правка
+# одного молча меняла другого; здесь проверяется именно граница между ними.
+func _test_compass() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var nrm : Node = game.get_node_or_null("Normaldo")
+	var bg  : Node = game.get_node_or_null("Background")
+	if nrm == null or bg == null:
+		_check(false, "сцена забега не собралась")
+		game.queue_free()
+		return
+
+	var mus : Node = game.get_node_or_null("Music")
+	if mus != null:
+		mus.set("stream", load("res://assets/audio/main_theme.mp3"))
+		mus.call("play")
+		await process_frame
+
+	nrm.call("apply_invert", 5.0)
+	_check(float(nrm.get("_invert_remaining")) > 0.0, "компас перевернул управление")
+	_check(mus == null or bool(nrm.get("_music_reversed")), "и развернул музыку")
+	# А МИР НЕ ТРОГАЕТ. Это и есть граница с зеркалом.
+	_check(not FLOW.mirrored(), "но поток идёт как шёл")
+	_check(not bg.call("trip_on", "mirror"), "и фон не отражён")
 
 	game.queue_free()
 	await process_frame
@@ -220,9 +256,8 @@ func _test_shroom() -> void:
 	junk.position = Vector2(400.0, 120.0)
 	await process_frame
 
-	# Реверс музыки подхватывает ТОЛЬКО основную тему — трек мини-игры он рвать
-	# не должен. В голой сцене не играет ничего, поэтому тему заводим сами:
-	# иначе проверка «музыка развернулась» падала бы не на грибе, а на тишине.
+	# Тему заводим сами: проверка «музыка НЕ развернулась» на тишине прошла бы
+	# и с поломанным грибом — реверсить нечего.
 	var mus : Node = game.get_node_or_null("Music")
 	if mus != null:
 		mus.set("stream", load("res://assets/audio/main_theme.mp3"))
@@ -232,9 +267,13 @@ func _test_shroom() -> void:
 	nrm.call("apply_shroom", 8.0)
 	_check(bg.call("trip_on", "invert"), "гриб вывернул цвет фона")
 	_check(sp.call("pizza_storm"), "и включил пицца-шторм")
-	_check(float(nrm.get("_invert_remaining")) > 0.0, "управление перевёрнуто")
 	_check(float(nrm.get("_slow_remaining")) > 0.0, "шаг замедлен")
-	_check(mus == null or bool(nrm.get("_music_reversed")), "музыка задом наперёд")
+	# РЕВЕРСА У ГРИБА БОЛЬШЕ НЕТ — ни руки, ни звука. Гриб и так делает три вещи
+	# разом: цвета наизнанку, шаг медленнее, всё вокруг пицца. Четвёртая, ломающая
+	# руку, превращала его из «накрыло» в «игра сломалась». Реверс уехал туда,
+	# где читается как своё, — на компас.
+	_check(float(nrm.get("_invert_remaining")) <= 0.0, "а управление НЕ перевёрнуто")
+	_check(not bool(nrm.get("_music_reversed")), "и музыка не развёрнута")
 
 	# ВСЁ НА ЭКРАНЕ — пицца. Считаем после кадра: подмена идёт освобождением
 	# старого узла, а оно откладывается до конца кадра.
