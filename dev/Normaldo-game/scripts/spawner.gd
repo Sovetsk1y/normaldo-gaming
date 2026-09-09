@@ -29,6 +29,7 @@ const COMPASS_SCRIPT       := preload("res://scripts/compass_item.gd")
 const MIRROR_SCRIPT        := preload("res://scripts/mirror_item.gd")
 # Побеждённые боссы возвращаются в поток одним своим ходом. См. HAZ_LEVEL ниже.
 const CROC_SCRIPT          := preload("res://scripts/croc_item.gd")
+const SWAT_SCRIPT          := preload("res://scripts/police_swat.gd")
 const MUSHROOM_SCRIPT      := preload("res://scripts/mushroom_item.gd")
 const ROADSIGN_BUM_SCRIPT  := preload("res://scripts/roadsign_bum.gd")
 const CONE_SCRIPT          := preload("res://scripts/cone.gd")
@@ -168,11 +169,15 @@ var _boss_test_t      : float = 0.0
 # как в игру играют: с телефона, отрезками. Плюс пять точек входа вместо трёх —
 # переиграть можно ровно тот кусок, который не даётся.
 #
-# `boss_tmp` — БОСС ВЗЯТ ВЗАЙМЫ. Нарисованных боссов три (нога ниндзя, крокодил,
-# хозяин клуба), а эпизодов пять, и каждый обязан чем-то заканчиваться: без
-# босса эпизод просто обрывается, засчитаться ему нечем. Поэтому два эпизода
-# доигрывают чужим боссом, и это помечено — чтобы при появлении своих не пришлось
-# гадать, где заглушка, а где замысел.
+# `boss_tmp` — БОСС ВЗЯТ ВЗАЙМЫ. Флага сейчас нет ни у кого, и это правильное
+# состояние: у каждого из пяти эпизодов свой бой. Какое-то время их было три на
+# пять, и двое доигрывали чужим боссом — помечено флагом, чтобы при появлении
+# своих не пришлось гадать, где заглушка, а где замысел. Пират закрыл пляж,
+# капитан полиции — двор, и заглушек не осталось.
+#
+# Флаг НЕ УДАЛЁН: следующий эпизод появится раньше, чем к нему нарисуют босса, и
+# помечать заглушку понадобится снова. Сколько их — считает `dev/smoke_levels.gd`
+# по числу РАЗНЫХ боссов, а не по списку: список пришлось бы править дважды.
 #
 # `story` — строка на карточке эпизода: ЗАЧЕМ игрок сюда бежит. Название
 # («ПЛЯЖ») говорит, где он; без второй строки кампания читается как набор
@@ -185,7 +190,7 @@ const CAMPAIGN_LEVELS : Array = [
 	  "story": "Исследуй прибрежную зону" },
 	{ "name": "ПЛЯЖ",        "boss": "bum_king", "letter": 12.0, "phase": 2,
 	  "story": "Найди дорогу к клубу" },
-	{ "name": "ДВОР",        "boss": "club",  "letter": 11.0, "phase": 3, "boss_tmp": true,
+	{ "name": "ДВОР",        "boss": "police", "letter": 11.0, "phase": 3,
 	  "story": "Направляйся к клубу" },
 	{ "name": "КЛУБ",        "boss": "club",  "letter": 10.0, "phase": 4,
 	  "story": "Найди вход в клуб" },
@@ -1095,7 +1100,7 @@ const HAZ_LEVEL : Array = [
 	# со двора: клуб стоит в нём же, а не на другой планете.
 	{ "cop": 14, "handcuffs": 10, "girl": 12, "cocktail": 10, "black_ace": 5,
 	  "loser_ticket": 4, "safe": 6, "molotov": 8, "thief": 8, "cone": 10,
-	  "ninja": 6, "croc": 6 },
+	  "ninja": 6, "croc": 6, "swat": 6 },
 ]
 
 # В ХВОСТЕ набор — СУММА ВСЕХ УРОВНЕЙ. Локации кончились, и держаться раскладки
@@ -1158,6 +1163,7 @@ func _spawn_level_hazard(kind: String, y: float, vp_w: float, speed: float) -> v
 		"black_ace":    _spawn_effect_item("black_ace", y, vp_w, speed)
 		"ninja":        _spawn_ninja(y, vp_w, speed)
 		"croc":         _spawn_scripted(CROC_SCRIPT, y, vp_w, speed)
+		"swat":         _spawn_swat(y, vp_w, speed)
 		"loser_ticket": _spawn_effect_item("loser_ticket", y, vp_w, speed)
 		"beer":         _spawn_slowing(y, vp_w, speed)
 		"handcuffs":    _spawn_effect_item("handcuffs", y, vp_w, speed)
@@ -1250,6 +1256,27 @@ func _spawn_hazard(kind: String, y: float, vp_w: float, speed: float) -> void:
 # вариации на знакомом, и вываливать их наравне значило бы учить трём вещам
 # сразу.
 const NINJA_KINDS : Array = ["shuriken", "shuriken", "predator", "smoke"]
+
+# СВАТ в потоке — цитата боя с капитаном полиции. Сам капитан в поток не идёт:
+# у него нет собственного хода, всё за него делают собака, отряд и вертолёт, и
+# «цитатой» тут были бы не он, а его подчинённые. Ими и цитируем.
+#
+# Вид берётся из тех же трёх, что и в бою, и щитоносец среди них — самый
+# уместный: он и на арене про «отдай полосу», а поток ровно про это и есть.
+func _spawn_swat(y: float, vp_w: float, speed: float) -> void:
+	var node := Area2D.new()
+	node.set_script(SWAT_SCRIPT)
+	# kind — ДО add_child: `_ready` читает его, чтобы собрать снаряжение и
+	# записаться в свою группу.
+	node.set("kind", SWAT_KINDS[randi() % SWAT_KINDS.size()])
+	node.set("walk_speed", speed)
+	node.set("target", get_parent().get_node_or_null("Normaldo"))
+	node.position = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
+	_mark_base_span(y)
+	add_child(node)
+	node.call("enter_from_edge")
+
+const SWAT_KINDS : Array = ["shield", "rifle", "grenade"]
 
 func _spawn_ninja(y: float, vp_w: float, speed: float) -> void:
 	var node := Area2D.new()

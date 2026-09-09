@@ -100,6 +100,7 @@ const NINJA_FOOT_SCENE := preload("res://scenes/ninja_foot.tscn")
 const LEATHERHEAD_SCRIPT := preload("res://scripts/leatherhead.gd")
 const CLUB_BOSS_SCRIPT   := preload("res://scripts/club_boss.gd")
 const BUM_KING_SCRIPT    := preload("res://scripts/bum_king.gd")
+const POLICE_BOSS_SCRIPT := preload("res://scripts/police_boss.gd")
 # Денежное облако с сюжетной строкой — им первый эпизод говорит то, что
 # остальным говорит занавес (см. `money_cloud.gd`).
 const MONEY_CLOUD        := preload("res://scripts/money_cloud.gd")
@@ -6850,6 +6851,7 @@ func _toggle_boss_menu() -> void:
 		["КРОК",   Color(0.60, 1.0, 0.50), _on_croc_tapped, LEATHERHEAD_SCRIPT.F_IDLE],
 		["КЛУБ",   Color(1.0, 0.65, 1.0),  _on_club_tapped, CLUB_BOSS_SCRIPT.F_IDLE[0]],
 		["ПИРАТ",  Color(1.0, 0.85, 0.40), _on_bum_king_tapped, BUM_KING_SCRIPT.F_IDLE],
+		["КОП",    Color(0.55, 0.75, 1.00), _on_police_tapped, POLICE_BOSS_SCRIPT.COP_TEX],
 		["✕",      Color(0.75, 0.75, 0.80), _close_boss_menu, null],
 	]
 	for i in items.size():
@@ -6890,6 +6892,29 @@ func _on_bum_king_tapped() -> void:
 	_play_btn_sfx()
 	_drop_boss_menu()
 	summon_bum_king(true)
+
+func _on_police_tapped() -> void:
+	_play_btn_sfx()
+	_drop_boss_menu()
+	summon_police(true)
+
+# Капитан полиции поднимается тем же путём, что и остальные.
+func summon_police(test_mode: bool = false) -> void:
+	if _boss_on_screen():
+		return
+	var game_root := get_parent() as Node2D
+	var normaldo  := get_parent().get_node_or_null("Normaldo") as Node2D
+	var spawner   := get_parent().get_node_or_null("Spawner")
+	if not normaldo or not game_root:
+		return
+	var boss := Node2D.new()
+	boss.set_script(POLICE_BOSS_SCRIPT)
+	boss.call("setup", normaldo, spawner, game_root, test_mode)
+	game_root.add_child(boss)
+	if not test_mode:
+		boss.connect("defeated", _on_boss_defeated)
+	else:
+		boss.connect("tree_exited", _slide_in_hud)
 
 # Старый пират поднимается тем же путём, что и остальные трое.
 func summon_bum_king(test_mode: bool = false) -> void:
@@ -7152,7 +7177,7 @@ func _on_level_cleared(boss: String, next_level: int) -> void:
 	_show_level_card(next_level)
 
 const BOSS_SCENES : Dictionary = { "ninja": "scene", "croc": "croc", "club": "club",
-	"bum_king": "bum_king" }
+	"bum_king": "bum_king", "police": "police" }
 
 # ── БОСС ЖДЁТ КОНЦА МИНИ-ИГРЫ ────────────────────────────────────────────────
 # Мутаген (и «пицца-пати», и слоты) ловится из общего потока, а босс выходит по
@@ -7238,6 +7263,11 @@ func _summon_boss(kind: String) -> void:
 			cb.set_script(CLUB_BOSS_SCRIPT)
 			cb.call("setup", normaldo, spawner, game_root, false)
 			boss = cb
+		"police":
+			var pb := Node2D.new()
+			pb.set_script(POLICE_BOSS_SCRIPT)
+			pb.call("setup", normaldo, spawner, game_root, false)
+			boss = pb
 		"bum_king":
 			var bk := Node2D.new()
 			bk.set_script(BUM_KING_SCRIPT)
