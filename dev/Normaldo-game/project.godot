@@ -15,8 +15,7 @@ config/version="1.0.1"
 run/main_scene="res://scenes/game.tscn"
 config/features=PackedStringArray("4.2", "GL Compatibility")
 run/max_fps=60
-boot_splash/bg_color=Color(0.04, 0.03, 0.08, 1)
-boot_splash/image="res://assets/ui/splash.png"
+boot_splash/bg_color=Color(0, 0, 0, 1)
 config/icon="res://assets/ui/icons/app_icon.png"
 config/main_scene="res://scenes/game.tscn"
 

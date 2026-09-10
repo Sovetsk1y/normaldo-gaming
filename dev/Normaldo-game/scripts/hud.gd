@@ -214,6 +214,9 @@ var _toast_node       : CanvasItem = null   # quest completion / phase toast (Co
 var _intro_quest_seq  : Node2D   = null
 
 var _menu_overlay      : ColorRect = null
+# Логотип меню. Держится ради заставки: она спрашивает, где он на экране,
+# чтобы погасить свою копию ровно поверх него (см. `menu_logo_rect`).
+var _menu_logo         : TextureRect = null
 var _play_btn_bg       : ColorRect = null
 var _play_label        : Label     = null
 var _menu_tapped       : bool      = false
@@ -411,6 +414,39 @@ func _ready() -> void:
 		# If we already received pending rewards before the menu was up (race),
 		# surface them now.
 		call_deferred("_check_pending_rewards_on_menu")
+		# ЗАСТАВКА. Поднимается ПОСЛЕ меню и поверх него: она гасит своё чёрное
+		# и открывает уже собранный экран, а не строит его у игрока на глазах.
+		# Заводится только на обычном запуске игры — см. `Splash.should_play`.
+		if Splash.should_play(self):
+			var sp := Splash.play(self)
+			sp.finished.connect(_after_splash)
+
+# ── ПОСЛЕ ЗАСТАВКИ ─────────────────────────────────────────────────────────
+# Первое, что видит новый игрок, — подсказка на зоне запуска: «ДАВАЙ СРАЗУ К
+# ДЕЛУ!». Она перекрывает всё остальное меню, потому что остальное меню ему
+# сейчас незачем: заданий он не выполнял, скинов не на что купить, в таблице
+# его нет. Одна кнопка и одна мысль.
+#
+# Тому, кто обучение уже прошёл, ничего не показывается: дальше меню объясняет
+# себя туром и подсказками по поводу (см. `_menu_tour_maybe`).
+#
+# Зовётся ТОЛЬКО заставкой, по её концу. Без заставки — то есть на сцене,
+# поднятой дев-скриптом или тестом, — не зовётся вовсе: подсказка «давай сразу
+# к делу» это часть запуска игры, а не часть меню.
+func _after_splash() -> void:
+	if SaveData.tutorial_done:
+		_menu_tour_maybe()
+		return
+	if bool(SaveData.menu_tips_seen.get("start", false)):
+		return
+	var r : Rect2 = menu_play_rect()
+	if r.size.x <= 1.0:
+		return
+	MenuTour.play(self, [{
+		"rect":  r,
+		"big":   "ДАВАЙ СРАЗУ К ДЕЛУ!",
+		"small": "тапни сюда — и побежали",
+	}], "start")
 
 func _build_fps_label() -> void:
 	# Отладочный счётчик — только в дев-сборках (DevFlags.ENABLED). В релиз/TF
@@ -1422,7 +1458,12 @@ func _show_menu() -> void:
 	call_deferred("_route_deep_link_if_ready")
 	# Обучение по меню — один раз, после первого забега. Отложенно: кнопкам надо
 	# дать кадр, чтобы встать на свои места, иначе тур подсветит их прошлые.
-	call_deferred("_menu_tour_maybe")
+	#
+	# На ХОЛОДНОМ ЗАПУСКЕ этого не происходит: там меню открывает заставка, и
+	# решение, что показать поверх него, принимает `_after_splash` — иначе тур
+	# полез бы под ещё не погасшее чёрное.
+	if not Splash.should_play(self):
+		call_deferred("_menu_tour_maybe")
 
 # ── ОБУЧЕНИЕ ПО МЕНЮ: ТРИ ОСТАНОВКИ ─────────────────────────────────────────
 # Заводится, когда первый забег уже сыгран (`tutorial_done`), а тур ещё не
@@ -2145,6 +2186,23 @@ func _build_menu_logo(vp: Vector2) -> void:
 	logo.texture_filter      = CanvasItem.TEXTURE_FILTER_LINEAR
 	logo.mouse_filter        = Control.MOUSE_FILTER_IGNORE
 	_menu_overlay.add_child(logo)
+	_menu_logo = logo
+
+# ГДЕ НА ЭКРАНЕ ЛОГОТИП МЕНЮ. Спрашивает заставка: она рисует свою копию
+# логотипа поверх чёрного и гаснет вместе с ним — под ней остаётся НАСТОЯЩИЙ
+# логотип на том же месте, и переход выходит без единого движения. Числа
+# заставке не переписываются: раскладка меню считается от размера экрана, и
+# копия этих чисел разъехалась бы на первом же телефоне другой формы.
+func menu_logo_rect() -> Rect2:
+	if is_instance_valid(_menu_logo):
+		return _menu_logo.get_global_rect()
+	return Rect2()
+
+# Где зона «тапни, чтобы играть» — её подсвечивает подсказка после заставки.
+func menu_play_rect() -> Rect2:
+	if is_instance_valid(_tour_play_zone):
+		return _tour_play_zone.get_global_rect()
+	return Rect2()
 
 # ── Settings (top-left) ──────────────────────────────────────────────────────
 

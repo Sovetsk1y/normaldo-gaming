@@ -30,7 +30,7 @@ func _beats() -> Array:
 # Такт «веди пальцем» ждёт до двадцати секунд, «поешь» — до двадцати двух. Все
 # ожидания в тесте ставятся С ЗАПАСОМ ОТ ОБРАТНОГО: проверка обязана падать,
 # когда такт НЕ сдвинулся сам, а не когда он не успел.
-const EXPECTED_CHECKS : int = 27
+const EXPECTED_CHECKS : int = 32
 
 var _fails  : int = 0
 var _checks : int = 0
@@ -58,6 +58,10 @@ func _initialize() -> void:
 	await _test_menu_tour()
 	print("── Подсказки по поводу ──")
 	await _test_menu_tips()
+	print("── Ничего выше третьей полосы ──")
+	await _test_lane_floor()
+	print("── Заставка запуска ──")
+	await _test_splash()
 	print("── Сценарий не врёт про себя ──")
 	_test_script_sane()
 
@@ -335,6 +339,63 @@ func _wait_node(host: Node, name: String, limit: float) -> Node:
 			return n
 	return null
 
+# ── НИЧЕГО ВЫШЕ ТРЕТЬЕЙ ПОЛОСЫ ─────────────────────────────────────────────
+# Облачко подсказки закрывает собой две верхние линии. Предмет, выданный туда,
+# игрок не видит — а обучение, показывающее невидимое, учит ровно одному: что
+# смотреть некуда.
+#
+# Проверяется САМ СПАВН, а не константа: попросили нулевую полосу — предмет
+# обязан приехать не выше третьей.
+func _test_lane_floor() -> void:
+	var r : Array = await _fresh_game(true)
+	var game : Node = r[0]
+	var tut  : Node = r[2]
+	var sp   : Node = game.get_node_or_null("Spawner")
+	if tut == null:
+		_check(false, "обучение не завелось — полосы проверить нечем")
+		game.queue_free()
+		await process_frame
+		return
+	var lanes : Array = sp.call("_lane_centers")
+	var floor_y : float = float(lanes[2]) - 4.0
+	var high : Array = []
+	for lane in [0, 1, 2, 3, 4]:
+		var it = tut.call("_send", "pizza", lane)
+		if it == null:
+			high.append("полоса %d: ничего не выдано" % lane)
+			continue
+		if (it as Node2D).position.y < floor_y:
+			high.append("полоса %d → y=%.0f" % [lane, (it as Node2D).position.y])
+	_check(high.is_empty(), "что ни попроси, приезжает не выше третьей: %s" % [high])
+	game.queue_free()
+	await process_frame
+
+# ── ЗАСТАВКА ───────────────────────────────────────────────────────────────
+# Две вещи, и обе про то, чтобы она никому не мешала: на сцене, поднятой руками
+# (а так её поднимают все тесты и все снимки), заставка не заводится вовсе, а
+# заведённая — уходит сама и не оставляет на экране ничего.
+func _test_splash() -> void:
+	var splash : GDScript = load("res://scripts/splash.gd") as GDScript
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var hud : Node = game.get_node_or_null("HUD")
+	splash.set("_played", false)
+	_check(not bool(splash.call("should_play", hud)),
+		"на поднятой руками сцене заставка не заводится")
+
+	# А заведённая — доигрывает и убирает себя.
+	var sp = splash.call("play", hud)
+	_check(sp != null and is_instance_valid(sp), "запущенная вручную — появилась")
+	var t0 := Time.get_ticks_msec()
+	while is_instance_valid(sp) and Time.get_ticks_msec() - t0 < 9000:
+		get_root().get_tree().paused = false
+		await process_frame
+	_check(not is_instance_valid(sp),
+		"и ушла сама за %.1f c" % [(Time.get_ticks_msec() - t0) / 1000.0])
+	game.queue_free()
+	await process_frame
+
 # ── Сам сценарий ────────────────────────────────────────────────────────────
 # Такт без слов — это пауза посреди игры, у которой игрок не понимает причины.
 # Такт без срока страховки — возможность зависнуть навсегда.
@@ -359,6 +420,11 @@ func _test_script_sane() -> void:
 	# палец, учит есть того, кто ещё не умеет двигаться.
 	_check(String((beats[0] as Dictionary).get("id", "")) == "move",
 		"а первым идёт управление: «%s»" % [(beats[0] as Dictionary).get("id", "")])
+	# И ПОСЛЕДНИМ — ПРОЩАНИЕ. Обучение, обрывающееся на середине задания,
+	# оставляет игрока ждать следующей подсказки вместо того, чтобы играть.
+	var last : Dictionary = beats[beats.size() - 1]
+	_check(String(last.get("id", "")) == "done",
+		"а последним — прощание: «%s»" % [last.get("id", "")])
 
 # ── Мелочи ──────────────────────────────────────────────────────────────────
 

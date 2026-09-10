@@ -39,6 +39,20 @@ const UI_FONT   := preload("res://assets/fonts/RussoOne-Regular.ttf")
 # выглядел бы как другая игра.
 const ARROW_TEX := preload("res://assets/ui/quests/back_arrow.png")
 
+# ── ЗВУК ────────────────────────────────────────────────────────────────────
+# Три звука, и каждый значит ровно одно:
+#   ПОЯВИЛАСЬ ПОДСКАЗКА — тихий «динь». Он не про то, что случилось в игре, а
+#     про то, что на экране появились слова: игрок в этот момент смотрит на
+#     предметы, и без звука первую подсказку он замечает через раз.
+#   ТАКТ ЗАСЧИТАН — короткий щелчок. Ответ на действие: «да, это оно».
+#   ФИНАЛ — салют, один раз за обучение.
+#
+# Больше не надо. Свой звук на каждый такт превратил бы обучение в музыкальную
+# шкатулку: игрок начал бы слушать её, а не игру.
+const SFX_SAY  := preload("res://assets/audio/shine.mp3")
+const SFX_OK   := preload("res://assets/audio/button.mp3")
+const SFX_DONE := preload("res://assets/audio/fireworks.mp3")
+
 # ── СЦЕНАРИЙ ────────────────────────────────────────────────────────────────
 # Порядок не случайный. Управление — раньше всего, без него нет ничего. Награда
 # раньше угрозы: игрок должен сначала захотеть двигаться и только потом узнать,
@@ -58,6 +72,12 @@ const BEATS : Array = [
 	{ "id": "bonus",  "big": "А ЭТО — БОНУС",      "small": "часы замедлят мир, хватай", "limit": 16.0 },
 	{ "id": "dollar", "big": "ДОЛЛАР — НЕ ЕДА",    "small": "на них берут скины",      "limit": 14.0 },
 	{ "id": "skill",  "big": "ДВОЙНОЙ ТАП",        "small": "это способность скина",   "limit": 20.0 },
+	# ПОСЛЕДНИЙ ТАКТ НИЧЕГО НЕ ЖДЁТ. Условия у него нет вовсе — он висит свои три
+	# секунды и уходит: это не задание, а прощание. Заодно оно честно
+	# предупреждает, что показали не всё: предметов в игре под сотню, и игрок,
+	# уверенный, что видел их все, первую же незнакомую штуку примет за поломку.
+	{ "id": "done",   "big": "ТЕПЕРЬ ТЫ ГОТОВ",
+		"small": "предметов много, обо всех не расскажешь — удачи!", "limit": 3.2 },
 ]
 
 # Насколько надо увести голову, чтобы такт «веди пальцем» засчитался. Полосы по
@@ -163,9 +183,13 @@ func _play(beat: Dictionary) -> void:
 	await _serve(id)
 	if not _alive():
 		return
-	await _wait_until(_cond_for(id), float(beat.get("limit", 20.0)))
+	var done := await _wait_until(_cond_for(id), float(beat.get("limit", 20.0)))
 	if not _alive():
 		return
+	# Щелчок — только если такт закрыт ДЕЙСТВИЕМ. Истёкший срок это не успех, и
+	# звук успеха на нём означал бы «молодец» тому, кто ничего не сделал.
+	if done:
+		_sfx(SFX_OK, -12.0)
 	await _after(id)
 	_hush()
 
@@ -218,7 +242,7 @@ func _serve(id: String) -> void:
 			# отрабатывает в пустоту, и игрок видит вспышку, а не то, что она
 			# делает.
 			await _breath(0.8)
-			for lane in [1, 2, 3]:
+			for lane in [2, 3, 4]:
 				if not _alive():
 					return
 				_send("trash", lane)
@@ -249,6 +273,9 @@ func _cond_for(id: String) -> Callable:
 				return _got_buck > 0 or _no_items_of("dollar")
 		"skill":
 			return func() -> bool: return _fired
+		"done":
+			# Никогда: такт кончается по своему сроку — см. BEATS.
+			return func() -> bool: return false
 	return func() -> bool: return true
 
 # Что сказать вслед. Только там, где ответ игрока бывает разным: одинаковое
@@ -317,15 +344,37 @@ func _release() -> void:
 
 # ── Мелочи ──────────────────────────────────────────────────────────────────
 
+# Звук живёт на СВОЁМ узле, который сам себя убирает: обучение исчезает по
+# концу сценария, и звук, привязанный к нему, обрывался бы на полуслове.
+func _sfx(stream: AudioStream, vol_db: float) -> void:
+	if stream == null or not is_inside_tree():
+		return
+	var p := AudioStreamPlayer.new()
+	p.stream       = stream
+	p.volume_db    = vol_db
+	p.bus          = "Master"
+	p.process_mode = Node.PROCESS_MODE_ALWAYS
+	_game.add_child(p)
+	p.play()
+	p.finished.connect(p.queue_free)
+
 func _alive() -> bool:
 	return is_instance_valid(self) and is_inside_tree() \
 		and is_instance_valid(_spawner) and is_instance_valid(_normaldo) \
 		and not bool(_normaldo.get("_dead"))
 
+# ── НИЧЕГО ВЫШЕ ТРЕТЬЕЙ ПОЛОСЫ ─────────────────────────────────────────────
+# Облачко подсказки стоит под верхней полосой и закрывает собой две первые
+# линии. Предмет, выданный туда, игрок просто не видит — а обучение, которое
+# показывает невидимое, учит ровно одному: что смотреть некуда.
+#
+# Полосы считаются с нуля, поэтому «третья» — это индекс 2.
+const LANE_MIN : int = 2
+
 func _send(kind: String, lane: int) -> Node:
 	if not _alive():
 		return null
-	return _spawner.call("tutorial_send", kind, clampi(lane, 0, 4), 0.0) as Node
+	return _spawner.call("tutorial_send", kind, clampi(lane, LANE_MIN, 4), 0.0) as Node
 
 func _lane_of_normaldo() -> int:
 	var lanes : Array = _spawner.call("_lane_centers")
@@ -389,6 +438,8 @@ const SAY_H : float = 104.0
 
 func _say(big: String, small: String) -> void:
 	_hush()
+	_sfx(SFX_DONE if big == String((BEATS[BEATS.size() - 1] as Dictionary).get("big", "")) \
+		else SFX_SAY, -8.0)
 	var vp := get_viewport().get_visible_rect().size
 	_caption = TipCloud.build(big, small, SAY_W, SAY_H)
 	_caption.position = Vector2(vp.x * 0.5, SAY_Y + SAY_H * 0.5 - 12.0)
