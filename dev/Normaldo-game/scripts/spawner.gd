@@ -214,6 +214,18 @@ func level_story() -> String:
 func level_name() -> String:
 	return String(CAMPAIGN_LEVELS[clampi(level, 0, CAMPAIGN_LEVELS.size() - 1)]["name"])
 
+# Заголовок занавеса: «УРОВЕНЬ 2 · РЕКА». До него там стояло «НЕМНОГО
+# ПОЗДНЕЕ…» — приём из кино, но он говорил только о том, что прошло время, и
+# ни слова о том, куда игрок попал. Название эпизода и его номер — это ровно то,
+# что нужно знать на входе.
+#
+# Номер берётся ОТСЮДА, а не считается на месте: `level` уже 0-based и уже
+# приведён к границам списка, и вторая копия этой арифметики разошлась бы с ним
+# на первом же новом эпизоде.
+func level_title() -> String:
+	var i : int = clampi(level, 0, CAMPAIGN_LEVELS.size() - 1)
+	return "УРОВЕНЬ %d · %s" % [i + 1, String(CAMPAIGN_LEVELS[i]["name"])]
+
 func level_boss() -> String:
 	return String(CAMPAIGN_LEVELS[clampi(level, 0, CAMPAIGN_LEVELS.size() - 1)]["boss"])
 
@@ -1900,20 +1912,53 @@ func _t1_osc_y() -> float:
 		return 0.0
 	return sin(t * 0.8) * 25.0
 
-# ── T1: Resource lines ────────────────────────────────────────────────────────
+# ── T1: ОБЛАЧКО ПИЦЦЫ ─────────────────────────────────────────────────────────
+# Раньше это были «ресурсные линии»: полоса пиццы, обложенная с двух сторон
+# ДЛИННЫМИ РЯДАМИ БАНАНОВ — по пять штук в каждой полосе, во всю ширину экрана.
+#
+# Ряд одинаковых предметов не создаёт решения. Он читается один раз («сюда
+# нельзя»), а дальше игрок просто держит палец на месте и ждёт, пока он
+# кончится: пять бананов подряд требуют того же, что и один, только дольше.
+# Плюс на первом эпизоде это выглядело как половина экрана в банановой кожуре.
+#
+# Теперь T1 — ОБЛАЧКО ПИЦЦЫ: четыре колонки на три полосы, двенадцать штук
+# кучей. Оно даёт ровно обратное — не «уйди отсюда», а «иди сюда и собери всё»,
+# и требует не стояния, а прохода зигзагом через три полосы.
+const PIZZA_CLOUD_COLS : int = 4     # в длину
+const PIZZA_CLOUD_ROWS : int = 3     # в высоту
 
 func _pat_t1(speed: float, lanes: Array, vp_w: float) -> void:
 	_t1_pattern_count += 1
-	# В хвосте негатив в ресурсных линиях — всегда бочка (урон 1), а не банан:
-	# банан там читался бы как поблажка.
+	# Флаг остаётся: по нему ОСТАЛЬНЫЕ линейные паттерны (вступление уровня,
+	# «сэндвич», «каскад») решают, чем обкладывать пиццу — бананом или бочкой.
+	# Сам T1 негативов больше не выдаёт, но счётчик его прогонов по-прежнему
+	# лучшая мера того, как далеко зашёл забег.
 	_t1_trash = _t1_pattern_count > 5 or _hardcore_tier >= 2
-	match randi() % 6:
-		0: await _t1_double_line(speed, lanes, vp_w)
-		1: await _t1_center_line(speed, lanes, vp_w)
-		2: await _t1_two_sandwiches(speed, lanes, vp_w, true)
-		3: await _t1_two_sandwiches(speed, lanes, vp_w, false)
-		4: await _t1_cascade(speed, lanes, vp_w, true)
-		5: await _t1_cascade(speed, lanes, vp_w, false)
+	await _t1_pizza_cloud(speed, lanes, vp_w)
+
+# ── ОБЛАЧКО НЕ ДОЛЖНО НА ЧТО-ТО НАЛЕЗТЬ ─────────────────────────────────────
+# Три полосы облачко занимает целиком и надолго — на всё время, пока едет через
+# экран. Поэтому место под него берётся ЗАРАНЕЕ и тем же механизмом, которым
+# спавнер разводит всё остальное: `_mark_base_span` на каждую полосу. Занятая
+# полоса не даст крупному предмету вырасти в неё (`_fit_size_mult`), а обычный
+# поток на время паттерна и так молчит (`_pattern_running`).
+#
+# Колонки разнесены по времени тем же `_col_gap`, что и все прочие паттерны, —
+# то есть расстояние между ними в пикселях одинаково на любой скорости.
+func _t1_pizza_cloud(speed: float, lanes: Array, vp_w: float) -> void:
+	var gap := _col_gap(speed)
+	# Стартовая полоса случайная: облачко, всегда приходящее в середину, учит
+	# стоять по центру, а не ходить за едой.
+	var top : int = randi() % maxi(1, LANE_COUNT - PIZZA_CLOUD_ROWS + 1)
+	for col in PIZZA_CLOUD_COLS:
+		if _frozen:
+			return
+		var oy := _t1_osc_y()
+		for row in PIZZA_CLOUD_ROWS:
+			_spawn_item(lanes[top + row] + oy, vp_w, PIZZA_TEX, 0.09,
+				speed, 0, true, true, true)
+		if col < PIZZA_CLOUD_COLS - 1:
+			await get_tree().create_timer(gap).timeout
 
 func _spawn_t1_negative(y: float, vp_w: float, speed: float, use_trash: bool = false) -> void:
 	if use_trash:

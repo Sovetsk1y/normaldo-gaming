@@ -2143,7 +2143,7 @@ func _trigger_resist(tag: String, area: Area2D) -> void:
 	# Выкрик — не вместо строки, а вместе с ней: строка говорит, ЧТО произошло,
 	# рисунок — как к этому относится Нормальдо.
 	_pop_sticker(Phrases.resist())
-	_bum_feast(tag)
+	_bum_feast(tag, area)
 	_crack_or_kill(area)
 
 # Destroy an obstacle with the "falling death" used in the ЖИРОБОСС mini-game:
@@ -4571,17 +4571,35 @@ func _on_area_entered(area: Area2D) -> void:
 # волне бомжей, где резист либо не открыт, либо на откате, Дракула просто
 # получал урон — то есть карточка обещала одно, а игра делала другое.
 #
-# «Человек» — это не только бомж: бандит, коп и шаман нарисованы людьми, и
-# отжирать одного бомжа означало читать карточку выборочно. Ниндзя-нога сюда НЕ
-# входит намеренно: это босс, и съесть его с одного касания — не пассивка, а
-# отмена боя.
-const HUMAN_TAGS : Array = ["bum", "thief", "cop", "shaman"]
+# «Человек» — это не только бомж: бандит, коп, шаман и сватовец нарисованы
+# людьми, и отжирать одного бомжа означало читать карточку выборочно.
+# Ниндзя-нога сюда НЕ входит намеренно: это босс, и съесть его с одного касания
+# — не пассивка, а отмена боя.
+const HUMAN_TAGS : Array = ["bum", "thief", "cop", "shaman", "swat"]
 
-func _bum_feast(tag: String) -> bool:
+# ── ОТКАТ ───────────────────────────────────────────────────────────────────
+# Без него пассивка отменяла целые куски игры: волна бомжей превращалась в
+# бесплатные тридцать пицц, а отряд капитана полиции Дракула проедал насквозь,
+# не приняв ни одного удара. Три секунды оставляют пассивку сильной — один
+# человек из каждой волны всё равно уходит в еду, — но заставляют выбирать,
+# КОГО съесть, а не идти напролом.
+const BUM_FEAST_CD  : float = 3.0
+const BUM_FEAST_KEY : String = "passive:bum_feast"
+
+func _bum_feast(tag: String, area: Object = null) -> bool:
 	if _passive_id != "bum_feast" or not HUMAN_TAGS.has(tag):
+		return false
+	if not is_skill_ready(BUM_FEAST_KEY):
+		return false
+	# ЩИТОНОСЦА НЕ СЪЕСТЬ. Щит и есть всё его правило — «в лоб не обойти», — и
+	# зубами он берётся не лучше, чем спеллом. Вдобавок его `on_hit` отвечает
+	# лязгом, а не смертью: съеденный сквозь щит, он остался бы на экране, а
+	# Дракула получил бы жир из ничего и повторял бы это каждые три секунды.
+	if area != null and area.get("kind") != null and String(area.get("kind")) == "shield":
 		return false
 	for _i in 3:
 		_eat_pizza()
+	start_skill_cd(BUM_FEAST_KEY, BUM_FEAST_CD)
 	_vfx_particles(SkinSkills.TRANSFORM)
 	_show_floating_text("+3", Color(0.72, 0.20, 1.00))
 	return true
@@ -4601,7 +4619,7 @@ func _handle_obstacle(area: Area2D) -> void:
 		return
 
 	# Отжор людей: бомж не бьёт Дракулу, а идёт в еду.
-	if _bum_feast(tag):
+	if _bum_feast(tag, area):
 		_vfx_resist_break(area.global_position)
 		_kill_item(area)
 		return

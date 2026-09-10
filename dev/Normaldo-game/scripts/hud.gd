@@ -6287,7 +6287,10 @@ func _start_game() -> void:
 					# Сюжетная строка берётся у спавнера ПОСЛЕ `set_start_level`:
 					# он уже знает, какой эпизод начинается, и второй источник
 					# этой строки завёлся бы ровно затем, чтобы разойтись.
-					await LevelTransition.play(self, "НЕМНОГО ПОЗДНЕЕ…",
+					# Заголовок — «УРОВЕНЬ N · НАЗВАНИЕ», и берётся он у спавнера
+					# вместе с сюжетной строкой, из одного места и после
+					# `set_start_level`.
+					await LevelTransition.play(self, String(spawner.call("level_title")),
 						func() -> void:
 							if is_instance_valid(bg):
 								bg.call("set_level", lvl)

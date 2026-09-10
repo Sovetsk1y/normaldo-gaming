@@ -92,6 +92,16 @@ func setup(nrm: Node) -> void:
 		specs.append({ "key": "passive:scars", "tex": CASEY_TEX, "sym": "",
 			"mod": Color(1, 1, 1), "ring": RING_PASS, "dyn": true,
 			"title": "НЕУЯЗВИМОСТЬ", "desc": "Маска Кейси — неуязвимость к урону." })
+	# ОТЖОР ЛЮДЕЙ — тоже со сроком, и потому тоже в ряду. У него появился откат
+	# (см. `normaldo.BUM_FEAST_CD`), а весь смысл кружка в том, чтобы показать,
+	# готова способность прямо сейчас или ещё копится: без него игрок узнаёт про
+	# откат единственным способом — врезавшись в человека и получив урон.
+	if not pas.is_empty() and str(pas.get("id", "")) == "bum_feast" \
+			and String(pas.get("icon", "")) != "":
+		specs.append({ "key": "passive:bum_feast",
+			"tex": load(String(pas.get("icon", ""))), "sym": "",
+			"mod": Color(1, 1, 1), "ring": RING_PASS,
+			"title": "ОТЖОР ЛЮДЕЙ", "desc": String(pas.get("desc", "")) })
 
 	# Зеркало — динамический кружок для ЛЮБОГО скина, появляется только пока
 	# держится отражение (ключ "mirror" в normaldo._skill_cd).

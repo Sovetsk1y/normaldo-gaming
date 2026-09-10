@@ -20,7 +20,7 @@ var _checks : int = 0
 #
 # Больше 112 бывает законно: `_check_once` печатает серию повторно, если
 # результат в ней ПЕРЕВЕРНУЛСЯ. Меньше — не бывает никогда.
-const EXPECTED_CHECKS : int = 112
+const EXPECTED_CHECKS : int = 116
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -718,8 +718,36 @@ func _test_human_feast() -> void:
 		"и отожрал его на три пиццы (+%d)" % (int(n.get("_pizza_count")) - before))
 	_check(int(n.get("fat_state")) >= fat_before, "а не похудел от удара")
 
-	for tag in ["bum", "cop", "shaman"]:
+	# ОТКАТ. Сразу после первой еды пассивка занята — второй человек проходит
+	# ударом, и это её главное новое свойство: волну людей больше не проесть
+	# насквозь.
+	_check(not bool(n.call("_bum_feast", "bum")),
+		"сразу следом второго не съесть — откат")
+
+	# Имя отката берём У САМОГО СКРИПТА, а не переписываем строкой: разъехавшись
+	# с ним, тест снимал бы несуществующий откат и молча проверял не то.
+	var cd_key : String = String(n.get_script().get_script_constant_map()
+		.get("BUM_FEAST_KEY", ""))
+	_check(cd_key != "", "имя отката известно: «%s»" % cd_key)
+	var cds : Dictionary = n.get("_skill_cd")
+
+	# А ЧЕЛОВЕК — ЭТО ЛЮБОЙ ЧЕЛОВЕК. Откат снимаем перед каждым, иначе проверка
+	# меряет не список людей, а длину отката.
+	for tag in ["bum", "cop", "shaman", "swat"]:
+		cds.erase(cd_key)
 		_check(bool(n.call("_bum_feast", tag)), "%s — тоже человек" % tag)
+
+	# ЩИТОНОСЦА НЕ СЪЕСТЬ: щит и есть его правило, и `on_hit` у него отвечает
+	# лязгом — съеденный сквозь щит, он остался бы на экране, а Дракула получил
+	# бы жир из ничего.
+	cds.erase(cd_key)
+	var shield := Area2D.new()
+	shield.set_script(load("res://scripts/police_swat.gd"))
+	shield.set("kind", "shield")
+	sp.add_child(shield)
+	await process_frame
+	_check(not bool(n.call("_bum_feast", "swat", shield)),
+		"а щитоносца — не съесть")
 	_check(not bool(n.call("_bum_feast", "safe")), "а сейф — не человек")
 	(e["game"] as Node).queue_free()
 	await process_frame
