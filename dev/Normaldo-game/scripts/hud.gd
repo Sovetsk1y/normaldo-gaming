@@ -5515,19 +5515,32 @@ func _build_reward_card(vbox: VBoxContainer, lvl: int, cw: float, skin_id: Strin
 	card.mouse_filter = Control.MOUSE_FILTER_PASS
 	vbox.add_child(card)
 
-	# Rounded background — YELLOW only for the next level, green claimed, grey else.
-	var sb := StyleBoxFlat.new()
+	# ── КАРТОЧКА В ЯЗЫКЕ ИГРЫ: ТЁМНОЕ ТЕЛО И ЦВЕТНАЯ ОБВОДКА ─────────────────
+	# Так собраны все остальные панели игры (`_detail_panel` → `UiKit.rounded`):
+	# тёмная подложка, тонкая рамка, цвет — в рамке.
+	#
+	# Здесь же стояли три СПЛОШНЫЕ заливки — зелёная, жёлтая, серая. Рядом друг с
+	# другом они читались как таблица из другой игры: ярче всего в списке была не
+	# та награда, до которой игрок идёт, а те, что он давно забрал, — сплошной
+	# зелёный тянет глаз сильнее любой рамки.
+	#
+	# Теперь тело у всех трёх одинаково тёмное, а состояние сказано рамкой:
+	# золотая — «следующая», приглушённо-зелёная — «взята», серая — «потом».
+	var fill : Color
+	var edge : Color
 	if claimed:
-		sb.bg_color = Color(0.30, 0.45, 0.20, 0.95)
+		fill = Color(0.08, 0.12, 0.07, 0.92)
+		edge = Color(0.34, 0.55, 0.26, 0.95)
 	elif is_next:
-		sb.bg_color = Color(0.86, 0.66, 0.12, 0.97)
+		fill = Color(0.16, 0.12, 0.03, 0.95)
+		edge = Color(1.00, 0.78, 0.20, 0.98)
 	else:
-		sb.bg_color = Color(0.32, 0.34, 0.36, 0.85)
-	sb.corner_radius_top_left = 12; sb.corner_radius_top_right = 12
-	sb.corner_radius_bottom_left = 12; sb.corner_radius_bottom_right = 12
+		fill = Color(0.07, 0.06, 0.09, 0.90)
+		edge = Color(0.28, 0.26, 0.32, 0.90)
 	var pw := cw - PAD_L - PAD_R
 	var panel := Panel.new()
-	panel.add_theme_stylebox_override("panel", sb)
+	panel.add_theme_stylebox_override("panel",
+		UiKit.rounded(fill, 12, edge, 3 if is_next else 2))
 	panel.size = Vector2(pw, CH); panel.position = Vector2(PAD_L, 0.0)
 	panel.mouse_filter = Control.MOUSE_FILTER_PASS
 	card.add_child(panel)
@@ -5569,34 +5582,45 @@ func _build_reward_card(vbox: VBoxContainer, lvl: int, cw: float, skin_id: Strin
 		_:
 			_reward_pair(panel, Vector2(8.0, row_y), pw - 16.0, TOKEN_TEXTURE, t_rwd, DOLLAR_TEXTURE, d_rwd, icon_sz)
 
+	# ── «ВЗЯТО» — УГЛОВАЯ ПЕЧАТЬ, А НЕ НАДПИСЬ ПОПЕРЁК КАРТОЧКИ ──────────────
+	# Здесь была подпись «Награда получена», растянутая на всю карточку и
+	# выровненная по центру, — то есть ровно поверх иконок. На скриншоте это и
+	# видно: буквы лежат на монете и на долларе, и не читается ни то ни другое.
+	#
+	# Печать в свободном углу говорит то же самое и ничего не закрывает — и это
+	# уже знакомый игроку приём: справа тем же способом висит номер уровня.
 	if claimed:
-		panel.modulate = Color(1, 1, 1, 0.55)
-		var got := _strong_label("Награда получена", 13, Color(0.85, 0.85, 0.85), 3)
-		got.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; got.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		got.size = Vector2(pw, CH); got.position = Vector2(PAD_L, 0.0)
-		card.add_child(got)
+		panel.modulate = Color(1, 1, 1, 0.78)
+		_corner_stamp(card, Vector2(PAD_L - 4.0, -6.0), Vector2(58.0, 22.0),
+			"ВЗЯТО", Color(0.22, 0.46, 0.16, 0.98), 7.0)
 
-	# Red "lvl.N" badge, rotated, sticking out of the top-right corner.
+	# Красная плашка «lvl.N» — вылезает из правого верхнего угла.
+	_corner_stamp(card, Vector2(PAD_L + pw - 44.0, -6.0), Vector2(56.0, 24.0),
+		"lvl.%d" % lvl, Color(0.80, 0.10, 0.10, 0.98), -8.0)
+	return card
+
+# Косая плашка, вылезающая из угла карточки. Их две — номер уровня и «ВЗЯТО», —
+# и собраны они одинаково: держать это двумя копиями значит развести их
+# скруглением при первой же правке.
+func _corner_stamp(card: Control, pos: Vector2, size: Vector2, text: String,
+		bg: Color, tilt_deg: float) -> void:
 	var badge := Control.new()
-	badge.size = Vector2(56.0, 24.0)
-	badge.position = Vector2(PAD_L + pw - 44.0, -6.0)
-	badge.pivot_offset = badge.size * 0.5
-	badge.rotation = deg_to_rad(-8.0)
+	badge.size         = size
+	badge.position     = pos
+	badge.pivot_offset = size * 0.5
+	badge.rotation     = deg_to_rad(tilt_deg)
 	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(badge)
-	var bsb := StyleBoxFlat.new()
-	bsb.bg_color = Color(0.80, 0.10, 0.10, 0.98)
-	bsb.corner_radius_top_left = 6; bsb.corner_radius_top_right = 6
-	bsb.corner_radius_bottom_left = 6; bsb.corner_radius_bottom_right = 6
 	var bp := Panel.new()
-	bp.add_theme_stylebox_override("panel", bsb)
-	bp.size = badge.size; bp.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bp.add_theme_stylebox_override("panel",
+		UiKit.rounded(bg, 6, Color(0.06, 0.05, 0.08, 0.95), 2))
+	bp.size = size; bp.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	badge.add_child(bp)
-	var bl := _strong_label("lvl.%d" % lvl, 13, Color(1, 1, 1), 3)
-	bl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; bl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	bl.size = badge.size; bl.position = Vector2.ZERO
+	var bl := _strong_label(text, 13, Color(1, 1, 1), 3)
+	bl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	bl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	bl.size = size; bl.position = Vector2.ZERO
 	badge.add_child(bl)
-	return card
 
 # Заголовок + пояснение справа от иконки награды. Общий для жира, резиста и
 # венца: у всех трёх карточка это «картинка слева, два текста справа», и три

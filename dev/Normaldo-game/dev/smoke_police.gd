@@ -23,7 +23,7 @@ const FIRE_W : float = 59.0
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 32
+const EXPECTED_CHECKS : int = 40
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -46,7 +46,134 @@ func _initialize() -> void:
 	await _test_gun_under_belly()
 	print("── Сватовец смотрит туда, куда стреляет ──")
 	await _test_swat_mirror()
+	print("── Собака: сперва на цепи, потом с пастью ──")
+	await _test_dog_leash_and_jaws()
+	print("── Бой отпускает сцену, когда её вынули ──")
+	await _test_restart_during_fight()
 	_finish()
+
+# ── ЦЕПЬ И ПАСТЬ ───────────────────────────────────────────────────────────
+# Три кадра, и каждый что-то ГОВОРИТ:
+#   с цепью    — капитан её ещё держит, лететь она пока никуда не может;
+#   без цепи   — сорвалась, началась атака;
+#   с пастью   — вот сейчас укусит.
+#
+# Ломается это тихо и целиком: перепутанные кадры выглядят просто как «собака
+# летит», и понять, что пропало обещание, можно только зная, что оно было.
+func _test_dog_leash_and_jaws() -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	get_root().get_tree().paused = false
+	var mark := Node2D.new()
+	mark.position = Vector2(200.0, 215.0)
+	game.add_child(mark)
+
+	var dog := Area2D.new()
+	dog.set_script(DOG)
+	dog.set("target", mark)
+	dog.set("owner_node", mark)
+	dog.position = Vector2(880.0, 215.0)
+	game.add_child(dog)
+	await process_frame
+	var born : Vector2 = dog.position
+	_check(_dog_frame(dog) == "leashed.png",
+		"родилась на цепи: %s" % _dog_frame(dog))
+
+	# И С МЕСТА НЕ ДВИГАЕТСЯ, пока её держат. Собака, поехавшая на цепи, —
+	# это уже не «держит», это «ведёт на поводке».
+	await _wait(0.2)
+	_check(dog.position.distance_to(born) < 1.0,
+		"и пока держат, с места не двигается: %s" % dog.position)
+
+	# Сорвалась — цепи больше нет.
+	await _wait(0.6)
+	_check(_dog_frame(dog) == "run.png" or _dog_frame(dog) == "bite.png",
+		"сорвалась — кадр без цепи: %s" % _dog_frame(dog))
+
+	# Вплотную к цели — пасть. Ставим её руками: ждать, пока она сама долетит до
+	# неподвижной метки, значит проверять её геометрию, а не пасть.
+	dog.set("_vel", Vector2.ZERO)
+	dog.position = mark.position + Vector2(40.0, 0.0)
+	await _wait(0.1)
+	_check(_dog_frame(dog) == "bite.png",
+		"вплотную к цели раскрыла пасть: %s" % _dog_frame(dog))
+
+	dog.position = mark.position + Vector2(400.0, 0.0)
+	await _wait(0.1)
+	_check(_dog_frame(dog) == "run.png",
+		"а отойдя — закрыла: %s" % _dog_frame(dog))
+
+	game.queue_free()
+	await process_frame
+
+# Имя файла кадра, который сейчас на собаке.
+func _dog_frame(dog: Node) -> String:
+	for c in dog.get_children():
+		if c is Sprite2D and (c as Sprite2D).texture != null:
+			return String((c as Sprite2D).texture.resource_path).get_file()
+	return "?"
+
+func _wait(sec: float) -> void:
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < int(sec * 1000.0):
+		get_root().get_tree().paused = false
+		await process_frame
+
+# ── «ЕЩЁ РАЗ» ПОСРЕДИ БОЯ ──────────────────────────────────────────────────
+# Игрок умирает на боссе и жмёт «ЕЩЁ РАЗ» — сцену вынимают из дерева прямо под
+# работающими актами. Акты боя это переживать обязаны: каждый из них корутина,
+# и проснуться вне дерева значит упасть на `get_tree()`.
+#
+# Падало это так: ждущая петля акта спрашивала «чиста ли арена» у боя, которого
+# уже нет. Ответ приходил «нет, не чисто» — потому что помощник сам видит, что
+# бой кончился, — петля заходила на новый круг и падала.
+#
+# Поэтому проверяется НЕ «нет ли ошибок» (их из скрипта не видно), а само
+# устройство: в обеих петлях `_alive()` спрашивается ПЕРВЫМ. Верни его назад — и
+# петля снова уйдёт на круг по мёртвому дереву.
+func _test_restart_during_fight() -> void:
+	var src := FileAccess.get_file_as_string("res://scripts/police_boss.gd")
+	var waits : Array = []
+	for line in src.split("\n"):
+		var s := String(line).strip_edges()
+		if s.begins_with("while ") and s.contains("_clear()"):
+			waits.append(s)
+	_check(waits.size() >= 2, "ждущих петель в бою: %d" % waits.size())
+	var guarded : int = 0
+	for s in waits:
+		if String(s).begins_with("while _alive()"):
+			guarded += 1
+	_check(guarded == waits.size(),
+		"и все спрашивают `_alive()` первым: %d из %d" % [guarded, waits.size()])
+
+	# А теперь то же самое вживую: бой поднят, сцену вынимают, дерево обязано
+	# пережить это и пустить следующую игру.
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	get_root().get_tree().paused = false
+	var normaldo : Node2D = game.get_node_or_null("Normaldo") as Node2D
+	var boss := Node2D.new()
+	boss.set_script(POLICE)
+	boss.call("setup", normaldo, game.get_node_or_null("Spawner"), game, true)
+	game.add_child(boss)
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 5000:
+		get_root().get_tree().paused = false
+		await process_frame
+	# Вынимаем сцену ровно так, как это делает `reload_current_scene`: сначала из
+	# дерева, и только потом на удаление.
+	get_root().remove_child(game)
+	var lived := [true]
+	for i in 90:
+		if get_root().get_tree() == null:
+			lived[0] = false
+			break
+		await process_frame
+	_check(lived[0], "дерево пережило вынутую посреди боя сцену")
+	game.queue_free()
+	await process_frame
 
 # ── ЗЕРКАЛО ПО ЦЕЛИ ────────────────────────────────────────────────────────
 # Боец нарисован смотрящим влево. Пока зеркала не было, Нормальдо мог зайти

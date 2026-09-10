@@ -68,9 +68,9 @@ const BEATS : Array = [
 	{ "id": "eat",    "big": "ЕШЬ ПИЦЦУ",          "small": "это очки и вес",          "limit": 22.0 },
 	{ "id": "dodge",  "big": "МУСОР — ОБЛЕТАЙ",    "small": "в него нельзя",           "limit": 14.0 },
 	{ "id": "fat",    "big": "ВЕС — ЭТО ЖИЗНИ",    "small": "полоса слева: удар съедает одну", "limit": 22.0 },
-	{ "id": "slow",   "big": "БЬЁТ НЕ ВСЁ",        "small": "банан не ударит, но занесёт", "limit": 16.0 },
+	{ "id": "slow",   "big": "БЬЁТ НЕ ВСЁ",        "small": "банан не ударит, но замедлит", "limit": 16.0 },
 	{ "id": "bonus",  "big": "А ЭТО — БОНУС",      "small": "часы замедлят мир, хватай", "limit": 16.0 },
-	{ "id": "dollar", "big": "ДОЛЛАР — НЕ ЕДА",    "small": "на них берут скины",      "limit": 14.0 },
+	{ "id": "dollar", "big": "СОБИРАЙ ДОЛЛАРЫ",    "small": "на них можно купить крутые скины", "limit": 14.0 },
 	{ "id": "skill",  "big": "ДВОЙНОЙ ТАП",        "small": "это способность скина",   "limit": 20.0 },
 	# ПОСЛЕДНИЙ ТАКТ НИЧЕГО НЕ ЖДЁТ. Условия у него нет вовсе — он висит свои три
 	# секунды и уходит: это не задание, а прощание. Заодно оно честно
@@ -98,6 +98,7 @@ var _layer   : CanvasLayer = null
 var _caption : Control     = null
 var _arrows  : Node2D      = null
 var _ring    : Control     = null
+var _dim     : ColorRect   = null
 
 var _skipped   : bool = false
 var _running   : bool = false
@@ -110,6 +111,10 @@ var _ate      : int  = 0
 var _got_buck : int  = 0
 var _was_hit  : bool = false
 var _fired    : bool = false
+# Сколько веса было В МОМЕНТ УДАРА. По нему и решается, что сказать вслед: на
+# нуле удар был смертельным и его простили, на любом другом — просто отнял вес.
+# Спрашивать Нормальдо задним числом нельзя — вес к тому времени уже другой.
+var _hit_fat_before : int = -1
 
 # ── Запуск ──────────────────────────────────────────────────────────────────
 # Зовёт HUD в начале первого забега. Возвращает узел, чтобы тест мог его
@@ -179,6 +184,7 @@ func _play(beat: Dictionary) -> void:
 	_got_buck = 0
 	_was_hit  = false
 	_fired    = false
+	_hit_fat_before = -1
 	_say(String(beat.get("big", "")), String(beat.get("small", "")))
 	await _serve(id)
 	if not _alive():
@@ -284,11 +290,37 @@ func _after(id: String) -> void:
 	match id:
 		"dodge":
 			_spawner.call("set_world_speed", 1.0)
-			if _was_hit:
-				_say("ПОТЕРЯЛ ВЕС", "в следующий раз облетай")
-			else:
+			if not _was_hit:
 				_say("ВОТ ТАК", "")
-			await _breath(1.4)
+				await _breath(1.4)
+				return
+			_say("ПОТЕРЯЛ ВЕС", "в следующий раз облетай")
+			await _breath(1.6)
+			if not _alive():
+				return
+			# ── ЧЕМ ЭТО КОНЧАЕТСЯ В НАСТОЯЩЕМ ЗАБЕГЕ ─────────────────────────
+			# В обучении умереть нельзя, и игрок об этом не знает. Удар, который
+			# ничего ему не стоил, учит ровно обратному тому, что нужно: «бьют —
+			# и ладно». Поэтому цену называем словами.
+			#
+			# Два разных случая, и врать нельзя ни в одном: на нулевом весе удар
+			# БЫЛ смертельным и его простили, на любом другом — просто отнял вес.
+			if _hit_fat_before <= 0:
+				_say("ТЫ ДОЛЖЕН БЫЛ УМЕРЕТЬ", "в обучении прощаем — но только раз")
+			else:
+				_say("ЭТО БЫЛА ЖИЗНЬ", "их у тебя столько, сколько веса")
+			await _breath(2.2)
+			if not _alive():
+				return
+			# ПРАВИЛО, А НЕ ДОКЛАД О ТЕКУЩЕМ ВЕСЕ. «Остался один череп» было бы
+			# враньём при любом весе, кроме нуля, — а сказать надо всем и один раз.
+			#
+			# И показать, ГДЕ это видно: слово «череп» без пальца, ткнутого в
+			# панель, — загадка, игрок ищет череп на себе, а он в углу экрана.
+			# Панель на пару секунд остаётся одна на затемнённом экране.
+			_say("КОГДА ОСТАНЕТСЯ ЧЕРЕП", "следующий удар будет последним")
+			_ring_fat_panel()
+			await _breath(2.6)
 
 # ── Слежка за игроком ───────────────────────────────────────────────────────
 
@@ -312,8 +344,9 @@ func _on_stats(_fat: int, pizza: int, _total: int) -> void:
 func _on_dollars(_count: int) -> void:
 	_got_buck += 1
 
-func _on_hit(_fat_before: int) -> void:
-	_was_hit = true
+func _on_hit(fat_before: int) -> void:
+	_was_hit        = true
+	_hit_fat_before = fat_before
 
 func _on_fired(_id: String) -> void:
 	_fired = true
@@ -465,6 +498,24 @@ func _hush() -> void:
 	if is_instance_valid(_arrows):
 		_arrows.queue_free()
 	_arrows = null
+	# Затемнение гаснет вместе с тем, ради чего его включали. Оставленное на
+	# экране после ухода подсказки, оно читается как поломка, а не как акцент.
+	if is_instance_valid(_dim):
+		_dim.queue_free()
+	_dim = null
+
+# ── ЗАТЕМНЕНИЕ НА ВРЕМЯ ПОКАЗА ПАНЕЛИ ──────────────────────────────────────
+# Рамка вокруг полосы веса рисуется поверх ЖИВОГО забега: фон едет, мимо летит
+# пицца, и взгляд к маленькой рамке в углу просто не идёт. На пару секунд экран
+# гасится — остаётся ровно то, на что показывают.
+#
+# Ввод затемнение НЕ ЕСТ (`MOUSE_FILTER_IGNORE`), и забег в эти секунды идёт
+# как шёл: отнять управление у игрока, пока он читает, значило бы уронить его на
+# мусор ровно за то, что он послушался.
+const DIM_IN   : float = 0.26
+const DIM_HOLD : float = 2.0
+const DIM_OUT  : float = 0.45
+const DIM_COL  : Color = Color(0.0, 0.0, 0.0, 0.66)
 
 # Рамка вокруг полосы веса в интерфейсе. Прямоугольник спрашивается У САМОГО
 # HUD: панель считается от размера экрана и ширины левого столбца, и выписанные
@@ -476,7 +527,29 @@ func _ring_fat_panel() -> void:
 	var r : Rect2 = hud.call("fat_panel_rect")
 	if r.size.x <= 1.0 or r.size.y <= 1.0:
 		return
+	_dim_screen()
 	_ring = TipCloud.ring(_layer, r)
+
+# Гаснет и само же возвращается. Своим твином, а не корутиной такта: такт может
+# кончиться раньше — игрок съест пиццу на первой секунде, — и затемнение,
+# привязанное к нему, осталось бы на экране висеть.
+func _dim_screen() -> void:
+	if _dim != null and is_instance_valid(_dim):
+		_dim.queue_free()
+	var vp := get_viewport().get_visible_rect().size
+	_dim = ColorRect.new()
+	_dim.color        = Color(DIM_COL.r, DIM_COL.g, DIM_COL.b, 0.0)
+	_dim.size         = vp
+	_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# ПОД всем, что тур уже поставил: подсказка и рамка обязаны остаться поверх
+	# затемнения, иначе гасится ровно то, ради чего его и включили.
+	_layer.add_child(_dim)
+	_layer.move_child(_dim, 0)
+	var tw := _dim.create_tween()
+	tw.tween_property(_dim, "color:a", DIM_COL.a, DIM_IN)
+	tw.tween_interval(DIM_HOLD)
+	tw.tween_property(_dim, "color:a", 0.0, DIM_OUT)
+	tw.tween_callback(_dim.queue_free)
 
 # Две стрелки над головой и под ней, качаются врозь: показывают ось, по которой
 # и ходит Нормальдо.

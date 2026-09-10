@@ -45,7 +45,7 @@ func _has_text(n: Node, s: String) -> bool:
 # Такт «веди пальцем» ждёт до двадцати секунд, «поешь» — до двадцати двух. Все
 # ожидания в тесте ставятся С ЗАПАСОМ ОТ ОБРАТНОГО: проверка обязана падать,
 # когда такт НЕ сдвинулся сам, а не когда он не успел.
-const EXPECTED_CHECKS : int = 44
+const EXPECTED_CHECKS : int = 49
 
 # Картинку грузить `preload`-ом можно: она ни на какие автолоады не смотрит.
 const MENU_LOGO_TEX := preload("res://assets/ui/menu/logo.png")
@@ -76,6 +76,8 @@ func _initialize() -> void:
 	await _test_menu_tour()
 	print("── Подсказки по поводу ──")
 	await _test_menu_tips()
+	print("── Подсветка панели гасит экран ──")
+	await _test_fat_panel_dim()
 	print("── Ничего выше третьей полосы ──")
 	await _test_lane_floor()
 	print("── Заставка запуска ──")
@@ -511,6 +513,40 @@ func _test_leading_tip() -> void:
 # ── Сам сценарий ────────────────────────────────────────────────────────────
 # Такт без слов — это пауза посреди игры, у которой игрок не понимает причины.
 # Такт без срока страховки — возможность зависнуть навсегда.
+# ── ПОДСВЕТКА ПАНЕЛИ ГАСИТ ЭКРАН ───────────────────────────────────────────
+# Рамка вокруг полосы веса рисуется поверх ЖИВОГО забега: фон едет, мимо летит
+# пицца, и взгляд к маленькой рамке в углу не идёт.
+#
+# Но забег в эти секунды продолжается, и потому затемнение обязано быть
+# СКВОЗНЫМ ДЛЯ ВВОДА и лежать ПОД подсказкой. Съевшее тап затемнение роняет
+# игрока на мусор ровно за то, что он послушался и стал читать; легшее поверх
+# гасит как раз то, ради чего его включили.
+func _test_fat_panel_dim() -> void:
+	var r : Array = await _fresh_game(true)
+	var game : Node = r[0]
+	var tut  : Node = r[2]
+	if tut == null:
+		_check(false, "обучение не завелось — затемнение проверить нечем")
+		game.queue_free()
+		await process_frame
+		return
+	tut.call("_ring_fat_panel")
+	await process_frame
+	var ring = tut.get("_ring")
+	var dim  = tut.get("_dim")
+	_check(ring != null and is_instance_valid(ring), "панель веса обведена")
+	_check(dim != null and is_instance_valid(dim), "и экран при этом затемнён")
+	if dim != null and is_instance_valid(dim):
+		var vp : Vector2 = get_root().get_visible_rect().size
+		var d := dim as Control
+		_check(d.size.x >= vp.x - 1.0 and d.size.y >= vp.y - 1.0,
+			"на весь экран: %s против %s" % [d.size, vp])
+		_check(d.mouse_filter == Control.MOUSE_FILTER_IGNORE,
+			"ввода не ест — забег в эти секунды идёт как шёл")
+		_check(d.get_index() == 0, "и лежит под подсказкой, а не поверх неё")
+	game.queue_free()
+	await process_frame
+
 func _test_script_sane() -> void:
 	var beats : Array = _beats()
 	_check(beats.size() >= 5, "тактов в сценарии: %d" % beats.size())

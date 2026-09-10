@@ -69,7 +69,23 @@ const SFX_PIZZA    := preload("res://assets/audio/super_pizza.mp3")
 
 # ── Размеры ─────────────────────────────────────────────────────────────────
 const COP_PX   : float = 150.0
-const RADIO_PX : float = 62.0
+# ── РАЦИЯ СТОИТ ТАК, КАК ЕЁ СОБРАЛ ХУДОЖНИК ────────────────────────────────
+# Прислана она отдельной картинкой вместе с уже собранным кадром «коп с рацией»
+# (parts cops/policeman.png). Собран он в натуральную величину обоих рисунков:
+# голова 341 px шириной, рация 161×298, и её центр стоит на (−195, +39) от
+# центра головы.
+#
+# Числа ниже — ровно это, переведённое в доли COP_PX (то есть ширины головы):
+# 298 × 150/341 ≈ 131 в высоту, смещение (−85.8, +17.2) px от центра рисунка
+# головы, а тот сидит на (+0.9, −12.8) от узла.
+#
+# До этого рация была ужата до 62 px и сдвинута на −63: она налезала боссу на
+# щёку и читалась не как «он говорит в рацию», а как деталь на лице.
+const RADIO_PX : float = 131.0
+# От УЗЛА, в долях COP_PX. Ставится по центру своего рисунка (`anchor_sprite`) —
+# иначе к смещению пришлось бы прибавлять ещё и то, насколько рисунок рации
+# сдвинут внутри своего кадра 500×500.
+const RADIO_POS : Vector2 = Vector2(-0.566, 0.029)
 # Капитан стоит У ПРАВОГО КРАЯ и никуда не двигается: он не боец, он штаб.
 # Отступ больше половины головы: ровно половина прижала бы её к самому краю, и
 # фуражка срезалась бы рамкой экрана.
@@ -228,7 +244,8 @@ func _ready() -> void:
 	_radio.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_radio.z_index        = 1
 	ItemSizing.fit_sprite_content(_radio, RADIO_PX)
-	_radio.position       = Vector2(-COP_PX * 0.42, COP_PX * 0.26)
+	ItemSizing.anchor_sprite(_radio, 0.5, 0.5)
+	_radio.position       = RADIO_POS * COP_PX
 	add_child(_radio)
 
 	_music = AudioStreamPlayer.new()
@@ -344,8 +361,16 @@ func _act_dog() -> void:
 				await get_tree().create_timer(0.22).timeout
 		# Ждём, пока ВСЯ волна отбегает своё. По арене, а не по сигналам: собак
 		# теперь несколько, и считать их по одному сигналу нечем.
+		# `_alive()` СТОИТ ПЕРВЫМ, и это не перестраховка. Ждущая петля просыпается
+		# каждый кадр, а «ЕЩЁ РАЗ» на экране смерти вынимает сцену из дерева между
+		# двумя её пробуждениями. `_dogs_clear()` в этот момент отвечает «нет, не
+		# чисто» — потому что сама видит, что боя больше нет, — петля заходит на
+		# новый круг и падает на `get_tree()`, которого уже нет.
+		#
+		# Спрашивать «чиста ли арена» у боя, которого нет, вообще нельзя: любой
+		# ответ будет враньём. Сначала выясняем, идём ли мы ещё.
 		var deadline : int = Time.get_ticks_msec() + DOG_WAVE_MAX_MS
-		while Time.get_ticks_msec() < deadline and not _dogs_clear():
+		while _alive() and Time.get_ticks_msec() < deadline and not _dogs_clear():
 			await get_tree().process_frame
 		if not _alive():
 			return
@@ -367,7 +392,10 @@ func _send_dog(pack: bool = false) -> void:
 	dog.set("target", _normaldo)
 	dog.set("owner_node", self)
 	dog.set("hunts", not pack)
-	dog.position = position + Vector2(-COP_PX * 0.4, COP_PX * 0.15)
+	# У НОГ, А НЕ ПОД ЛИЦОМ. Собака теперь висит на цепи почти полсекунды, и на
+	# прежнем месте (−0.40, +0.15) эта пауза проходила за кадром: точка лежит
+	# внутри головы капитана, а рядом с ней ещё и рука с рацией.
+	dog.position = position + Vector2(-COP_PX * 0.30, COP_PX * 0.62)
 	_game_root.add_child(dog)
 	_units.append(dog)
 	SCREEN_SHAKE.play(_game_root, 5.0, 3)
@@ -381,8 +409,9 @@ func _act_squad() -> void:
 	await _heli_drop([])
 	if not _alive():
 		return
+	# `_alive()` первым — по той же причине, что и у собак: см. `_act_dog`.
 	var deadline : int = Time.get_ticks_msec() + SQUAD_WAIT_MAX_MS
-	while Time.get_ticks_msec() < deadline and not _squad_clear():
+	while _alive() and Time.get_ticks_msec() < deadline and not _squad_clear():
 		await get_tree().process_frame
 
 # Вертолёт идёт через кадр над первой-второй полосой и роняет бойцов на

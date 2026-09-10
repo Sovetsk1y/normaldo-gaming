@@ -32,11 +32,14 @@ func _initialize() -> void:
 	# попадает «десятый уровень» у скина, который даже не куплен.
 	save.skin_progress = {}
 	# Немного истории у активного скина, чтобы в кадр попала строка статистики.
-	save.skin_progress["harry_potter"] = {"xp": 1, "level": 4, "mastery": 0, "runs": 37, "best": 412}
+	# Уровень скина берётся из аргументов: на четвёртом в кадр попадают только
+	# ещё не взятые награды, а как выглядит взятая — не видно вовсе.
+	var lvl : int = int(argv[4]) if argv.size() > 4 else 4
+	save.skin_progress["harry_potter"] = {"xp": 1, "level": lvl, "mastery": 0, "runs": 37, "best": 412}
 	save.skin_progress["pirate"]       = {"xp": 0, "level": 1, "mastery": 0, "runs": 0,  "best": 0}
 	save.owned_skins = ["classic", "viking", "tyson", "harry_potter"]
 	save.active_skin = "harry_potter"
-	save.skin_level  = 4
+	save.skin_level  = lvl
 
 	if detail == "cards" or detail == "cards_fat":
 		# Карточный вид: тот же экран, другой режим показа.

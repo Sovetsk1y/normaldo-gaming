@@ -29,10 +29,36 @@ extends Area2D
 # скина. Оба правила ниже расписаны там, где живут; вместе они говорят одно:
 # отбиться от неё нельзя, можно только уйти, и с каждой секундой уходить труднее.
 
-const DOG_TEX   := preload("res://assets/items/angry_dog.png")
+# ── ЧЕТЫРЕ КАДРА ДОБЕРМАНА ─────────────────────────────────────────────────
+# Собака у капитана НА ЦЕПИ, пока он её держит, и БЕЗ ЦЕПИ, когда сорвалась:
+# цепь — единственное, по чему видно, отпустил он её уже или ещё нет.
+#
+# И пасть. По умолчанию закрыта, а на подлёте к Нормальдо раскрывается — тем же
+# языком, что и сам Нормальдо, открывающий рот на пролетающую мимо пиццу. Пасть,
+# раскрытая всё время полёта, ничего не сообщает; раскрывшаяся за полметра до
+# игрока сообщает «сейчас укушу».
+const TEX_LEASHED := preload("res://assets/bosses/police/dog/leashed.png")
+const TEX_STRAIN  := preload("res://assets/bosses/police/dog/strain.png")
+const TEX_RUN     := preload("res://assets/bosses/police/dog/run.png")
+const TEX_BITE    := preload("res://assets/bosses/police/dog/bite.png")
 const SFX_BARK  := preload("res://assets/audio/dog.mp3")
 
 const DOG_PX : float = 72.0
+
+# ── СКОЛЬКО ОНА ВИСИТ НА ЦЕПИ ──────────────────────────────────────────────
+# Меньше полусекунды, и это не пауза ради красоты: за неё игрок успевает
+# ПРОЧИТАТЬ, откуда сейчас полетит. До сих пор собака появлялась уже в броске, и
+# первая волна читалась как «что-то прилетело справа».
+#
+# Внутри этой паузы она рвётся с цепи — кадр со раскрытой пастью, — и по нему
+# видно, что сейчас отпустят.
+const LEASH_T  : float = 0.42
+const STRAIN_AT: float = 0.20
+
+# На каком расстоянии от Нормальдо раскрывается пасть. Чуть больше её собственной
+# длины: пасть должна успеть раскрыться ДО того, как она поравняется с ним, а не
+# в момент касания.
+const OPEN_R : float = 96.0
 
 # ── ОНА РАЗГОНЯЕТСЯ ВСЁ ВРЕМЯ, ПОКА СПУЩЕНА ────────────────────────────────
 # Собака, идущая с одной скоростью, читается через два отскока: игрок понял темп
@@ -100,18 +126,32 @@ var _bounces  : int     = 0
 var _homing   : bool    = false   # последний заход — к хозяину
 var _sprite   : Sprite2D = null
 var _done     : bool    = false
+var _leashed  : bool    = true    # пока держат — с места не двигается
 
 func _ready() -> void:
 	collision_layer = 2
 	collision_mask  = 0
 	add_to_group("obstacle")
 	add_to_group("police_dog")
+	# ВЫШЕ ХОЗЯИНА. Капитан стоит на z=40, а собака выходит у его ног — на общем
+	# слое её просто не было видно, она целиком пряталась за его головой, и вся
+	# пауза на цепи проходила за кадром. Пролетая мимо него потом, она тоже
+	# обязана идти спереди: собака, ныряющая ему в затылок, читается как ошибка
+	# рисования.
+	z_index = 41
 
 	_sprite = Sprite2D.new()
-	_sprite.texture        = DOG_TEX
+	_sprite.texture        = TEX_RUN
 	_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_sprite.z_index        = 2
+	# МАСШТАБ И ОПОРА СЧИТАЮТСЯ ОДИН РАЗ, по бегущему кадру, и дальше не трогаются.
+	# Все четыре кадра нарисованы в одном поле 600×600 и в одном масштабе, так что
+	# их взаимная раскладка уже задана художником; пересчёт под каждый кадр
+	# отдельно ломал бы её — собака меняла бы размер и подпрыгивала ровно в тот
+	# момент, когда раскрывает пасть.
 	ItemSizing.fit_sprite_content(_sprite, DOG_PX)
+	ItemSizing.anchor_sprite(_sprite, 0.5, 0.5)
+	_sprite.texture        = TEX_LEASHED
 	add_child(_sprite)
 
 	var cs   := CollisionShape2D.new()
@@ -120,8 +160,41 @@ func _ready() -> void:
 	cs.shape  = rect
 	add_child(cs)
 
+	_hold_leash()
+
+# ── СНАЧАЛА НА ЦЕПИ, ПОТОМ БЕЗ ЦЕПИ ────────────────────────────────────────
+# Капитан её ДЕРЖИТ, и это видно: кадр с цепью, рывок с раскрытой пастью — и
+# только потом бросок, уже без цепи. Пауза короткая, её задача одна — дать
+# игроку прочитать, откуда сейчас полетит.
+func _hold_leash() -> void:
+	_bark()
+	await _wait(STRAIN_AT)
+	if not _running():
+		return
+	_set_frame(TEX_STRAIN)
+	await _wait(LEASH_T - STRAIN_AT)
+	if not _running():
+		return
+	# СОРВАЛАСЬ. Цепь остаётся у хозяина — с этого кадра её на собаке нет.
+	_leashed = false
+	_set_frame(TEX_RUN)
 	_aim_at_target()
 	_bark()
+
+# Жива ли и в дереве — между двумя `await` её могли убрать вместе со сценой.
+func _running() -> bool:
+	return is_instance_valid(self) and is_inside_tree() and not _done
+
+func _wait(sec: float) -> void:
+	var t0 := Time.get_ticks_msec()
+	while _running() and Time.get_ticks_msec() - t0 < int(sec * 1000.0):
+		await get_tree().process_frame
+
+# Смена кадра и ничего больше: масштаб с опорой поставлены в `_ready` по одному
+# общему кадру и пересчёту не подлежат.
+func _set_frame(tex: Texture2D) -> void:
+	if is_instance_valid(_sprite) and _sprite.texture != tex:
+		_sprite.texture = tex
 
 func _aim_at_target() -> void:
 	if not hunts:
@@ -137,7 +210,7 @@ func _aim_at_target() -> void:
 	_vel = (d.normalized() if d.length() > 1.0 else Vector2.LEFT) * _speed
 
 func _process(delta: float) -> void:
-	if _done:
+	if _done or _leashed:
 		return
 	# Разгон: курс держим, скорость добираем. Направление живёт в `_vel`, поэтому
 	# после каждой прибавки его надо ПЕРЕСОБРАТЬ по той же нормали — иначе
@@ -154,6 +227,11 @@ func _process(delta: float) -> void:
 		# Морда смотрит туда, куда летит: собака, летящая затылком вперёд,
 		# читается как брошенный предмет, а не как живое.
 		_sprite.flip_h = _vel.x > 0.0
+	# ── ПАСТЬ РАСКРЫВАЕТСЯ НА ПОДЛЁТЕ ────────────────────────────────────────
+	# Тем же языком, что и у самого Нормальдо: рот открывается на то, что летит
+	# мимо. Пасть, раскрытая весь полёт, не сообщает ничего — сообщает именно
+	# момент, когда она раскрылась.
+	_set_frame(TEX_BITE if _near_target() else TEX_RUN)
 
 	_eat_shots()
 
@@ -161,6 +239,11 @@ func _process(delta: float) -> void:
 		_check_home()
 		return
 	_bounce_off_walls()
+
+func _near_target() -> bool:
+	if not is_instance_valid(target):
+		return false
+	return global_position.distance_to(target.global_position) <= OPEN_R
 
 # ── ЛОВИТ ЧУЖИЕ СНАРЯДЫ ────────────────────────────────────────────────────
 # Всё, что вылетело из рук Нормальдо, гаснет у неё в зубах. Группа маленькая —
