@@ -27,10 +27,28 @@ func _tut() -> GDScript:
 func _beats() -> Array:
 	return _tut().get_script_constant_map().get("BEATS", [])
 
+# Есть ли ГДЕ-НИБУДЬ ВНУТРИ такая надпись. Облачко собирается из вложенных
+# узлов, и спрашивать про подпись у самого облачка бесполезно.
+func _has_text(n: Node, s: String) -> bool:
+	if n == null:
+		return false
+	for c in n.get_children():
+		# У большинства узлов свойства `text` нет вовсе, и `get` вернёт null —
+		# приводить его к строке нельзя, это уже не проверка, а ошибка в обходе.
+		var t = c.get("text")
+		if t is String and t == s:
+			return true
+		if _has_text(c, s):
+			return true
+	return false
+
 # Такт «веди пальцем» ждёт до двадцати секунд, «поешь» — до двадцати двух. Все
 # ожидания в тесте ставятся С ЗАПАСОМ ОТ ОБРАТНОГО: проверка обязана падать,
 # когда такт НЕ сдвинулся сам, а не когда он не успел.
-const EXPECTED_CHECKS : int = 40
+const EXPECTED_CHECKS : int = 44
+
+# Картинку грузить `preload`-ом можно: она ни на какие автолоады не смотрит.
+const MENU_LOGO_TEX := preload("res://assets/ui/menu/logo.png")
 
 var _fails  : int = 0
 var _checks : int = 0
@@ -394,18 +412,44 @@ func _test_splash() -> void:
 	# окажется в другом. Ловим последнее её положение перед тем, как заставка
 	# себя уберёт.
 	var last_logo := Vector2.INF
+	var logo_node : Control = null
+	# ДВУХ НАДПИСЕЙ НА ЭКРАНЕ НЕ БЫВАЕТ. Пока копия заставки едет из центра, своя
+	# надпись меню обязана быть спрятана: сквозь гаснущее чёрное видны обе, и
+	# главная встречает игрока двоящимся логотипом.
+	var doubled : bool = false
 	var t0 := Time.get_ticks_msec()
 	while is_instance_valid(sp) and Time.get_ticks_msec() - t0 < 9000:
 		get_root().get_tree().paused = false
 		var lg = sp.get("_logo")
 		if lg != null and is_instance_valid(lg):
-			last_logo = (lg as Control).position
+			logo_node = lg as Control
+			last_logo = logo_node.position
+			var own = hud.get("_menu_logo")
+			if own != null and is_instance_valid(own) and own != lg \
+					and (own as CanvasItem).visible:
+				doubled = true
 		await process_frame
+	_check(not doubled, "пока заставка ведёт надпись, второй на экране нет")
 	_check(not is_instance_valid(sp),
 		"и ушла сама за %.1f c" % [(Time.get_ticks_msec() - t0) / 1000.0])
 	var home : Vector2 = (hud.call("menu_logo_rect") as Rect2).position
 	_check(last_logo != Vector2.INF and last_logo.distance_to(home) < 4.0,
 		"а логотип приехал на место меню'шного: %s против %s" % [last_logo, home])
+
+	# НАДПИСЬ НЕ ПОДМЕНИЛАСЬ, А ОСТАЛАСЬ. Меню обязано забрать узел заставки
+	# себе: две одинаковые надписи на одном месте совпадают только на слово, а
+	# на телефоне с островком у слоёв разные системы координат — и подмена видна
+	# прыжком ровно на величину отступа.
+	_check(logo_node != null and is_instance_valid(logo_node)
+			and hud.get("_menu_logo") == logo_node,
+		"меню забрало надпись заставки себе, а не завело вторую")
+	var logos : int = 0
+	var ov = hud.get("_menu_overlay")
+	if ov != null and is_instance_valid(ov):
+		for c in (ov as Node).get_children():
+			if c is TextureRect and (c as TextureRect).texture == MENU_LOGO_TEX:
+				logos += 1
+	_check(logos == 1, "и на главной ровно одна надпись, а не две (их %d)" % logos)
 	game.queue_free()
 	await process_frame
 
@@ -452,6 +496,10 @@ func _test_leading_tip() -> void:
 			hit = b
 	_check(wide == 0, "кнопки во весь экран у неё нет — смахнуть нечем")
 	_check(hit != null, "а кнопка стоит ровно на подсвеченной зоне")
+	# И НЕ ОБЕЩАЕТ ТОГО, ЧЕГО НЕ УМЕЕТ. «ПОНЯТНО» под текстом читается как «ткни
+	# сюда, и я закроюсь», а закрыться она может ровно одним способом.
+	_check(not _has_text(tour.get("_body") as Node, "ПОНЯТНО"),
+		"«ПОНЯТНО» на ней не написано — закрывать её нечем, кроме зоны")
 	if hit != null:
 		hit.pressed.emit()
 		await process_frame

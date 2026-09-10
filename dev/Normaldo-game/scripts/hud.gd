@@ -2166,9 +2166,10 @@ func _attach_canvas_badge(parent: Button, visible_on_start: bool) -> TextureRect
 
 # ── Logo ─────────────────────────────────────────────────────────────────────
 
-func _build_menu_logo(vp: Vector2) -> void:
-	# New SVG-derived logo is 4096×810 with anti-aliased Figma rendering — must
-	# downscale, so use LINEAR filter to keep edges smooth instead of jagged.
+# Где на главной стоит логотип. Считается отдельно от постройки, потому что на
+# это же место заставка ставит СВОЙ узел (`adopt_splash_logo`), а два счёта
+# одного места разъехались бы на первом же экране другой формы.
+func _menu_logo_box(vp: Vector2) -> Rect2:
 	# Width set in CANVAS pixels (~58 % of canvas) then scaled to viewport so
 	# the size is consistent on every device.
 	var src_w : float = float(MENU_LOGO_TEX.get_width())
@@ -2178,23 +2179,84 @@ func _build_menu_logo(vp: Vector2) -> void:
 	var scale_y : float = vp.y / MENU_CANVAS_H
 	var logo_w : float = MENU_LOGO_W_CANVAS * scale_x
 	var logo_h : float = MENU_LOGO_W_CANVAS * aspect * scale_x  # keep aspect by source ratio
+	return Rect2(
+		Vector2((vp.x - logo_w) * 0.5, MENU_LOGO_Y_CANVAS * scale_y + 30.0),
+		Vector2(logo_w, logo_h))
+
+func _build_menu_logo(vp: Vector2) -> void:
+	# New SVG-derived logo is 4096×810 with anti-aliased Figma rendering — must
+	# downscale, so use LINEAR filter to keep edges smooth instead of jagged.
+	var box := _menu_logo_box(vp)
 	var logo := TextureRect.new()
 	logo.texture             = MENU_LOGO_TEX
 	logo.stretch_mode        = TextureRect.STRETCH_SCALE
 	logo.expand_mode         = TextureRect.EXPAND_IGNORE_SIZE
 	logo.custom_minimum_size = Vector2.ZERO
-	logo.size                = Vector2(logo_w, logo_h)
-	logo.position            = Vector2((vp.x - logo_w) * 0.5, MENU_LOGO_Y_CANVAS * scale_y + 30)
+	logo.size                = box.size
+	logo.position            = box.position
 	logo.texture_filter      = CanvasItem.TEXTURE_FILTER_LINEAR
 	logo.mouse_filter        = Control.MOUSE_FILTER_IGNORE
 	_menu_overlay.add_child(logo)
 	_menu_logo = logo
 
-# ГДЕ НА ЭКРАНЕ ЛОГОТИП МЕНЮ. Спрашивает заставка: она рисует свою копию
-# логотипа поверх чёрного и гаснет вместе с ним — под ней остаётся НАСТОЯЩИЙ
-# логотип на том же месте, и переход выходит без единого движения. Числа
-# заставке не переписываются: раскладка меню считается от размера экрана, и
-# копия этих чисел разъехалась бы на первом же телефоне другой формы.
+# ── ПОСЛЕ ЗАСТАВКИ НАДПИСЬ НА ГЛАВНОЙ — ТА ЖЕ САМАЯ ─────────────────────────
+# Заставка не гасит свой логотип, а ОТДАЁТ его меню: узел переезжает сюда и
+# остаётся жить на главной. Своя копия меню при этом убирается — на экране
+# ровно одна надпись, и это та, которую игрок уже видел на чёрном.
+#
+# Раньше их было две, и совпасть пиксель в пиксель они были обязаны на слово:
+# разные слои и разные системы координат — у меню поверх стоит отступ под
+# островок, у заставки его нет. На телефоне с островком подмена выдавала себя
+# прыжком, и ровно на тех телефонах, ради которых отступ и заводился.
+#
+# Одному узлу совпадать не с чем.
+#
+# Меню всё же строит свою надпись само: заставка играет один раз за запуск, а
+# в меню возвращаются после каждого забега — без своей копии главная осталась
+# бы с этого момента без логотипа.
+#
+# На время заставки своя надпись ПРЯЧЕТСЯ (`menu_logo_shown`): сквозь гаснущее
+# чёрное иначе видно сразу две — одна ещё едет из центра, вторая уже стоит на
+# месте. Именно это двоение и было видно на главной.
+func menu_logo_shown(on: bool) -> void:
+	if is_instance_valid(_menu_logo):
+		_menu_logo.visible = on
+
+func adopt_splash_logo(node: TextureRect) -> void:
+	# Меню могло пересобраться, пока заставка играла, — тогда свой логотип у него
+	# уже новый, и отдавать нечего: приезжий узел просто уходит.
+	if node == null or not is_instance_valid(node):
+		return
+	if _menu_overlay == null or not is_instance_valid(_menu_overlay):
+		node.queue_free()
+		return
+	var p := node.get_parent()
+	if p != null:
+		p.remove_child(node)
+	# Своя копия уходит НА МЕСТЕ, а не в очередь: место в слое нужно занять
+	# приезжим тем же самым, иначе надпись уедет поверх соседей.
+	var idx : int = -1
+	if is_instance_valid(_menu_logo) and _menu_logo != node:
+		idx = _menu_logo.get_index()
+		_menu_overlay.remove_child(_menu_logo)
+		_menu_logo.queue_free()
+	var box := _menu_logo_box(get_viewport().get_visible_rect().size)
+	node.position     = box.position
+	node.size         = box.size
+	node.scale        = Vector2.ONE
+	node.modulate     = Color(1, 1, 1, 1)
+	node.visible      = true
+	node.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_menu_overlay.add_child(node)
+	if idx >= 0:
+		_menu_overlay.move_child(node, idx)
+	_menu_logo = node
+
+# ГДЕ НА ЭКРАНЕ ЛОГОТИП МЕНЮ. Спрашивает заставка: она ведёт свою надпись из
+# центра чёрного экрана сюда, а доехав — отдаёт её меню насовсем
+# (`adopt_splash_logo`). Числа заставке не переписываются: раскладка меню
+# считается от размера экрана, и копия этих чисел разъехалась бы на первом же
+# телефоне другой формы.
 func menu_logo_rect() -> Rect2:
 	if is_instance_valid(_menu_logo):
 		return _menu_logo.get_global_rect()
