@@ -201,6 +201,7 @@ func setup(hud: Node) -> void:
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	layer = 90
+	SafeArea.apply(self)
 	_read_live_geometry()
 	_snapshot  = SkinMetrics.layout_snapshot()
 	_item_snap = ITEM_TWEAKS.snapshot()

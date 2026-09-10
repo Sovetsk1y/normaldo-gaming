@@ -726,6 +726,7 @@ func _show_boss_banner() -> void:
 	var vp := get_viewport_rect()
 
 	var cl := CanvasLayer.new()
+	SafeArea.apply(cl)
 	cl.layer = 99
 	_game_root.add_child(cl)
 

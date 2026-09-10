@@ -791,6 +791,7 @@ func _finale() -> void:
 func _show_banner() -> void:
 	var vp := get_viewport_rect().size
 	var cl := CanvasLayer.new()
+	SafeArea.apply(cl)
 	cl.layer = 99
 	_game_root.add_child(cl)
 

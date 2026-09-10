@@ -771,6 +771,7 @@ func _show_tutorial() -> void:
 	_clear_ui()
 	var vp := get_viewport_rect().size
 	_ui = CanvasLayer.new()
+	SafeArea.apply(_ui)
 	_ui.layer = 50
 	add_child(_ui)
 

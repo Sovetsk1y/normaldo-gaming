@@ -345,6 +345,7 @@ func _show_speech() -> void:
 func _show_banner() -> void:
 	var vp := get_viewport_rect().size
 	var cl := CanvasLayer.new()
+	SafeArea.apply(cl)
 	cl.layer = 99
 	cl.add_to_group("club_fx")
 	_game_root.add_child(cl)
@@ -1137,6 +1138,7 @@ const BAR_H : float = 30.0
 func _build_bars() -> void:
 	var vp := get_viewport_rect().size
 	_bar_layer = CanvasLayer.new()
+	SafeArea.apply(_bar_layer)
 	_bar_layer.layer = 60
 	_bar_layer.add_to_group("club_fx")
 	_game_root.add_child(_bar_layer)

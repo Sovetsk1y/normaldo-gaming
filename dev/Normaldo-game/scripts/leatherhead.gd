@@ -376,6 +376,7 @@ func _show_speech() -> void:
 func _show_banner() -> void:
 	var vp := get_viewport_rect().size
 	var cl := CanvasLayer.new()
+	SafeArea.apply(cl)
 	cl.layer = 99
 	_game_root.add_child(cl)
 	var dim := ColorRect.new()
@@ -1109,6 +1110,7 @@ const SHELL_H : float = 26.0
 func _build_shells() -> void:
 	var vp := get_viewport_rect().size
 	_shell_layer = CanvasLayer.new()
+	SafeArea.apply(_shell_layer)
 	_shell_layer.layer = 60
 	_game_root.add_child(_shell_layer)
 	var total : float = 3.0 * SHELL_W + 2.0 * 8.0

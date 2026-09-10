@@ -43,6 +43,7 @@ static func show(host: Node, root: Node, text: String, boss_w: float,
 		return
 	var vp : Vector2 = host.get_viewport_rect().size
 	var cl := CanvasLayer.new()
+	SafeArea.apply(cl)
 	cl.layer = LAYER
 	root.add_child(cl)
 

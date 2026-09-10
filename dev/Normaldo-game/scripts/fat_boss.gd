@@ -208,6 +208,7 @@ func _ready() -> void:
 		_normaldo.fat_boss_loot_collected.connect(_on_loot_collected)
 
 	_ui = CanvasLayer.new()
+	SafeArea.apply(_ui)
 	_ui.layer = 50
 	add_child(_ui)
 

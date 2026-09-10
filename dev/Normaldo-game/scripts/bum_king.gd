@@ -837,6 +837,7 @@ func _intro() -> void:
 # одна рейка, у пирата пять, и по длине полосы сразу видно, кто вышел.
 func _build_bars() -> void:
 	_bars_root = CanvasLayer.new()
+	SafeArea.apply(_bars_root)
 	_bars_root.layer = BAR_Z
 	_game_root.add_child(_bars_root)
 	# Подложка кладётся ПЕРВОЙ и живёт отдельно от реек: раскладка реек
@@ -1770,6 +1771,7 @@ func _caption(text: String, col: Color) -> void:
 	l.position             = Vector2(0.0, BAR_Y + BAR_SEG_H + 38.0)
 	l.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	var lay := CanvasLayer.new()
+	SafeArea.apply(lay)
 	lay.layer = BAR_Z + 1
 	lay.add_child(l)
 	_game_root.add_child(lay)

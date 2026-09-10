@@ -23,6 +23,7 @@ config/main_scene="res://scenes/game.tscn"
 [autoload]
 
 Logger="*res://scripts/logger.gd"
+SafeArea="*res://scripts/safe_area.gd"
 SaveData="*res://scripts/save_data.gd"
 SkinRegistry="*res://scripts/skin_registry.gd"
 SkinSkills="*res://scripts/skin_skills.gd"

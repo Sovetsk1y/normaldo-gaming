@@ -664,6 +664,7 @@ func _update_pack_fx(delta: float) -> void:
 func _build_tap_prompt() -> void:
 	_clear_ui()
 	_ui = CanvasLayer.new()
+	SafeArea.apply(_ui)
 	_ui.layer = 50
 	add_child(_ui)
 	_tap_lbl = TAP_PROMPT.new()

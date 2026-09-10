@@ -354,6 +354,10 @@ var _fps_label : Label = null
 
 func _ready() -> void:
 	await get_tree().process_frame
+	# Островок и полоска «домой»: весь интерфейс уезжает в безопасный
+	# прямоугольник целиком, вместе с экранами, которые к нему подцепляются
+	# детьми (лидеры, задания, настройки). См. scripts/safe_area.gd.
+	SafeArea.apply(self)
 	_btn_sfx = AudioStreamPlayer.new()
 	var _btn_stream := load("res://assets/audio/button.mp3") as AudioStreamMP3
 	if _btn_stream:
@@ -6231,6 +6235,7 @@ func _start_game() -> void:
 	_show_run_intro_quests()
 	if DevFlags.ENABLED and DevFlags.TOOLBOX:
 		_build_dev_collisions_btn()
+		_build_dev_safe_btn()
 
 # Throw-and-jump intro:
 #   1. Normaldo spawns the thrown remote at his hand + the "ahh" emote pop.
@@ -6367,6 +6372,7 @@ const DIALOG_LAYER   : int = 140
 
 func _modal_layer(idx: int) -> CanvasLayer:
 	var cl := CanvasLayer.new()
+	SafeArea.apply(cl)
 	cl.layer        = idx
 	cl.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(cl)
@@ -6781,7 +6787,7 @@ const DEV_GAP : float = 6.0
 # накрыла её собой — кнопки в игре не было вовсе.
 #
 # Занято:
-#   1 — мутаген      4 — «БОССЫ»
+#   1 — мутаген      4 — «БОССЫ»     7 — «ОСТРОВ»
 #   2 — бессмертие   5 — «ФЗ» (только в кампании)
 #   3 — коллизии     6 — «МИНИ»
 #
@@ -6930,6 +6936,83 @@ const MINI_ICONS : Dictionary = {
 	"croc":       preload("res://assets/bosses/leatherhead/idle.png"),
 	"swat":       preload("res://assets/bosses/police/swat.png"),
 }
+
+# ── Дев-чип: ПОКАЗАТЬ ОСТРОВОК ───────────────────────────────────────────────
+# Островок есть только на устройстве, а разметку правят на настольной машине.
+# Проверка «собери, залей в TestFlight, посмотри» делается один раз, а потом
+# перестаёт делаться, — поэтому островок умеет включаться прямо здесь.
+#
+# Сторон ДВЕ, и обе нужны: игра разрешает поворот в любую сторону
+# (`window/handheld/orientation=4`), и островок оказывается то слева, то справа.
+# Проверять одну сторону — это проверить половину.
+#
+# Числа — с айфона 15/16 Pro в альбомной: вырез 59 pt из 852 pt ширины даёт
+# около 66 пикселей холста, полоска «домой» — около 18 по высоте.
+const SAFE_SIM : Array = [
+	[Vector4.ZERO,                  "ОСТРОВ"],
+	[Vector4(66.0, 0.0, 0.0, 18.0), "ОСТР◀"],
+	[Vector4(0.0, 0.0, 66.0, 18.0), "ОСТР▶"],
+]
+var _safe_btn      : Node2D      = null
+var _safe_sim_idx  : int         = 0
+var _safe_sim_deco : CanvasLayer = null
+
+func _build_dev_safe_btn() -> void:
+	_safe_btn = _dev_chip("ОСТРОВ", Color(0.55, 0.85, 1.00), _cycle_safe_sim)
+	_safe_btn.position = _dev_col_pos(7)
+	add_child(_safe_btn)
+
+func _cycle_safe_sim() -> void:
+	_play_btn_sfx()
+	_safe_sim_idx = (_safe_sim_idx + 1) % SAFE_SIM.size()
+	var step : Array = SAFE_SIM[_safe_sim_idx]
+	SafeArea.simulate(step[0] as Vector4)
+	# Подпись живёт внутри чипа; ищем её, а не храним второй ссылкой — чип
+	# собирается общей `_dev_chip`, и лишнее поле разошлось бы с ней.
+	if is_instance_valid(_safe_btn):
+		for c in _safe_btn.get_children():
+			if c is Label:
+				(c as Label).text = String(step[1])
+	_draw_safe_sim()
+
+# Нарисованное железо. Слой НЕ берёт отступ — он и показывает то место, которого
+# отступ избегает; взяв отступ, он нарисовал бы островок внутри безопасной
+# области, то есть ровно наоборот.
+func _draw_safe_sim() -> void:
+	if is_instance_valid(_safe_sim_deco):
+		_safe_sim_deco.queue_free()
+	_safe_sim_deco = null
+	var inset : Vector4 = SAFE_SIM[_safe_sim_idx][0]
+	if inset == Vector4.ZERO:
+		return
+	var vp := get_viewport().get_visible_rect().size
+	_safe_sim_deco = CanvasLayer.new()
+	_safe_sim_deco.layer = 200
+	get_parent().add_child(_safe_sim_deco)
+
+	# Отъеденные поля — прозрачной краснотой: видно, что интерфейс туда не лезет.
+	for band in [
+		Rect2(0.0, 0.0, inset.x, vp.y),
+		Rect2(vp.x - inset.z, 0.0, inset.z, vp.y),
+		Rect2(0.0, vp.y - inset.w, vp.x, inset.w),
+	]:
+		if (band as Rect2).size.x <= 0.0 or (band as Rect2).size.y <= 0.0:
+			continue
+		var r := ColorRect.new()
+		r.color        = Color(1.0, 0.25, 0.25, 0.30)
+		r.position     = (band as Rect2).position
+		r.size         = (band as Rect2).size
+		r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_safe_sim_deco.add_child(r)
+
+	# Сам островок — чёрная пилюля у того края, с которого отъели.
+	var pill := ColorRect.new()
+	pill.color        = Color(0.0, 0.0, 0.0, 0.92)
+	pill.size         = Vector2(26.0, 96.0)
+	pill.position     = Vector2(
+		6.0 if inset.x > 0.0 else vp.x - 32.0, (vp.y - 96.0) * 0.5)
+	pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_safe_sim_deco.add_child(pill)
 
 func _build_dev_mini_btn() -> void:
 	# Подпись «МИНИ», а не «МИНИБОССЫ»: чип 44 пикселя шириной, и девять букв в
@@ -7533,6 +7616,7 @@ func _show_shout(big: String, small: String, hold: float,
 		big_col: Color, small_col: Color) -> void:
 	var vp := get_viewport().get_visible_rect().size
 	var cl := CanvasLayer.new()
+	SafeArea.apply(cl)
 	cl.layer = 96
 	add_child(cl)
 
@@ -7606,6 +7690,7 @@ func _show_level_card(next_level: int) -> void:
 
 	var vp := get_viewport().get_visible_rect().size
 	var cl := CanvasLayer.new()
+	SafeArea.apply(cl)
 	cl.layer = 96
 	add_child(cl)
 	# ПОДЛОЖКА ТА ЖЕ, ЧТО У ЗАНАВЕСА, И ДОВОДИТСЯ ДО НЕПРОЗРАЧНОЙ.
