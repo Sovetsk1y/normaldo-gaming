@@ -52,7 +52,7 @@ const DEV_TEXTS : Array = [
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 15
+const EXPECTED_CHECKS : int = 17
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -71,7 +71,46 @@ func _initialize() -> void:
 	await _test_toolbox()
 	print("── Заглушки в каталоге ──")
 	_test_placeholder_art()
+	print("── Нижняя версия iOS ──")
+	_test_ios_min_version()
 	_finish()
+
+# ── APP STORE ОТКАЗЫВАЕТ ЗА НИЗКУЮ НИЖНЮЮ ВЕРСИЮ iOS ───────────────────────
+# Загрузка падает так: «This bundle is invalid. The value provided for the key
+# MinimumOSVersion '12.0' is not acceptable», код 90068. Узнаётся это в конце
+# пути — после сборки, архива и двадцати минут заливки, — и потому проверяется
+# здесь, до всего.
+#
+# Ключа `MinimumOSVersion` в Info.plist нет: Xcode выводит его из
+# IPHONEOS_DEPLOYMENT_TARGET при сборке. Значит смотреть надо туда.
+#
+# ── И ОНО САМО ВОЗВРАЩАЕТСЯ НА 12.0 ─────────────────────────────────────────
+# Проект Xcode СОБИРАЕТСЯ ЭКСПОРТОМ Godot из своего шаблона, а в шаблоне этой
+# версии нижняя версия зашита намертво — отдельной настройки экспорта под неё
+# нет. То есть очередной экспорт затирает правку и возвращает 12.0 молча.
+#
+# Поэтому проверка живёт в тесте готовности сборки, а не в чьей-то памяти.
+const IOS_MIN_REQUIRED : float = 15.0
+const IOS_PBXPROJ : String = "res://ios_export/Normaldo.xcodeproj/project.pbxproj"
+
+func _test_ios_min_version() -> void:
+	var src := FileAccess.get_file_as_string(IOS_PBXPROJ)
+	if src == "":
+		_check(false, "проект Xcode не прочитался: %s" % IOS_PBXPROJ)
+		return
+	var found : Array = []
+	for line in src.split("\n"):
+		var s := String(line).strip_edges()
+		if not s.begins_with("IPHONEOS_DEPLOYMENT_TARGET"):
+			continue
+		found.append(float(s.get_slice("=", 1).strip_edges().trim_suffix(";")))
+	_check(not found.is_empty(), "нижняя версия iOS в проекте задана: %s" % [found])
+	var low : Array = []
+	for v in found:
+		if float(v) < IOS_MIN_REQUIRED:
+			low.append(v)
+	_check(low.is_empty(), "и нигде не ниже %.1f — иначе App Store откажет: %s"
+		% [IOS_MIN_REQUIRED, low])
 
 # Заглушка в каталоге — это картинка, скопированная у соседа, пока настоящей
 # нет. Найти её глазами нельзя: страница собирается, рисунок показывается,
