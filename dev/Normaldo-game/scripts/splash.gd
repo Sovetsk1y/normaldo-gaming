@@ -11,14 +11,20 @@ class_name Splash
 #   1. По чёрному сверху вниз сыплется пицца.
 #   2. Появляется логотип NORMALDO — тот же и на том же месте, что в меню.
 #   3. Новая пицца сыпаться перестаёт, оставшаяся долетает.
-#   4. Чёрное гаснет, и под ним оказывается обычное меню — вместе с логотипом,
-#      который всё это время был на своём месте.
+#   4. Чёрное гаснет, логотип едет из центра на своё меню'шное место — и под
+#      ними оказывается обычное меню с той же надписью там же.
 #
-# ── ПОЧЕМУ ЛОГОТИП РИСУЕТСЯ ДВАЖДЫ ──────────────────────────────────────────
-# Заставка рисует СВОЮ копию логотипа поверх чёрного и гасит её вместе с ним. За
-# ней открывается настоящий логотип меню — ровно на том же месте, потому что
-# место спрашивается у самого меню (`hud.menu_logo_rect`). Переход выходит без
-# единого движения: с точки зрения игрока логотип просто не двигался.
+# ── ЛОГОТИП ОДИН И ТОТ ЖЕ, И ОН ПРИЕЗЖАЕТ НА СВОЁ МЕСТО ─────────────────────
+# Заставка показывает ТУ ЖЕ картинку, что стоит в меню, и приводит её ровно
+# туда, где меню её и держит.
+#
+# Появляется он ПО ЦЕНТРУ ЭКРАНА — так его видно на чёрном, — а вместе с фейдом
+# едет на своё меню'шное место. К концу фейда копия заставки и настоящий
+# логотип меню совпадают пиксель в пиксель, и подмена не видна: игрок видит
+# одну надпись, которая приехала и осталась.
+#
+# Место спрашивается у самого меню (`hud.menu_logo_rect`) — числами его сюда не
+# переписать: раскладка меню считается от размера экрана.
 #
 # Двигать вместо этого настоящий логотип меню значило бы, что заставка правит
 # чужой экран и обязана вернуть его как было — а не вернуть его как было можно
@@ -40,10 +46,24 @@ const LOGO_IN_T : float = 0.42
 const DRAIN_T   : float = 0.75   # даём долететь оставшейся
 const FADE_T    : float = 0.50
 
-const SPAWN_EVERY : float = 0.055
-const FALL_MIN    : float = 260.0
-const FALL_MAX    : float = 480.0
-const PIZZA_PX    : float = 46.0
+# ── ПИЦЦА ИДЁТ МАССОЙ, А НЕ РОССЫПЬЮ ───────────────────────────────────────
+# Так же, как деньги на переходе между эпизодами (`level_transition`): там экран
+# закрывает СПЛОШНАЯ куча купюр, а не редкий дождик. Здесь то же самое, только
+# сверху вниз и пиццей.
+#
+# Отсюда и устройство: пицца сыплется НЕ по одной в случайную точку, а ПАЧКАМИ
+# ПО СЕТКЕ — ряд разбит на колонки, в каждой своя пицца со сдвигом внутри
+# клетки. Случайные точки при любой частоте оставляют дыры и сгустки: где-то
+# три пиццы одна на другой, где-то полсекунды пустого чёрного.
+#
+# Каждая при этом летит САМА. Одной массой их гнать нельзя — по замыслу новая
+# пицца перестаёт сыпаться, а оставшаяся долетает; у монолита долетать нечему.
+const ROW_EVERY  : float = 0.085    # как часто выходит новый ряд
+const ROW_COLS   : int   = 7        # сколько пицц в ряду
+const JITTER_K   : float = 0.55     # разброс внутри клетки, доля её ширины
+const FALL_MIN   : float = 300.0
+const FALL_MAX   : float = 520.0
+const PIZZA_PX   : float = 58.0
 
 signal finished
 
@@ -97,22 +117,30 @@ func _process(delta: float) -> void:
 		return
 	_rain_t -= delta
 	if _rain_t <= 0.0:
-		_rain_t = SPAWN_EVERY
-		_drop()
+		_rain_t = ROW_EVERY
+		_row()
 
-func _drop() -> void:
+# Ряд целиком: по пицце на колонку, каждая со своим сдвигом, размером и
+# скоростью. Ряды идут внахлёст и складываются в сплошной поток.
+func _row() -> void:
 	var vp := get_viewport().get_visible_rect().size
+	var cell : float = vp.x / float(ROW_COLS)
+	var jit  : float = cell * JITTER_K
+	for i in ROW_COLS:
+		_drop(cell * (float(i) + 0.5) + randf_range(-jit, jit), vp)
+
+func _drop(x: float, vp: Vector2) -> void:
 	var s := Sprite2D.new()
 	s.texture        = PIZZA_TEX
 	s.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	ItemSizing.fit_sprite_content(s, PIZZA_PX * randf_range(0.75, 1.25))
-	s.position = Vector2(randf_range(-20.0, vp.x + 20.0), -60.0)
+	ItemSizing.fit_sprite_content(s, PIZZA_PX * randf_range(0.72, 1.28))
+	s.position = Vector2(x, randf_range(-110.0, -50.0))
 	s.rotation = randf_range(-PI, PI)
 	_rain.add_child(s)
 	var fall : float = randf_range(FALL_MIN, FALL_MAX)
-	var t : float = (vp.y + 140.0) / fall
+	var t : float = (vp.y + 200.0) / fall
 	var tw := s.create_tween().set_parallel(true)
-	tw.tween_property(s, "position:y", vp.y + 80.0, t)
+	tw.tween_property(s, "position:y", vp.y + 90.0, t)
 	tw.tween_property(s, "rotation", s.rotation + randf_range(-6.0, 6.0), t)
 	tw.chain().tween_callback(s.queue_free)
 
@@ -136,23 +164,32 @@ func _run() -> void:
 	tw.tween_property(_black, "color:a", 0.0, FADE_T)
 	tw.tween_property(_rain, "modulate:a", 0.0, FADE_T)
 	if is_instance_valid(_logo):
-		tw.tween_property(_logo, "modulate:a", 0.0, FADE_T)
+		# ЕДЕТ НА СВОЁ МЕСТО, А НЕ ГАСНЕТ. К концу пути он совпадает с настоящим
+		# логотипом меню пиксель в пиксель — и потому исчезновение копии не
+		# видно: на экране остаётся ровно та же надпись.
+		tw.tween_property(_logo, "position", _home_rect().position, FADE_T)\
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 	await _wait(FADE_T)
 	if not is_inside_tree():
 		return
 	finished.emit()
 	queue_free()
 
-# Логотип рисуется НА МЕСТЕ МЕНЮШНОГО. Если меню ещё не собрано (а такого быть
-# не должно), кладём его по центру — заставка без логотипа хуже, чем логотип
-# чуть не там.
-func _show_logo() -> void:
+# Куда логотип приедет — место меню'шного. Если меню ещё не собрано (а такого
+# быть не должно), берём разумную середину: заставка без логотипа хуже, чем
+# логотип чуть не там.
+func _home_rect() -> Rect2:
 	var hud := get_parent()
-	var vp := get_viewport().get_visible_rect().size
 	var r : Rect2 = hud.call("menu_logo_rect") if hud.has_method("menu_logo_rect") else Rect2()
-	if r.size.x <= 1.0:
-		var w : float = vp.x * 0.58
-		r = Rect2(Vector2((vp.x - w) * 0.5, vp.y * 0.22), Vector2(w, w * 0.2))
+	if r.size.x > 1.0:
+		return r
+	var vp := get_viewport().get_visible_rect().size
+	var w : float = vp.x * 0.58
+	return Rect2(Vector2((vp.x - w) * 0.5, vp.y * 0.22), Vector2(w, w * 0.2))
+
+func _show_logo() -> void:
+	var vp := get_viewport().get_visible_rect().size
+	var r := _home_rect()
 	_logo = TextureRect.new()
 	_logo.texture        = load("res://assets/ui/menu/logo.png")
 	if _logo.texture == null:
@@ -163,7 +200,10 @@ func _show_logo() -> void:
 	_logo.expand_mode    = TextureRect.EXPAND_IGNORE_SIZE
 	_logo.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_logo.size           = r.size
-	_logo.position       = r.position
+	# ПОЯВЛЯЕТСЯ ПО ЦЕНТРУ ЭКРАНА, а не сразу на своём месте: на чёрном экране
+	# надпись у верхней трети читается как случайно оставшийся кусок интерфейса,
+	# а по центру — как то, ради чего всё и показывают.
+	_logo.position       = Vector2((vp.x - r.size.x) * 0.5, (vp.y - r.size.y) * 0.5)
 	_logo.mouse_filter   = Control.MOUSE_FILTER_IGNORE
 	_logo.pivot_offset   = r.size * 0.5
 	add_child(_logo)

@@ -442,11 +442,13 @@ func _after_splash() -> void:
 	var r : Rect2 = menu_play_rect()
 	if r.size.x <= 1.0:
 		return
+	# Закрывается ТОЛЬКО тапом по зоне запуска, и тот же тап начинает забег: её
+	# задача не сообщить, а довести до первой игры.
 	MenuTour.play(self, [{
 		"rect":  r,
 		"big":   "ДАВАЙ СРАЗУ К ДЕЛУ!",
 		"small": "тапни сюда — и побежали",
-	}], "start")
+	}], "start", _on_play_tapped)
 
 func _build_fps_label() -> void:
 	# Отладочный счётчик — только в дев-сборках (DevFlags.ENABLED). В релиз/TF

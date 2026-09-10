@@ -32,8 +32,8 @@ func _initialize() -> void:
 	# Время считается ОТ ЗАПУСКА ЗАСТАВКИ, а не от старта скрипта: меню перед
 	# этим собирается сколько-то, и кадры уехали бы на эту разницу.
 	var start := Time.get_ticks_msec()
-	for shot in [[0.4, "splash_rain"], [1.1, "splash_logo"], [2.5, "splash_drain"],
-			[3.1, "splash_fade"], [4.0, "splash_tip"]]:
+	for shot in [[0.45, "splash_rain"], [1.15, "splash_logo"], [2.25, "splash_drain"],
+			[2.62, "splash_move"], [3.2, "splash_fade"], [4.2, "splash_tip"]]:
 		await _wait_until(float(shot[0]), start)
 		get_root().get_texture().get_image().save_png("%s/%s.png" % [out, shot[1]])
 		print("XX ", shot[1])

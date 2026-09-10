@@ -35,6 +35,7 @@ signal finished
 var _stops : Array = []
 var _idx   : int   = 0
 var _key   : String = "tour"
+var _on_hole : Callable = Callable()
 var _body  : Control = null
 
 # `stops` — список словарей { rect: Rect2, big: String, small: String }.
@@ -44,13 +45,22 @@ var _body  : Control = null
 # Тот же узел работает и разовой подсказкой по поводу: одна остановка вместо
 # трёх, свой ключ. Заводить ради неё второй вид всплывашки значило бы иметь два
 # места, где решается, как подсказка выглядит.
-static func play(host: Node, stops: Array, key: String = "tour") -> MenuTour:
+# `on_hole` — что сделать, когда игрок ткнул В САМУ подсвеченную кнопку. Если он
+# задан, тур закрывается ТОЛЬКО этим тапом: мимо кнопки экран не реагирует.
+#
+# Нужно ровно первой подсказке — «ДАВАЙ СРАЗУ К ДЕЛУ!». Её задача не сообщить, а
+# ДОВЕСТИ до первого забега, и закрываемая тапом куда попало она эту задачу не
+# решает: игрок смахивает её вслепую и остаётся в меню, из которого его как раз
+# и уводили.
+static func play(host: Node, stops: Array, key: String = "tour",
+		on_hole: Callable = Callable()) -> MenuTour:
 	if host == null or stops.is_empty():
 		return null
 	var t := MenuTour.new()
-	t.name   = "MenuTour"
-	t._stops = stops
-	t._key   = key
+	t.name    = "MenuTour"
+	t._stops  = stops
+	t._key    = key
+	t._on_hole = on_hole
 	host.add_child(t)
 	return t
 
@@ -97,14 +107,33 @@ func _show(idx: int) -> void:
 	TipCloud.ring(_body, hole)
 	_caption(stop, hole, vp)
 
-	# Тап куда угодно — дальше. Отдельной кнопки «ДАЛЬШЕ» нет намеренно: искать
-	# её глазами в затемнённом экране дольше, чем ткнуть в него.
-	var tap := Button.new()
-	tap.flat       = true
-	tap.focus_mode = Control.FOCUS_NONE
-	tap.size       = vp
-	tap.pressed.connect(func() -> void: _show(_idx + 1))
-	_body.add_child(tap)
+	if _on_hole.is_valid():
+		# ЗАКРЫВАЕТ ТОЛЬКО ТАП ПО КНОПКЕ. Экран вокруг ест ввод и не реагирует:
+		# такая подсказка не сообщает, а ведёт, и смахнуть её мимо цели нельзя.
+		var eat := Control.new()
+		eat.size         = vp
+		eat.mouse_filter = Control.MOUSE_FILTER_STOP
+		_body.add_child(eat)
+		var hit := Button.new()
+		hit.flat       = true
+		hit.focus_mode = Control.FOCUS_NONE
+		hit.position   = hole.position
+		hit.size       = hole.size
+		hit.pressed.connect(func() -> void:
+			var cb := _on_hole
+			_done()
+			if cb.is_valid():
+				cb.call())
+		_body.add_child(hit)
+	else:
+		# Тап куда угодно — дальше. Отдельной кнопки «ДАЛЬШЕ» нет намеренно:
+		# искать её глазами в затемнённом экране дольше, чем ткнуть в него.
+		var tap := Button.new()
+		tap.flat       = true
+		tap.focus_mode = Control.FOCUS_NONE
+		tap.size       = vp
+		tap.pressed.connect(func() -> void: _show(_idx + 1))
+		_body.add_child(tap)
 
 	_body.modulate = Color(1, 1, 1, 0.0)
 	var tw := _body.create_tween()
@@ -116,9 +145,13 @@ func _caption(stop: Dictionary, hole: Rect2, vp: Vector2) -> void:
 	var below : bool = hole.end.y + TipCloud.outer(TIP_W, TIP_H).y < vp.y
 	var y : float = (hole.end.y + 8.0) if below else (hole.position.y - TIP_H - 8.0)
 	var last : bool = _idx >= _stops.size() - 1
+	var hint : String = "ПОНЯТНО" if last else "ДАЛЬШЕ ›"
+	if _on_hole.is_valid():
+		# «ПОНЯТНО» на ведущей подсказке обещает, что её можно просто закрыть, —
+		# а закрыть её можно ровно одним способом, тапом по кнопке.
+		hint = "▼ ТАП ▼"
 	var cloud := TipCloud.build(String(stop.get("big", "")),
-		String(stop.get("small", "")), TIP_W, TIP_H,
-		"ПОНЯТНО" if last else "ДАЛЬШЕ ›")
+		String(stop.get("small", "")), TIP_W, TIP_H, hint)
 	var out := TipCloud.outer(TIP_W, TIP_H)
 	cloud.position = Vector2(
 		clampf(hole.get_center().x, out.x * 0.5, vp.x - out.x * 0.5),

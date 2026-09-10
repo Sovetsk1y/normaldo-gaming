@@ -30,7 +30,7 @@ func _beats() -> Array:
 # Такт «веди пальцем» ждёт до двадцати секунд, «поешь» — до двадцати двух. Все
 # ожидания в тесте ставятся С ЗАПАСОМ ОТ ОБРАТНОГО: проверка обязана падать,
 # когда такт НЕ сдвинулся сам, а не когда он не успел.
-const EXPECTED_CHECKS : int = 32
+const EXPECTED_CHECKS : int = 40
 
 var _fails  : int = 0
 var _checks : int = 0
@@ -62,6 +62,8 @@ func _initialize() -> void:
 	await _test_lane_floor()
 	print("── Заставка запуска ──")
 	await _test_splash()
+	print("── Ведущая подсказка не смахивается ──")
+	await _test_leading_tip()
 	print("── Сценарий не врёт про себя ──")
 	_test_script_sane()
 
@@ -387,12 +389,74 @@ func _test_splash() -> void:
 	# А заведённая — доигрывает и убирает себя.
 	var sp = splash.call("play", hud)
 	_check(sp != null and is_instance_valid(sp), "запущенная вручную — появилась")
+	# ЛОГОТИП ОБЯЗАН ПРИЕХАТЬ НА МЕСТО МЕНЮШНОГО. Не приедет — на глазах у
+	# игрока надпись прыгнет: копия заставки исчезнет в одном месте, настоящая
+	# окажется в другом. Ловим последнее её положение перед тем, как заставка
+	# себя уберёт.
+	var last_logo := Vector2.INF
 	var t0 := Time.get_ticks_msec()
 	while is_instance_valid(sp) and Time.get_ticks_msec() - t0 < 9000:
 		get_root().get_tree().paused = false
+		var lg = sp.get("_logo")
+		if lg != null and is_instance_valid(lg):
+			last_logo = (lg as Control).position
 		await process_frame
 	_check(not is_instance_valid(sp),
 		"и ушла сама за %.1f c" % [(Time.get_ticks_msec() - t0) / 1000.0])
+	var home : Vector2 = (hud.call("menu_logo_rect") as Rect2).position
+	_check(last_logo != Vector2.INF and last_logo.distance_to(home) < 4.0,
+		"а логотип приехал на место меню'шного: %s против %s" % [last_logo, home])
+	game.queue_free()
+	await process_frame
+
+# ── ВЕДУЩАЯ ПОДСКАЗКА НЕ СМАХИВАЕТСЯ ───────────────────────────────────────
+# «ДАВАЙ СРАЗУ К ДЕЛУ!» закрывается ТОЛЬКО тапом по зоне запуска, и тот же тап
+# начинает забег. Её задача не сообщить, а довести до первой игры: закрываемая
+# тапом куда попало, она смахивается вслепую, и игрок остаётся ровно в том
+# меню, из которого его уводили.
+func _test_leading_tip() -> void:
+	await process_frame
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	get_root().get_tree().paused = false
+	var hud : Node = game.get_node_or_null("HUD")
+	var t0 := Time.get_ticks_msec()
+	while (hud.call("menu_play_rect") as Rect2).size.x <= 1.0 \
+			and Time.get_ticks_msec() - t0 < 9000:
+		get_root().get_tree().paused = false
+		await process_frame
+
+	var fired : Array = [false]
+	var tour = MenuTour.play(hud, [{
+		"rect": hud.call("menu_play_rect"), "big": "ДАВАЙ", "small": "сюда",
+	}], "start_test", func() -> void: fired[0] = true)
+	await process_frame
+	_check(tour != null and is_instance_valid(tour), "ведущая подсказка появилась")
+
+	# СМАХНУТЬ НЕЧЕМ. У обычного тура поверх экрана лежит кнопка во весь
+	# viewport — тап куда угодно листает дальше. У ведущей такой быть не должно:
+	# единственная кнопка обязана совпадать с подсвеченной зоной, а всё
+	# остальное — глухо есть ввод.
+	var zone : Rect2 = hud.call("menu_play_rect")
+	var vp : Vector2 = get_root().get_visible_rect().size
+	var hit : Button = null
+	var wide : int = 0
+	for c in (tour.get("_body") as Node).get_children():
+		if not (c is Button):
+			continue
+		var b := c as Button
+		if b.size.x >= vp.x - 1.0 and b.size.y >= vp.y - 1.0:
+			wide += 1
+		elif b.position.distance_to(zone.position) < 2.0:
+			hit = b
+	_check(wide == 0, "кнопки во весь экран у неё нет — смахнуть нечем")
+	_check(hit != null, "а кнопка стоит ровно на подсвеченной зоне")
+	if hit != null:
+		hit.pressed.emit()
+		await process_frame
+		_check(not is_instance_valid(tour), "тап по зоне её закрыл")
+		_check(fired[0], "и тем же тапом позвал начать забег")
 	game.queue_free()
 	await process_frame
 
