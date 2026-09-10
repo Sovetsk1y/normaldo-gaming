@@ -20,6 +20,29 @@ const COLA_TEX    := preload("res://assets/items/cola.png")
 # `SkinProgression.PERK_ICONS`, откуда их берут все три места, где венец
 # показывается. См. комментарий там.
 
+# ── ПРЕДМЕТ ВЫПИРАЕТ ИЗ КРУЖКА ─────────────────────────────────────────────
+# Иконка рисуется БОЛЬШЕ диска — на 16 процентов, — и потому вылезает за кольцо.
+# Так кружок читается как «предмет в оправе», а не как «картинка в кнопке», и
+# по силуэту предмета его узнают раньше, чем разглядят, что внутри.
+#
+# Число живёт здесь, а экран информации о скине берёт его отсюда же
+# (`hud._ability_badge`): два одинаковых кружка, нарисованных по двум числам,
+# разъезжаются при первой же правке одного из них — ровно с этим и пришли,
+# «сделай на экране скина такие же, как в игре».
+const ICON_OVER : float = 1.16
+
+# ── СВЕТ ПОД ТЁМНОЙ ИКОНКОЙ ────────────────────────────────────────────────
+# Пары «доля радиуса — прозрачность». Три круга с падающей прозрачностью дают
+# мягкое пятно; один круг читался бы как второй диск внутри кружка, то есть как
+# деталь оправы, а не как свет из-под предмета.
+#
+# Прозрачности НЕ маленькие. Первым заходом здесь стояли 0.16–0.26, и поверх
+# почти чёрного диска это давало не свет, а коричневое пятно: ворон стал виден,
+# но выглядел лежащим на грязи.
+#
+# Таблица одна на оба места, где кружок рисуется, — за этим следит smoke_skin_card.
+const ICON_GLOW_RINGS : Array = [[0.94, 0.30], [0.70, 0.38], [0.48, 0.46]]
+
 # 34 было мало: кружок в углу экрана и так на периферии зрения.
 const D    : float = 40.0
 const PAD  : float = 10.0
@@ -76,7 +99,8 @@ func setup(nrm: Node) -> void:
 			# всех одинаковый и о самом спелле не говорит ничего.
 			specs.append({ "key": "active", "tex": load(String(ab.get("icon", ""))), "sym": "",
 				"mod": Color(1, 1, 1), "ring": RING_ACTIVE, "title": a_title, "desc": a_desc,
-				"chg": a_charges, "k": float(ab.get("icon_k", 1.0)) })
+				"chg": a_charges, "k": float(ab.get("icon_k", 1.0)),
+				"glow": ab.get("icon_glow", Color(0, 0, 0, 0)) })
 		else:
 			specs.append({ "key": "active", "tex": null, "sym": "✦",
 				"mod": Color(1, 1, 1), "ring": RING_ACTIVE, "title": a_title, "desc": a_desc, "chg": a_charges })
@@ -157,6 +181,7 @@ func setup(nrm: Node) -> void:
 		b.symbol   = s["sym"]
 		b.icon_mod = s["mod"]
 		b.icon_k   = float(s.get("k", 1.0))
+		b.glow     = s.get("glow", Color(0, 0, 0, 0))
 		b.ring_col = s["ring"]
 		b.dynamic  = s.get("dyn", false)
 		b.charges_badge = s.get("chg", false)
@@ -238,6 +263,9 @@ class Badge extends Control:
 	# лежит и в спелле, и в резистах, и два одинаковых кружка рядом читались бы
 	# как «одно и то же», хотя один это удар, а другой защита.
 	var icon_k   : float    = 1.0
+	# Свет под иконкой — для тех, что тонут в почти чёрном диске. Прозрачный
+	# по умолчанию: подсвечивать нечего, пока об этом не попросили.
+	var glow     : Color    = Color(0, 0, 0, 0)
 	var ring_col : Color    = Color(1, 1, 1)
 	var dynamic  : bool     = false   # only visible while the effect is running
 	var charges_badge : bool = false  # active ability with a charge counter
@@ -412,7 +440,16 @@ class Badge extends Control:
 		# Icon (texture) or symbol. The item is drawn a bit LARGER than the disc so
 		# it pokes out past the ring, keeping its aspect ratio.
 		if tex != null:
-			var isz : float = D * 1.16 * icon_k
+			# СВЕТ ПОД ТЁМНОЙ КАРТИНКОЙ — если её об этом попросили. Диск почти
+			# чёрный, и чисто чёрный рисунок (ворон Хэллоуина) на нём не виден
+			# вовсе: в кольце пустота. Три круга с падающей прозрачностью, как и
+			# на экране скина (`hud._icon_glow`), — мягкое пятно, а не второй диск.
+			if glow.a > 0.0:
+				for g in ICON_GLOW_RINGS:
+					var ga : Array = g
+					draw_circle(c, r * float(ga[0]),
+						Color(glow.r, glow.g, glow.b, float(ga[1]) * glow.a))
+			var isz : float = D * ICON_OVER * icon_k
 			var ts := tex.get_size()
 			var k := isz / maxf(ts.x, ts.y)
 			var iw := ts.x * k

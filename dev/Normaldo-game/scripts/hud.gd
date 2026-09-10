@@ -474,6 +474,25 @@ func _play_btn_sfx() -> void:
 		_btn_sfx.stop()
 		_btn_sfx.play()
 
+# ── СВЕЧЕНИЕ ПОД ТЁМНОЙ ИКОНКОЙ ────────────────────────────────────────────
+# Таблица кругов берётся у боевых кружков — той же, какой светится тот же значок
+# в забеге. Своя копия здесь означала бы два разных свечения у одного спелла.
+func _icon_glow(parent: Control, cx: float, cy: float, r: float, col: Color) -> void:
+	for ring in _SKILL_BADGES_SCRIPT.ICON_GLOW_RINGS:
+		var k : float = float((ring as Array)[0])
+		var a : float = float((ring as Array)[1]) * col.a
+		var d : float = r * 2.0 * k
+		var g := TextureRect.new()
+		g.texture        = _circle_tex()
+		g.modulate       = Color(col.r, col.g, col.b, a)
+		g.stretch_mode   = TextureRect.STRETCH_SCALE
+		g.expand_mode    = TextureRect.EXPAND_IGNORE_SIZE
+		g.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+		g.size           = Vector2(d, d)
+		g.position       = Vector2(cx - d * 0.5, cy - d * 0.5)
+		g.mouse_filter   = Control.MOUSE_FILTER_IGNORE
+		parent.add_child(g)
+
 func _make_icon(tex: Texture2D, sz: float) -> TextureRect:
 	var r := TextureRect.new()
 	r.texture      = tex
@@ -4412,7 +4431,7 @@ func _circle_tex() -> Texture2D:
 # «одно и то же», хотя один это удар, а другой защита.
 func _ability_badge(parent: Control, x: float, y: float, sz: float, ring_col: Color,
 		icon_tex: Texture2D, icon_mod: Color, star: String, locked: bool = false,
-		icon_k: float = 1.0) -> void:
+		icon_k: float = 1.0, glow: Color = Color(0, 0, 0, 0)) -> void:
 	var rim := TextureRect.new()
 	rim.texture = _circle_tex(); rim.modulate = ring_col
 	rim.stretch_mode = TextureRect.STRETCH_SCALE; rim.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -4428,7 +4447,20 @@ func _ability_badge(parent: Control, x: float, y: float, sz: float, ring_col: Co
 	disc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(disc)
 	if icon_tex != null:
-		var isz : float = sz * 0.64 * icon_k
+		# ── ТАК ЖЕ, КАК В ЗАБЕГЕ ─────────────────────────────────────────────
+		# Пропорция берётся у боевых кружков (`skill_badges.ICON_OVER`), а не
+		# пишется здесь своим числом: предмет ВЫПИРАЕТ за кольцо, и именно по
+		# этому силуэту игрок узнаёт его на экране скина — тот же кружок, что он
+		# полсекунды назад видел в углу экрана.
+		#
+		# Тут стояло 0.64 — картинка, аккуратно вписанная внутрь кольца. Один и
+		# тот же резист выглядел в бою и в описании двумя разными значками.
+		var isz : float = sz * _SKILL_BADGES_SCRIPT.ICON_OVER * icon_k
+		# Свечение под тёмной картинкой — если её об этом попросили. Диск кружка
+		# почти чёрный, и чёрный рисунок (ворон Хэллоуина) на нём не виден вовсе:
+		# в кольце просто пустота.
+		if glow.a > 0.0:
+			_icon_glow(parent, x + sz * 0.5, y + sz * 0.5, sz * 0.5, glow)
 		var ic := _make_icon(icon_tex, isz); ic.modulate = icon_mod
 		ic.position = Vector2(x + (sz - isz) * 0.5, y + (sz - isz) * 0.5); ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		parent.add_child(ic)
@@ -4501,6 +4533,7 @@ func _ability_items(skin_id: String) -> Array:
 	elif String(ab.get("icon", "")) != "":
 		items.append({ "ring": RING_ACTIVE, "tex": load(String(ab.get("icon", ""))),
 			"mod": Color(1, 1, 1), "star": "", "icon_k": float(ab.get("icon_k", 1.0)),
+			"glow": ab.get("icon_glow", Color(0, 0, 0, 0)),
 			"kind": "АКТИВНАЯ", "kind_col": RING_ACTIVE,
 			"title": ab.get("label", ""), "desc": ab.get("desc", "") })
 	elif not ab.is_empty():
@@ -4520,7 +4553,8 @@ func _fill_desc(desc_root: VBoxContainer, skin_id: String) -> void:
 		var bc := Control.new()
 		bc.custom_minimum_size = Vector2(28.0, 28.0)
 		_ability_badge(bc, 0.0, 0.0, 28.0, it["ring"], it["tex"], it["mod"], it["star"],
-			bool(it.get("locked", false)), float(it.get("icon_k", 1.0)))
+			bool(it.get("locked", false)), float(it.get("icon_k", 1.0)),
+			it.get("glow", Color(0, 0, 0, 0)))
 		row.add_child(bc)
 		var col := VBoxContainer.new()
 		col.add_theme_constant_override("separation", 1)
