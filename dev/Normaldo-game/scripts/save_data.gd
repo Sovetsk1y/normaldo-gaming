@@ -124,6 +124,17 @@ var music_volume : float = 1.0
 # в игре нет ни одного, иначе выключатель знал бы не про все вызовы.
 var vibration_on : bool = true
 
+# ─── Обучение ────────────────────────────────────────────────────────────────
+# Первый забег ведёт обучение (см. scripts/tutorial.gd и
+# /Концепция/Обучение — первый забег и меню.md). Флаг ставится в конце — в том
+# числе когда игрок нажал ПРОПУСТИТЬ: пропуск это тоже ответ, и переспрашивать
+# его каждый запуск значит не услышать.
+var tutorial_done : bool = false
+
+# Какие подсказки по главному меню уже показаны: ключ кнопки → true. Словарь, а
+# не набор булевых полей, потому что кнопок в меню семь и будут новые.
+var menu_tips_seen : Dictionary = {}
+
 # ─── Push notifications ──────────────────────────────────────────────────────
 # Master switch + per-category toggles (A..H mirror Концепция/Пуш-уведомления).
 # `last_session_end_at` is stamped by NotifPlanner on focus-out so the
@@ -504,6 +515,8 @@ func _save() -> void:
 		"sfx_volume":          sfx_volume,
 		"music_volume":        music_volume,
 		"vibration_on":        vibration_on,
+		"tutorial_done":       tutorial_done,
+		"menu_tips_seen":      menu_tips_seen,
 		"notif_enabled":       notif_enabled,
 		"notif_categories":    notif_categories,
 		"notif_quiet_start":   notif_quiet_start,
@@ -582,6 +595,8 @@ func _load() -> void:
 	sfx_volume          = float(d.get("sfx_volume",        1.0))
 	music_volume        = float(d.get("music_volume",      1.0))
 	vibration_on        = bool(d.get("vibration_on",       true))
+	tutorial_done       = bool(d.get("tutorial_done",      false))
+	menu_tips_seen      = (d.get("menu_tips_seen", {}) as Dictionary).duplicate()
 	notif_enabled       = bool(d.get("notif_enabled",       true))
 	var raw_cats = d.get("notif_categories", null)
 	if raw_cats is Dictionary:

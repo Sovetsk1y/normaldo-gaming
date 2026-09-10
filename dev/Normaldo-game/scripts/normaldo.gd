@@ -12,6 +12,13 @@ signal slot_machine_caught   # СЛОТЫ mini-game trigger (caught like the mut
 # the local counter (NOT the run score) and credits it all at the end.
 signal fat_boss_loot_collected(kind: String, world_pos: Vector2)
 signal active_denied   # tried to fire the active ability while on cooldown
+# Способность СРАБОТАЛА — не «тапнули», а именно ушла в дело. Обучение ждёт
+# ровно этого: тап по кулдауну ничему не научит, и такт на нём кончаться
+# не должен.
+signal ability_fired(id: String)
+# Удар ПРИНЯТ. `fat_before` — жир до удара: по нему видно, потерял ли он
+# состояние или это был удар в скинни.
+signal hit_taken(fat_before: int)
 
 const FAT_THRESHOLDS = [30, 60, 90]
 
@@ -2179,6 +2186,11 @@ var spells_blocked : bool = false
 func set_spells_blocked(v: bool) -> void:
 	spells_blocked = v
 
+# Есть ли у скина активная способность вообще. Спрашивает обучение: подсказка
+# про то, чего у игрока нет, — это не обучение, а обещание.
+func has_active_ability() -> bool:
+	return not _ability_cfg.is_empty()
+
 func _try_fire_ability(target: Vector2) -> void:
 	if _ability_cfg.is_empty():
 		return
@@ -2218,6 +2230,7 @@ func _try_fire_ability(target: Vector2) -> void:
 			_show_spell_pose(pose_time_for(String(_ability_cfg.get("id", ""))))
 		_cast_spell(str(_ability_cfg.get("id", "")), dir)
 	AchievementManager.on_spell_cast(String(SaveData.active_skin))
+	ability_fired.emit(String(_ability_cfg.get("id", "")))
 	# Consume a charge; start the cooldown only when they're all gone.
 	_active_charges -= 1
 	if _active_charges <= 0:
@@ -3843,6 +3856,7 @@ func set_dev_immortal(v: bool) -> void:
 	_dev_immortal = v
 
 func _take_hit(damage: int = 1) -> void:
+	hit_taken.emit(fat_state)
 	if fat_state == 0:
 		# Dev immortality: skip death entirely, just brief invincibility + flash.
 		if _dev_immortal:

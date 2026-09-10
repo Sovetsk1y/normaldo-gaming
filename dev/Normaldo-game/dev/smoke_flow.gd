@@ -95,7 +95,11 @@ func _test_flow() -> void:
 
 # Сет-писы считают ход сами и в зеркале не запускаются вовсе (см. `_run_set_piece`):
 # у них хореография с парковкой в заданной точке, отражать её — отдельная работа.
-const SETPIECE_OK : Array = ["ninja_item", "bum_barrel"]
+const SETPIECE_OK : Array = ["ninja_item", "bum_barrel",
+	# Сватовец: идёт своим шагом и держит щит спереди по ходу. В зеркале не
+	# запускается — стоит в `spawner.NO_MIRROR`, и это проверяется ниже, чтобы
+	# послабление здесь не пережило причину, по которой дано.
+	"police_swat"]
 # Не поток: фон, декор и боссы едут своей жизнью.
 #
 # `club_boss_minion` — оба разом: девочка из потока слушается общего знака,
@@ -135,6 +139,21 @@ func _test_sources() -> void:
 			if t.contains("speed * delta") and not t.contains("ItemFlow"):
 				stray.append("%s: %s" % [name, t])
 	_check(stray.is_empty(), "своей копии движения ни у кого не осталось: %s" % [stray])
+
+	# ПОСЛАБЛЕНИЕ НЕ ДОЛЖНО ПЕРЕЖИТЬ СВОЮ ПРИЧИНУ. Тому, кто считает ход сам,
+	# оно дано ровно потому, что в зеркале он не появляется вовсе. Уберут его из
+	# `NO_MIRROR` — и он поедет не в ту сторону, а список здесь промолчит.
+	var spawner_src := FileAccess.get_file_as_string("res://scripts/spawner.gd")
+	var no_mirror : Array = []
+	for line in spawner_src.split("\n"):
+		if String(line).strip_edges().begins_with("const NO_MIRROR"):
+			no_mirror = String(line).split("[")[1].split("]")[0].split(",")
+			break
+	var listed := ""
+	for k in no_mirror:
+		listed += String(k)
+	_check(listed.contains("swat"),
+		"а сватовец за это исключён из зеркала: %s" % [listed.strip_edges()])
 	_check(users >= 20, "общий знак читают %d скриптов" % users)
 
 	# Девочка-зазывала: в потоке — по общему знаку, в бою — по воле босса.

@@ -1372,6 +1372,7 @@ func _show_menu() -> void:
 	tap_zone.pressed.connect(_play_btn_sfx)
 	tap_zone.pressed.connect(_on_play_tapped)
 	_menu_overlay.add_child(tap_zone)
+	_tour_play_zone = tap_zone
 
 	_build_menu_logo(vp)
 	_build_menu_settings_btn(vp)
@@ -1406,6 +1407,55 @@ func _show_menu() -> void:
 	# rebuild so a tap that arrived mid-run gets handled once the player
 	# either dies and returns or backs out manually.
 	call_deferred("_route_deep_link_if_ready")
+	# Обучение по меню — один раз, после первого забега. Отложенно: кнопкам надо
+	# дать кадр, чтобы встать на свои места, иначе тур подсветит их прошлые.
+	call_deferred("_menu_tour_maybe")
+
+# ── ОБУЧЕНИЕ ПО МЕНЮ: ТРИ ОСТАНОВКИ ─────────────────────────────────────────
+# Заводится, когда первый забег уже сыгран (`tutorial_done`), а тур ещё не
+# показан. Пропустивший обучение в забеге тура не увидит вовсе: пропуск — это
+# ответ, и переспрашивать его другим способом значит не услышать (флаг ставит
+# `Tutorial._skip`).
+#
+# Кнопки берутся ТЕ ЖЕ САМЫЕ, что построило меню, а не их координаты по памяти:
+# раскладка меню считается от размера экрана, и выписанные числом рамки
+# разъехались бы с кнопками на первом же телефоне с другим соотношением сторон.
+# Забег начат тапом в меню, а не перезапуском с экрана смерти, боем с боссом
+# или дев-кнопкой. Читает и гасит `_start_game`.
+var _play_from_menu : bool = false
+
+var _tour_play_zone   : Control = null
+var _tour_quests_btn  : Control = null
+var _tour_skins_btn   : Control = null
+
+func _menu_tour_maybe() -> void:
+	if not SaveData.tutorial_done:
+		return
+	# И ХОТЯ БЫ ОДИН ЗАБЕГ ПОЗАДИ. Тур обещан «после первой игры», и показанный
+	# до неё он объясняет кнопки тому, кто ещё не знает, зачем они. Заодно это
+	# делает поведение определённым для тестов: на чистом сейве забегов ноль, и
+	# тур не лезет поверх меню, по которому тест собирается тапать.
+	if SaveData.total_runs() <= 0:
+		return
+	if bool(SaveData.menu_tips_seen.get("tour", false)):
+		return
+	var stops : Array = []
+	for it in [
+		[_tour_play_zone,  "ОТСЮДА ЗАБЕГ",  "тапни по центру — и побежали"],
+		[_tour_quests_btn, "ЗАДАНИЯ",       "тут награда за то, что уже сыграл"],
+		[_tour_skins_btn,  "СКИНЫ",         "сюда уходят собранные доллары"],
+	]:
+		var c : Control = (it as Array)[0]
+		if c == null or not is_instance_valid(c):
+			continue
+		stops.append({
+			"rect":  c.get_global_rect(),
+			"big":   String((it as Array)[1]),
+			"small": String((it as Array)[2]),
+		})
+	if stops.is_empty():
+		return
+	MenuTour.play(self, stops)
 
 # ── Музыка главного меню ──────────────────────────────────────────────────────
 # Меню молчало: трек забега заводится только на старте, и до первого тапа игра
@@ -2162,6 +2212,7 @@ func _build_menu_right_column(vp: Vector2) -> void:
 	var skins_btn := _build_menu_icon_btn(vp, MENU_ICON_SKINS, Vector2(350, 8),
 		"СКИНЫ", _on_shop_tapped)
 	_skins_badge = _attach_canvas_badge(skins_btn, SaveData.has_ready_mastery_chest())
+	_tour_skins_btn = skins_btn
 
 	_build_menu_icon_btn(vp, MENU_ICON_SLOTS, Vector2(350, 48),
 		"СЛОТЫ", _show_slots)
@@ -2169,6 +2220,7 @@ func _build_menu_right_column(vp: Vector2) -> void:
 	var quests_btn := _build_menu_icon_btn(vp, MENU_ICON_QUESTS, Vector2(350, 88),
 		"ЗАДАНИЯ", _show_quests)
 	_quest_badge = _attach_canvas_badge(quests_btn, QuestManager.has_daily_badge())
+	_tour_quests_btn = quests_btn
 
 	_build_menu_icon_btn(vp, MENU_ICON_LEADERS, Vector2(350, 128),
 		"ЛИДЕРЫ", _show_leaderboard.bind(0))
@@ -2433,6 +2485,8 @@ func _on_play_tapped() -> void:
 	HUD._start_episode = _mode_btn_pos
 	if _mode_btn_pos == 0 and not QuestManager.is_endless_unlocked():
 		HUD._start_episode = 1
+	# Забег начат ИЗ МЕНЮ — единственный случай, когда может завестись обучение.
+	_play_from_menu = true
 	_start_game()
 
 # Выбор режима когда-то жил в двух всплывающих окнах — «Приключение или
@@ -6236,6 +6290,22 @@ func _start_game() -> void:
 	if DevFlags.ENABLED and DevFlags.TOOLBOX:
 		_build_dev_collisions_btn()
 		_build_dev_safe_btn()
+		_build_dev_tutorial_btn()
+	# ── ПЕРВЫЙ ЗАБЕГ ВЕДЁТ ОБУЧЕНИЕ ────────────────────────────────────────
+	# Заводится последним и в КОРНЕ СЦЕНЫ, а не здесь: оно глушит поток, а
+	# глушение снимает спавнеру `_process` — жить внутри него значит
+	# остановиться вместе с ним (см. scripts/tutorial.gd).
+	#
+	# Условий два, и второе не формальность. `_start_game` зовут не только из
+	# меню: им перезапускают забег с экрана смерти, им же входят в бой с боссом
+	# и им пользуется весь дев- и тестовый инструментарий. Обучение бывает
+	# ровно один раз и ровно на забеге, начатом ИЗ МЕНЮ, — иначе оно
+	# заморозило бы поток посреди чужого сценария, а тесты стали бы зависеть от
+	# того, лежит ли на машине сейв с проставленным флагом.
+	var from_menu := _play_from_menu
+	_play_from_menu = false
+	if from_menu and not SaveData.tutorial_done:
+		Tutorial.start(get_parent())
 
 # Throw-and-jump intro:
 #   1. Normaldo spawns the thrown remote at his hand + the "ahh" emote pop.
@@ -6791,6 +6861,9 @@ const DEV_GAP : float = 6.0
 #   2 — бессмертие   5 — «ФЗ» (только в кампании)
 #   3 — коллизии     6 — «МИНИ»
 #
+# ВОСЬМОГО МЕСТА НЕТ: оно приходится на y = 28, где стоит панель скина. Всё, что
+# не влезло, идёт в нижний ряд — см. `_build_dev_tutorial_btn`.
+#
 # Номер «ФЗ» не переиспользуется в бесконечном режиме, хотя кнопки там нет:
 # столбец должен выглядеть одинаково в обоих режимах, иначе кнопка, которую
 # ищешь пальцем, в разных режимах в разных местах.
@@ -6956,6 +7029,26 @@ const SAFE_SIM : Array = [
 var _safe_btn      : Node2D      = null
 var _safe_sim_idx  : int         = 0
 var _safe_sim_deco : CanvasLayer = null
+
+# ── Дев-чип: ПРОЙТИ ОБУЧЕНИЕ ЗАНОВО ─────────────────────────────────────────
+# Обучение случается один раз в жизни установки. Без этой кнопки оно
+# проверяется на чистом телефоне и больше никогда — то есть не проверяется.
+func _build_dev_tutorial_btn() -> void:
+	# НЕ В ЛЕВОМ СТОЛБЦЕ: восьмое место в нём приходится на y = 28, а там уже
+	# стоит панель скина с полосой опыта. Столбец кончился — дальше нижний ряд,
+	# у которого свободно как раз восьмое место.
+	var vp := get_viewport().get_visible_rect().size
+	var chip := _dev_chip("ОБУЧ", Color(0.70, 1.00, 0.60), _reset_tutorial)
+	chip.position = Vector2(8.0 + (DEV_SZ + DEV_GAP) * 8.0, vp.y - DEV_SZ - 8.0)
+	add_child(chip)
+
+func _reset_tutorial() -> void:
+	_play_btn_sfx()
+	SaveData.tutorial_done  = false
+	SaveData.menu_tips_seen = {}
+	SaveData._save()
+	get_tree().paused = false
+	get_tree().reload_current_scene()
 
 func _build_dev_safe_btn() -> void:
 	_safe_btn = _dev_chip("ОСТРОВ", Color(0.55, 0.85, 1.00), _cycle_safe_sim)

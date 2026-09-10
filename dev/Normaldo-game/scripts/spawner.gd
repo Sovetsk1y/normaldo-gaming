@@ -1166,10 +1166,14 @@ func _pick_level_hazard() -> String:
 #   police_car  — врезается, пройдя долю экрана СЛЕВА направо. Выехав слева,
 #                 он выполняет это условие в первом же кадре и разбивается
 #                 прямо на точке вылета.
+#   swat        — идёт СВОИМ шагом влево и держит щит СПЕРЕДИ ПО ХОДУ. Это
+#                 не украшение, а всё его правило: щитоносца не обойти в лоб.
+#                 Отражённый, он вылетал бы из левого края и тут же уходил за
+#                 него, а щит оказался бы у него за спиной.
 #
 # Отразить хореографию — отдельная работа на каждого. Зеркало живёт пять секунд;
 # на это время они просто уступают место обычному потоку.
-const NO_MIRROR : Array = ["glove", "ninja", "police_car"]
+const NO_MIRROR : Array = ["glove", "ninja", "police_car", "swat"]
 
 func _spawn_level_hazard(kind: String, y: float, vp_w: float, speed: float) -> void:
 	if ItemFlow.mirrored() and kind in NO_MIRROR:
@@ -1347,6 +1351,36 @@ func dev_send_hazard(kind: String) -> void:
 	var lanes := _lane_centers()
 	var speed : float = _campaign_item_speed() if campaign_mode else 250.0
 	_spawn_level_hazard(kind, lanes[randi() % LANE_COUNT], vp_w, speed)
+
+# ── ОДНА ДВЕРЬ ДЛЯ ОБУЧЕНИЯ ────────────────────────────────────────────────
+# Обучение выдаёт поток руками, такт за тактом (см. scripts/tutorial.gd), и
+# обязано выдавать ТО ЖЕ САМОЕ, что выдаёт обычный поток: пицца, собранная
+# обучением по-своему, показывала бы не игру, а обучение — и разошлась бы с
+# игрой на первой же правке предмета.
+#
+# Полоса здесь, в отличие от дев-вызова, ЗАДАЁТСЯ: весь смысл такта в том, что
+# предмет появляется там, где игрок его точно увидит.
+#
+# Возвращает то, что появилось, — обучению нужно дождаться, пока этот самый
+# предмет уедет за край, а не «пока в потоке не останется предметов».
+func tutorial_send(kind: String, lane: int, speed: float = 0.0) -> Node:
+	var vp_w  := get_viewport_rect().size.x
+	var lanes := _lane_centers()
+	var y : float = lanes[clampi(lane, 0, LANE_COUNT - 1)]
+	var v : float = speed
+	if v <= 0.0:
+		v = _campaign_item_speed() if campaign_mode else 250.0
+	var before := get_child_count()
+	match kind:
+		"pizza":
+			_spawn_item(y, vp_w, PIZZA_TEX, 0.09, v, 0, true, true, true)
+		"dollar":
+			_spawn_dollar(y, vp_w, v)
+		_:
+			_spawn_level_hazard(kind, y, vp_w, v)
+	if get_child_count() > before:
+		return get_child(get_child_count() - 1)
+	return null
 
 func dev_send_thief() -> void:
 	var vp_w  := get_viewport_rect().size.x
