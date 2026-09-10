@@ -2493,7 +2493,11 @@ func _pop_power(pos: Vector2) -> void:
 	tw.tween_callback(spr.queue_free)
 
 # Спеллы, у которых своя картинка удара и поза каста ЛИШНЯЯ.
-const _POSE_SKIP : Array = ["explosive_fist"]
+# Спеллы, у которых поза каста НЕ играется. У викинга кулак нарисован и в позе,
+# и летит анимированным — на экране выходило два кулака. У паука голова на время
+# спелла становится рукой (см. `_spider_morph_in`), и поза под ней всё равно не
+# видна, зато сбивает масштаб, который превращение потом возвращает.
+const _POSE_SKIP : Array = ["explosive_fist", "web_pull"]
 
 # Доворот головы к точке тапа: мгновенно повернулся — плавно вернулся. Тайсону
 # он заменяет летящий кулак, и именно поворот делает удар «в сторону», а не
@@ -2629,6 +2633,9 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 			_arm_frames(ps, web, 20.0)
 			_attach_web_line(ps)
 			_play_skill_sfx(SkinSkills.DODGE)
+			# Стреляет РУКА, а не голова: превращение идёт вместе с выстрелом.
+			_spider_morph_in()
+			_spider_watch(ps)
 		"card_deck":
 			# Три карты веером, каждая крутится своей раскадровкой из 9 кадров.
 			_cast_card_deck(dir)
@@ -2895,15 +2902,116 @@ func _drop_web(spr: Sprite2D) -> void:
 	tw.tween_property(spr, "rotation", spr.rotation + 1.4, 0.75)
 	tw.tween_property(spr, "modulate:a", 0.0, 0.3).set_delay(0.45)
 	tw.chain().tween_callback(spr.queue_free)
+const WEB_PULL_T : float = 0.22
+
 func _web_pull(n: Node2D) -> void:
 	if n.has_method("set_process"):
 		n.set_process(false)
+	_spider_caught = true
 	var tw := n.create_tween()
-	tw.tween_property(n, "global_position", global_position, 0.22) \
+	tw.tween_property(n, "global_position", global_position, WEB_PULL_T) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tw.tween_callback(func() -> void:
 		if is_instance_valid(n):
 			n.set_process(true))
+	# Паук возвращается ПОД САМЫЙ КОНЕЦ полёта добычи, а не в его начале:
+	# превращение занимает десятую долю секунды, и начатое раньше оно оставило
+	# бы добычу влетать в уже пустое место.
+	_spider_return_at_catch()
+
+func _spider_return_at_catch() -> void:
+	if not is_instance_valid(_spider_hand):
+		return
+	var tok := _spider_token
+	await get_tree().create_timer(maxf(0.0, WEB_PULL_T - SPIDER_MORPH_T)).timeout
+	if not is_instance_valid(self) or tok != _spider_token:
+		return
+	_spider_morph_out(true)
+
+# ── ПАУК ПРЕВРАЩАЕТСЯ В РУКУ ────────────────────────────────────────────────
+# На время спелла Спайдер САМ становится большой рукой и стреляет из неё, а в
+# конце возвращается пауком — и, если паутина что-то дотащила, тут же это ест.
+#
+# Зачем. «Расчистка» была единственным спеллом, у которого на экране двигался
+# только снаряд: голова оставалась головой, и о том, что спелл вообще
+# сработал, говорила лишь летящая паутина. У викинга летит кулак, у Очков —
+# рывок с хвостом, у Дракулы голова становится призрачной; здесь не было
+# ничего.
+#
+# Превращение БЫСТРОЕ — десятая доля секунды. Это не превращение в смысле
+# анимации, а щелчок: рука появляется вместо головы, как в мультфильме.
+#
+# ── ВОЗВРАТ — В ПОСЛЕДНИЙ МОМЕНТ, А НЕ СРАЗУ ────────────────────────────────
+# Добыча летит к голове 0.22 с. Обратное превращение начинается не когда её
+# зацепили, а когда она почти долетела: паук обязан появиться РОВНО под то, что
+# он сейчас съест, иначе добыча влетает в руку и пропадает в ней.
+const SPIDER_HAND_TEX : Texture2D = preload("res://assets/skills/spider_man/hand_icon.png")
+const SPIDER_MORPH_T  : float = 0.10    # щелчок, а не превращение
+const SPIDER_HAND_K   : float = 1.30    # рука крупнее головы — она же «большая»
+
+var _spider_hand   : Sprite2D = null
+var _spider_token  : int      = 0
+var _spider_caught : bool     = false
+
+func _spider_morph_in() -> void:
+	if is_instance_valid(_spider_hand) or _sprite == null:
+		return
+	_spider_token += 1
+	_spider_caught = false
+	var hand := Sprite2D.new()
+	hand.texture        = SPIDER_HAND_TEX
+	hand.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	hand.z_index        = _sprite.z_index
+	ItemSizing.fit_sprite_content(hand, _art_px() * SPIDER_HAND_K)
+	var full : Vector2 = hand.scale
+	hand.scale = full * 0.25
+	add_child(hand)
+	_spider_hand = hand
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(_sprite, "scale", Vector2.ZERO, SPIDER_MORPH_T)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	tw.tween_property(hand, "scale", full, SPIDER_MORPH_T)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+func _spider_morph_out(eat: bool) -> void:
+	if not is_instance_valid(_spider_hand):
+		return
+	var hand := _spider_hand
+	_spider_hand = null
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(hand, "scale", Vector2.ZERO, SPIDER_MORPH_T)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	tw.chain().tween_callback(hand.queue_free)
+	if not is_instance_valid(_sprite):
+		return
+	# Масштаб головы возвращает `_update_mouth` — он же выбирает нужный кадр.
+	# Ставить его числом здесь значило бы держать вторую копию той же величины
+	# (`_base_scale * _head_k`), и она разошлась бы на первой правке поз.
+	_update_mouth()
+	var back : Vector2 = _sprite.scale
+	_sprite.scale = back * 0.25
+	var tw2 := create_tween()
+	tw2.tween_property(_sprite, "scale", back, SPIDER_MORPH_T)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if eat:
+		# ЖРЁТ. Тот же кадр, что и на обычной пицце: добыча, дотащенная
+		# паутиной, съедается ровно так же, как подобранная лбом.
+		_eating    = true
+		_eat_timer = EAT_ANIM_TIME
+		_show_eat_frame()
+
+# Спелл кончился сам — паутина улетела за край или разбилась, ничего не
+# дотащив. Ждём именно СНАРЯД, а не таймер: время жизни паутины зависит от
+# того, во что она попала, и вторым числом здесь оно бы разошлось.
+func _spider_watch(shot: Node) -> void:
+	var tok := _spider_token
+	while is_instance_valid(shot):
+		await get_tree().process_frame
+		if not is_instance_valid(self) or tok != _spider_token:
+			return
+	if _spider_caught:
+		return          # добыча летит — возврат сыграет `_web_pull`
+	_spider_morph_out(false)
 
 # Невидимость Дракулы: препятствия пролетают сквозь, голова полупрозрачна.
 func _cast_invisibility(duration: float) -> void:

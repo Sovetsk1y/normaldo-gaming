@@ -19,7 +19,7 @@ var _checks : int = 0
 #
 # Число — нижняя граница, а не точное совпадение: добавлять проверки можно, а
 # терять — нет. Не сошлось — прогон падает и говорит, сколько недосчитался.
-const EXPECTED_CHECKS : int = 60
+const EXPECTED_CHECKS : int = 71
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -59,6 +59,11 @@ func _initialize() -> void:
 	await _test_casts(reg, save)
 	print("── Паутина Спайдера ──")
 	await _test_web(save)
+	print("── Паук становится рукой ──")
+	await _test_spider_morph(save)
+	await _test_spider_morph_empty(save)
+	print("── Кружки способностей заполнены ──")
+	_test_ability_icons()
 	print("── Поза каста при взгляде влево ──")
 	await _test_pose_mirror(reg, save)
 	print("── Колода Джокера: крест, отскоки, возврат ──")
@@ -801,6 +806,131 @@ func _test_web(save: Node) -> void:
 		_check(true, "добыча долетела до головы и подобрана")
 
 	game.queue_free()
+
+# ── ПАУК СТАНОВИТСЯ РУКОЙ ───────────────────────────────────────────────────
+# На время спелла Спайдер сам превращается в большую руку и стреляет из неё, а
+# в конце возвращается пауком — и, если паутина что-то дотащила, ест это.
+#
+# Проверяется вся дуга, а не «появился узел»: рука ПОЯВЛЯЕТСЯ на касте, УХОДИТ
+# по концу спелла, и по притянутой добыче возврат сопровождается жеванием.
+func _test_spider_morph(save: Node) -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var normaldo : Node = game.get_node_or_null("Normaldo")
+	var spawner  : Node = game.get_node_or_null("Spawner")
+	spawner.clear_items()
+	spawner.set_process(false)
+	get_root().get_tree().paused = false
+	save.active_skin = "spider_man"
+	save.skin_level  = 10
+	normaldo.reload_skin()
+	normaldo.call("_build_skin_runtime")
+	await process_frame
+
+	_check(not bool(normaldo.get("_spider_hand") != null),
+		"до каста руки нет")
+	normaldo.call("_try_fire_ability", (normaldo as Node2D).position + Vector2(400.0, 0.0))
+	await _wait(0.2)
+	_check(normaldo.get("_spider_hand") != null, "на касте паук стал рукой")
+
+	# ДОБЫЧА. Возврат должен случиться не сразу, а под конец её полёта — и
+	# закончиться жеванием.
+	var loot := Area2D.new()
+	loot.set_script(preload("res://scripts/effect_item.gd"))
+	loot.set("kind", "casino_chip")
+	loot.set("speed", 0.0)
+	loot.position = (normaldo as Node2D).position + Vector2(160.0, 0.0)
+	spawner.add_child(loot)
+	await process_frame
+	normaldo.call("_web_pull", loot)
+	_check(normaldo.get("_spider_hand") != null,
+		"сразу после захвата он ЕЩЁ рука — добыча в полёте")
+	# Замер на четверти секунды, а не на половине: возврат кончается к 0.22 с
+	# (полёт 0.22 минус превращение 0.10, плюс само превращение), а жевание
+	# длится 0.25 с и к полусекунде уже успевает закончиться честно.
+	await _wait(0.26)
+	_check(normaldo.get("_spider_hand") == null, "а к концу полёта снова паук")
+	_check(bool(normaldo.get("_eating")), "и жуёт то, что дотащил")
+
+	game.queue_free()
+	await process_frame
+
+# СПЕЛЛ КОНЧИЛСЯ ВПУСТУЮ — рука всё равно обязана уйти. Иначе паук остаётся
+# рукой до конца забега, и это худший из возможных исходов: играть нечем.
+func _test_spider_morph_empty(save: Node) -> void:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var normaldo : Node = game.get_node_or_null("Normaldo")
+	var spawner  : Node = game.get_node_or_null("Spawner")
+	spawner.clear_items()
+	spawner.set_process(false)
+	get_root().get_tree().paused = false
+	save.active_skin = "spider_man"
+	save.skin_level  = 10
+	normaldo.reload_skin()
+	normaldo.call("_build_skin_runtime")
+	await process_frame
+
+	normaldo.call("_try_fire_ability", (normaldo as Node2D).position + Vector2(400.0, 0.0))
+	await _wait(0.2)
+	_check(normaldo.get("_spider_hand") != null, "рука появилась")
+	# Паутина улетает за край сама; ждём с запасом на её время жизни.
+	await _wait(3.2)
+	_check(normaldo.get("_spider_hand") == null,
+		"и ушла сама, когда паутина кончилась ни с чем")
+	_check(not bool(normaldo.get("_eating")), "жевать при этом нечего")
+
+	game.queue_free()
+	await process_frame
+
+func _wait(sec: float) -> void:
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < int(sec * 1000.0):
+		get_root().get_tree().paused = false
+		await process_frame
+
+# ── КРУЖКИ СПОСОБНОСТЕЙ ЗАПОЛНЕНЫ У ВСЕХ ───────────────────────────────────
+# Кружок без картинки — это «✦» или «★», одинаковые у всех скинов: они говорят
+# «тут что-то есть», а не что именно. Проверяется КАЖДЫЙ скин, а не список
+# избранных: новый скин без иконки обязан уронить набор, а не тихо получить
+# звёздочку.
+func _test_ability_icons() -> void:
+	var reg : Node = get_root().get_node_or_null("SkinRegistry")
+	var sk  : Node = get_root().get_node_or_null("SkinSkills")
+	var no_icon : Array = []
+	var broken  : Array = []
+	var pass_no : Array = []
+	var seen : int = 0
+	for skin in reg.get("SKINS"):
+		var sid : String = String((skin as Dictionary).get("id", ""))
+		var ab : Dictionary = sk.call("get_ability", sid)
+		if ab.is_empty():
+			continue
+		seen += 1
+		# Рыгалити рисуется общим облаком дыма — у неё своей иконки нет и не надо.
+		if String(ab.get("type", "")) != "ryagality":
+			var path : String = String(ab.get("icon", ""))
+			if path == "":
+				no_icon.append(sid)
+			elif load(path) == null:
+				broken.append(sid)
+		var pas : Dictionary = sk.call("get_passive", sid)
+		if not pas.is_empty():
+			var ppath : String = String(pas.get("icon", ""))
+			if ppath == "" or load(ppath) == null:
+				pass_no.append(sid)
+	_check(seen >= 12, "скинов со способностью: %d" % seen)
+	_check(no_icon.is_empty(), "у каждой активки своя картинка: %s" % [no_icon])
+	_check(broken.is_empty(), "и каждая грузится: %s" % [broken])
+	_check(pass_no.is_empty(), "у каждой пассивки тоже: %s" % [pass_no])
+
+	# ПЕРЧАТКА ТАЙСОНА КРУПНЕЕ РЕЗИСТОВОЙ. Она лежит и там, и там, и два
+	# одинаковых кружка рядом читаются как «одно и то же».
+	var tab : Dictionary = sk.call("get_ability", "tyson")
+	_check(float(tab.get("icon_k", 1.0)) > 1.0,
+		"перчатка активки крупнее обычного: ×%.2f" % [float(tab.get("icon_k", 1.0))])
 
 # ── ПОЗА КАСТА ПРИ ВЗГЛЯДЕ ВЛЕВО ─────────────────────────────────────────────
 # Кадры вариантов (каст, «доллары в глазах», «ест») нарисованы в СВОИХ рамках, и

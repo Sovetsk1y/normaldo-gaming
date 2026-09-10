@@ -55,21 +55,24 @@ const DATA : Dictionary = {
 		# пятисекундном откате скин играл как «раз в пять секунд одно движение»,
 		# а мили-скину нужна частота: подставиться под удар он обязан уметь чаще,
 		# чем стрелок промахивается.
-		"ability": { "type": SPELL, "id": "explosive_fist", "combat": MELEE, "cd": 3.0,
+		"ability": { "type": SPELL, "id": "explosive_fist",
+			"icon": "res://assets/skills/viking/fist.png", "combat": MELEE, "cd": 3.0,
 			"label": "ВЗРЫВНОЙ КУЛАК",
 			"desc": "Удар кулаком перед собой — взрыв сносит всё вплотную" },
 		"unique": {},
 	},
 	"kuss": {
 		"skills": [], "resists": [],
-		"ability": { "type": SPELL, "id": "shovel_throw", "combat": RANGED, "cd": 3.0,
+		"ability": { "type": SPELL, "id": "shovel_throw",
+			"icon": "res://assets/skills/kuss/spatula.png", "combat": RANGED, "cd": 3.0,
 			"label": "БРОСОК ЛОПАТКИ",
 			"desc": "Лопатка летит в сторону тапа и сносит одну цель" },
 		"unique": {},
 	},
 	"halloween": {
 		"skills": [], "resists": [],
-		"ability": { "type": SPELL, "id": "black_birds", "combat": RANGED, "cd": 5.0,
+		"ability": { "type": SPELL, "id": "black_birds",
+			"icon": "res://assets/skills/halloween/blackbird.png", "combat": RANGED, "cd": 5.0,
 			"label": "ЧЁРНЫЕ ПТИЦЫ", "projectile": "blackbird",
 			"desc": "Стая чёрных птиц срывается с головы и разлетается в разные стороны" },
 		"unique": {},
@@ -80,14 +83,20 @@ const DATA : Dictionary = {
 		# один хук в точку тапа, без летящего кулака и без радиуса викинга.
 		# Компенсируется он частотой, иначе это просто худший удар: на секунде он
 		# наконец играет как боксёр, а не как медленный стрелок без снаряда.
-		"ability": { "type": SPELL, "id": "glove_punch", "combat": MELEE, "cd": 1.0,
+		# `icon_k` — перчатка в кружке КРУПНЕЕ обычного. Она же лежит у Тайсона в
+		# резистах, и два одинаковых кружка рядом читались бы как «одно и то же»,
+		# хотя один это удар, а другой защита.
+		"ability": { "type": SPELL, "id": "glove_punch",
+			"icon": "res://assets/skills/tyson/punch.png", "icon_k": 1.28,
+			"combat": MELEE, "cd": 1.0,
 			"label": "УДАР ПЕРЧАТКОЙ",
 			"desc": "Короткий хук по цели перед собой" },
 		"unique": {},
 	},
 	"batman": {
 		"skills": [], "resists": [],
-		"ability": { "type": SPELL, "id": "bat_shuriken", "combat": RANGED, "cd": 3.0,
+		"ability": { "type": SPELL, "id": "bat_shuriken",
+			"icon": "res://assets/skills/batman/throw.png", "combat": RANGED, "cd": 3.0,
 			"label": "БЭТ-СЮРИКЕН", "projectile": "batarang",
 			"desc": "Батаранг уходит в сторону тапа, вращаясь на лету" },
 		"unique": {},
@@ -96,10 +105,12 @@ const DATA : Dictionary = {
 	# ── Эпические ─────────────────────────────────────────────────────────────
 	"dracula": {
 		"skills": [], "resists": [],
-		"ability": { "type": SPELL, "id": "invisibility", "combat": BUFF, "cd": 5.0,
+		"ability": { "type": SPELL, "id": "invisibility",
+			"icon": "res://assets/skills/dracula/wing_ghost.png", "combat": BUFF, "cd": 5.0,
 			"duration": 2.0, "label": "НЕВИДИМОСТЬ",
 			"desc": "На 2 секунды исчезаешь — препятствия пролетают сквозь" },
-		"unique": { "id": "bum_feast", "label": "ОТЖОР ЛЮДЕЙ", "short": "О",
+		"unique": { "id": "bum_feast",
+			"icon": "res://assets/items/homeless1.png", "label": "ОТЖОР ЛЮДЕЙ", "short": "О",
 			"desc": "Сбил человека — и сразу толстеешь на 3 пиццы" },
 	},
 	"glasses": {
@@ -107,15 +118,18 @@ const DATA : Dictionary = {
 		# Было «ускорение на 2 секунды». Сила там имелась, а читаемости не было:
 		# на экране не происходило ничего, кроме того, что палец начинал
 		# опережать голову. Рывок видно.
-		"ability": { "type": SPELL, "id": "electric_dash", "combat": BUFF, "cd": 5.0,
+		"ability": { "type": SPELL, "id": "electric_dash",
+			"icon": "res://assets/skills/glasses/can_hand.png", "combat": BUFF, "cd": 5.0,
 			"duration": 0.24, "label": "ЭЛЕКТРО-РЫВОК",
 			"desc": "Глотнул энергетик — и рывком в точку тапа, сквозь всё подряд" },
-		"unique": { "id": "aerodynamics", "label": "АЭРОДИНАМИКА", "short": "А",
+		"unique": { "id": "aerodynamics",
+			"icon": "res://assets/skills/glasses/sunglasses.png", "label": "АЭРОДИНАМИКА", "short": "А",
 			"desc": "Жир вообще не замедляет — на любом весе остаёшься шустрым" },
 	},
 	"wizard": {
 		"skills": [], "resists": [],
-		"ability": { "type": SPELL, "id": "wand_shot", "combat": RANGED, "cd": 3.0,
+		"ability": { "type": SPELL, "id": "wand_shot",
+			"icon": "res://assets/skills/wizard/staff1.png", "combat": RANGED, "cd": 3.0,
 			"label": "ВЫСТРЕЛ ПАЛОЧКОЙ", "projectile": "magicball",
 			# Маг не ломает предмет и не выдаёт добычу — он превращает угрозу в
 			# СТАВКУ: ящик ещё надо поймать, и выплюнет он что попало. Откат за
@@ -127,32 +141,38 @@ const DATA : Dictionary = {
 	# ── Легендарные ───────────────────────────────────────────────────────────
 	"harry_potter": {
 		"skills": [], "resists": [],
-		"ability": { "type": SPELL, "id": "light_flash", "combat": RANGED, "cd": 10.0,
+		"ability": { "type": SPELL, "id": "light_flash",
+			"icon": "res://assets/skills/harry_potter/glasses_icon.png", "combat": RANGED, "cd": 10.0,
 			"label": "ВСПЫШКА СВЕТА",
 			"desc": "Вспышка обнуляет ВСЁ на экране разом. Откат самый долгий — 10 секунд" },
 		"unique": {},
 	},
 	"pirate": {
 		"skills": [], "resists": [],
-		"ability": { "type": SPELL, "id": "helm_throw", "combat": RANGED, "cd": 3.0,
+		"ability": { "type": SPELL, "id": "helm_throw",
+			"icon": "res://assets/skills/ship_wheel.png", "combat": RANGED, "cd": 3.0,
 			"label": "ШТУРВАЛ",
 			"desc": "Штурвал прошивает всё на линии и не разбивается" },
-		"unique": { "id": "treasure", "label": "СОКРОВИЩЕ", "short": "С",
+		"unique": { "id": "treasure",
+			"icon": "res://assets/skills/x3.png", "label": "СОКРОВИЩЕ", "short": "С",
 			"desc": "Рейт на деньги ×3 — каждый доллар считается втройне" },
 	},
 	"joker": {
 		"skills": [], "resists": [],
-		"ability": { "type": SPELL, "id": "card_deck", "combat": RANGED, "cd": 5.0,
+		"ability": { "type": SPELL, "id": "card_deck",
+			"icon": "res://assets/skills/joker/card_pair.png", "combat": RANGED, "cd": 5.0,
 			"label": "КОЛОДА КАРТ",
 			"desc": "Четыре карты крестом: бьют плохое, отскакивают от краёв и возвращаются" },
 		"unique": {},
 	},
 	"spider_man": {
 		"skills": [], "resists": [],
-		"ability": { "type": SPELL, "id": "web_pull", "combat": RANGED, "cd": 2.0,
+		"ability": { "type": SPELL, "id": "web_pull",
+			"icon": "res://assets/skills/spider_man/hand_icon.png", "combat": RANGED, "cd": 2.0,
 			"label": "РАСЧИСТКА", "projectile": "web",
 			"desc": "Паутина ломает всё плохое на линии и утаскивает первую добычу" },
-		"unique": { "id": "spider_sense", "label": "ПОВЫШЕННАЯ ЛОВКОСТЬ", "short": "Л",
+		"unique": { "id": "spider_sense",
+			"icon": "res://assets/skills/spider_man/mask_icon.png", "label": "ПОВЫШЕННАЯ ЛОВКОСТЬ", "short": "Л",
 			"desc": "Паук слушается мгновенно — увороты даются легко на любом жире" },
 	},
 

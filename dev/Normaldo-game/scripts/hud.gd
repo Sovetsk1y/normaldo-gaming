@@ -4284,8 +4284,13 @@ func _circle_tex() -> Texture2D:
 # `locked` — способность ещё не открыта уровнем скина: кружок гаснет, а поверх
 # ложится замок. Показывать её всё равно нужно — игрок должен видеть, ради чего
 # качать скин дальше.
+# `icon_k` — во сколько раз иконка крупнее обычной. Нужен ровно одному случаю и
+# по делу: у Тайсона перчатка и в спелле, и в резистах, и в кружке активки она
+# обязана быть заметно больше — иначе два одинаковых кружка рядом означают
+# «одно и то же», хотя один это удар, а другой защита.
 func _ability_badge(parent: Control, x: float, y: float, sz: float, ring_col: Color,
-		icon_tex: Texture2D, icon_mod: Color, star: String, locked: bool = false) -> void:
+		icon_tex: Texture2D, icon_mod: Color, star: String, locked: bool = false,
+		icon_k: float = 1.0) -> void:
 	var rim := TextureRect.new()
 	rim.texture = _circle_tex(); rim.modulate = ring_col
 	rim.stretch_mode = TextureRect.STRETCH_SCALE; rim.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -4301,7 +4306,7 @@ func _ability_badge(parent: Control, x: float, y: float, sz: float, ring_col: Co
 	disc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(disc)
 	if icon_tex != null:
-		var isz := sz * 0.64
+		var isz : float = sz * 0.64 * icon_k
 		var ic := _make_icon(icon_tex, isz); ic.modulate = icon_mod
 		ic.position = Vector2(x + (sz - isz) * 0.5, y + (sz - isz) * 0.5); ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		parent.add_child(ic)
@@ -4356,7 +4361,14 @@ func _ability_items(skin_id: String) -> Array:
 			"desc": "Разбиваешь «" + nm + "» без вреда для себя." })
 	var passive := SkinSkills.get_passive(skin_id)
 	if not passive.is_empty():
-		items.append({ "ring": RING_PASS, "tex": null, "mod": Color(1, 1, 1), "star": "★",
+		# Своей картинкой, а не звёздочкой. «★» у всех пассивок одна и та же и о
+		# самой пассивке не говорит ничего — кружок с ней читался как «тут что-то
+		# есть», а не как «маска паука» или «аэродинамика».
+		var ptex : Texture2D = null
+		if String(passive.get("icon", "")) != "":
+			ptex = load(String(passive.get("icon", ""))) as Texture2D
+		items.append({ "ring": RING_PASS, "tex": ptex, "mod": Color(1, 1, 1),
+			"star": "" if ptex != null else "★",
 			"kind": "ПАССИВНАЯ", "kind_col": RING_PASS,
 			"title": passive.get("label", ""), "desc": passive.get("desc", "") })
 	var ab := SkinSkills.get_ability(skin_id)
@@ -4366,7 +4378,7 @@ func _ability_items(skin_id: String) -> Array:
 			"title": ab.get("label", ""), "desc": ab.get("desc", "") })
 	elif String(ab.get("icon", "")) != "":
 		items.append({ "ring": RING_ACTIVE, "tex": load(String(ab.get("icon", ""))),
-			"mod": Color(1, 1, 1), "star": "",
+			"mod": Color(1, 1, 1), "star": "", "icon_k": float(ab.get("icon_k", 1.0)),
 			"kind": "АКТИВНАЯ", "kind_col": RING_ACTIVE,
 			"title": ab.get("label", ""), "desc": ab.get("desc", "") })
 	elif not ab.is_empty():
@@ -4386,7 +4398,7 @@ func _fill_desc(desc_root: VBoxContainer, skin_id: String) -> void:
 		var bc := Control.new()
 		bc.custom_minimum_size = Vector2(28.0, 28.0)
 		_ability_badge(bc, 0.0, 0.0, 28.0, it["ring"], it["tex"], it["mod"], it["star"],
-			bool(it.get("locked", false)))
+			bool(it.get("locked", false)), float(it.get("icon_k", 1.0)))
 		row.add_child(bc)
 		var col := VBoxContainer.new()
 		col.add_theme_constant_override("separation", 1)

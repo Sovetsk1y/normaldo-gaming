@@ -75,7 +75,8 @@ func setup(nrm: Node) -> void:
 			# Спелл со своей иконкой рисуется ею, а не общей звёздочкой: «✦» у
 			# всех одинаковый и о самом спелле не говорит ничего.
 			specs.append({ "key": "active", "tex": load(String(ab.get("icon", ""))), "sym": "",
-				"mod": Color(1, 1, 1), "ring": RING_ACTIVE, "title": a_title, "desc": a_desc, "chg": a_charges })
+				"mod": Color(1, 1, 1), "ring": RING_ACTIVE, "title": a_title, "desc": a_desc,
+				"chg": a_charges, "k": float(ab.get("icon_k", 1.0)) })
 		else:
 			specs.append({ "key": "active", "tex": null, "sym": "✦",
 				"mod": Color(1, 1, 1), "ring": RING_ACTIVE, "title": a_title, "desc": a_desc, "chg": a_charges })
@@ -145,6 +146,7 @@ func setup(nrm: Node) -> void:
 		b.tex      = s["tex"]
 		b.symbol   = s["sym"]
 		b.icon_mod = s["mod"]
+		b.icon_k   = float(s.get("k", 1.0))
 		b.ring_col = s["ring"]
 		b.dynamic  = s.get("dyn", false)
 		b.charges_badge = s.get("chg", false)
@@ -222,6 +224,10 @@ class Badge extends Control:
 	var tex      : Texture2D
 	var symbol   : String   = ""
 	var icon_mod : Color    = Color(1, 1, 1)
+	# Во сколько раз иконка крупнее обычной. Нужен ровно перчатке Тайсона: она
+	# лежит и в спелле, и в резистах, и два одинаковых кружка рядом читались бы
+	# как «одно и то же», хотя один это удар, а другой защита.
+	var icon_k   : float    = 1.0
 	var ring_col : Color    = Color(1, 1, 1)
 	var dynamic  : bool     = false   # only visible while the effect is running
 	var charges_badge : bool = false  # active ability with a charge counter
@@ -396,7 +402,7 @@ class Badge extends Control:
 		# Icon (texture) or symbol. The item is drawn a bit LARGER than the disc so
 		# it pokes out past the ring, keeping its aspect ratio.
 		if tex != null:
-			var isz := D * 1.16
+			var isz : float = D * 1.16 * icon_k
 			var ts := tex.get_size()
 			var k := isz / maxf(ts.x, ts.y)
 			var iw := ts.x * k
