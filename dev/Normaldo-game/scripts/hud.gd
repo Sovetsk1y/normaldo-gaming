@@ -149,6 +149,9 @@ var _pizza_icon     : TextureRect = null   # refs kept for the ЖИРОБОСС 
 var _dollar_icon    : TextureRect = null
 var _time_label     : Label
 var _fat_bar_fill  : ColorRect
+# Подложка панели веса. Держится ради одного: обучение спрашивает у HUD, где
+# эта панель на экране, чтобы обвести её рамкой (см. `fat_panel_rect`).
+var _fat_panel_bg  : ColorRect = null
 var _fat_bar_width : float = 0.0
 # y of the bottom edge of the resources + fat panels — wizard / one-shot
 # panels anchor themselves below this so nothing overlaps.
@@ -559,6 +562,15 @@ func _refit_head_rect(r: TextureRect, tex: Texture2D, fat: int) -> void:
 # ── ЖИРОБОСС end fly-in targets ───────────────────────────────────────────────
 # Screen-space centre of the top-left pizza / dollar counters, so fat_boss.gd can
 # fly the mini-game's tallied loot into the real run score at the end.
+# ГДЕ НА ЭКРАНЕ ПОЛОСА ВЕСА. Спрашивает обучение: слова «вес — это жизни» без
+# указания на счётчик оставляют игрока гадать, по чему следить. Отдаётся
+# ЖИВОЙ прямоугольник, а не выписанные числа: панель считается от размера
+# экрана и ширины левого столбца, и копия этих чисел разъехалась бы с ней.
+func fat_panel_rect() -> Rect2:
+	if is_instance_valid(_fat_panel_bg):
+		return _fat_panel_bg.get_global_rect()
+	return Rect2()
+
 func fat_boss_pizza_target() -> Vector2:
 	if is_instance_valid(_pizza_icon):
 		return _pizza_icon.global_position + _pizza_icon.size * 0.5
@@ -873,6 +885,7 @@ func _build_ui() -> void:
 	fat_bg.size     = Vector2(fat_panel_w, fat_panel_h)
 	fat_bg.position = Vector2(fat_panel_x, fat_y)
 	_left_container.add_child(fat_bg)
+	_fat_panel_bg = fat_bg
 
 	# Bar runs almost the full width of the panel (just panel-pad on each side).
 	var bar_w : float = fat_panel_w - FAT_PANEL_PAD * 2
@@ -1427,17 +1440,25 @@ var _play_from_menu : bool = false
 var _tour_play_zone   : Control = null
 var _tour_quests_btn  : Control = null
 var _tour_skins_btn   : Control = null
+var _tour_slots_btn   : Control = null
+var _tour_leaders_btn : Control = null
+var _tour_book_btn    : Control = null
+var _tour_awards_btn  : Control = null
 
 func _menu_tour_maybe() -> void:
 	if not SaveData.tutorial_done:
+		return
+	# Тур идёт первым и один раз; когда он позади, меню начинает объяснять
+	# оставшиеся кнопки по поводу. Разом два всплывающих окна невозможны: тур
+	# уходит по `return`, поводы — тоже, показав ровно одну подсказку.
+	if bool(SaveData.menu_tips_seen.get("tour", false)):
+		_menu_tip_maybe()
 		return
 	# И ХОТЯ БЫ ОДИН ЗАБЕГ ПОЗАДИ. Тур обещан «после первой игры», и показанный
 	# до неё он объясняет кнопки тому, кто ещё не знает, зачем они. Заодно это
 	# делает поведение определённым для тестов: на чистом сейве забегов ноль, и
 	# тур не лезет поверх меню, по которому тест собирается тапать.
 	if SaveData.total_runs() <= 0:
-		return
-	if bool(SaveData.menu_tips_seen.get("tour", false)):
 		return
 	var stops : Array = []
 	for it in [
@@ -1455,7 +1476,61 @@ func _menu_tour_maybe() -> void:
 		})
 	if stops.is_empty():
 		return
-	MenuTour.play(self, stops)
+	MenuTour.play(self, stops, "tour")
+
+# ── ПОДСКАЗКИ ПО ПОВОДУ ─────────────────────────────────────────────────────
+# Остальные кнопки меню не объясняются туром, и это не экономия. Тур по семи
+# кнопкам подряд листают не читая: игроку показывают то, чем он не собирается
+# пользоваться прямо сейчас. Зато у каждой такой кнопки есть СВОЙ МОМЕНТ, когда
+# она вдруг становится нужна, — и объясняется она ровно тогда.
+#
+# Условие у каждой — то самое событие, а не «прошло N забегов»: жетон упал,
+# результат уехал в таблицу, открылась история. Игрок в этот момент уже видит
+# на кнопке бейдж и сам хочет знать, что там; подсказка отвечает на возникший
+# вопрос, а не задаёт его.
+#
+# ПО ОДНОЙ ЗА ЗАХОД В МЕНЮ. То же правило, что и в забеге: две подсказки разом —
+# это уже не подсказки, а модальное окно с оглавлением.
+const MENU_TIPS : Array = [
+	["slots",   "СЛОТЫ",         "упал жетон — здесь его крутят"],
+	["leaders", "ЛИДЕРЫ",        "твой результат уже в таблице недели"],
+	["book",    "КНИГА УЧИТЕЛЯ", "открылась история — она тут"],
+	["awards",  "ДОСТИЖЕНИЯ",    "тут считают всё, что ты успел"],
+]
+
+func _menu_tip_ready(key: String) -> bool:
+	match key:
+		"slots":   return SaveData.tokens > 0
+		"leaders": return not (SaveData.mode_best as Dictionary).is_empty()
+		"book":    return QuestManager.has_story_badge()
+		"awards":  return int((AchievementManager.summary() as Dictionary).get("done", 0)) > 0
+	return false
+
+func _menu_tip_target(key: String) -> Control:
+	match key:
+		"slots":   return _tour_slots_btn
+		"leaders": return _tour_leaders_btn
+		"book":    return _tour_book_btn
+		"awards":  return _tour_awards_btn
+	return null
+
+func _menu_tip_maybe() -> void:
+	for it in MENU_TIPS:
+		var row : Array = it
+		var key : String = String(row[0])
+		if bool(SaveData.menu_tips_seen.get(key, false)):
+			continue
+		if not _menu_tip_ready(key):
+			continue
+		var c := _menu_tip_target(key)
+		if c == null or not is_instance_valid(c):
+			continue
+		MenuTour.play(self, [{
+			"rect":  c.get_global_rect(),
+			"big":   String(row[1]),
+			"small": String(row[2]),
+		}], key)
+		return
 
 # ── Музыка главного меню ──────────────────────────────────────────────────────
 # Меню молчало: трек забега заводится только на старте, и до первого тапа игра
@@ -2088,13 +2163,14 @@ func _build_menu_book_btn(vp: Vector2) -> void:
 	var book_btn := _build_menu_icon_btn(vp, MENU_ICON_BOOK, Vector2(217, 0),
 		"КНИГА\nУЧИТЕЛЯ", _show_achievements, 11)
 	_achieve_badge = _attach_canvas_badge(book_btn, QuestManager.has_story_badge())
+	_tour_book_btn = book_btn
 
 	# Достижения — рядом с книгой, а не в правом столбце. Столбец полон: четыре
 	# шайбы с шагом 40 канвас-px доходят до 162 при высоте канваса 192, и пятая
 	# просто не влезает вместе с подписью. Но соседство с книгой не вынужденное,
 	# а верное: книга про сюжет, достижения про прожитое, и оба отвечают на
 	# вопрос «что я уже сделал» — в отличие от скинов, слотов и лидеров.
-	_build_menu_icon_btn(vp, MENU_ICON_AWARDS, Vector2(283, 0),
+	_tour_awards_btn = _build_menu_icon_btn(vp, MENU_ICON_AWARDS, Vector2(283, 0),
 		"ДОСТИЖЕНИЯ", _show_awards, 9)
 
 # ── Player identity block (top-center) ───────────────────────────────────────
@@ -2214,7 +2290,7 @@ func _build_menu_right_column(vp: Vector2) -> void:
 	_skins_badge = _attach_canvas_badge(skins_btn, SaveData.has_ready_mastery_chest())
 	_tour_skins_btn = skins_btn
 
-	_build_menu_icon_btn(vp, MENU_ICON_SLOTS, Vector2(350, 48),
+	_tour_slots_btn = _build_menu_icon_btn(vp, MENU_ICON_SLOTS, Vector2(350, 48),
 		"СЛОТЫ", _show_slots)
 
 	var quests_btn := _build_menu_icon_btn(vp, MENU_ICON_QUESTS, Vector2(350, 88),
@@ -2222,7 +2298,7 @@ func _build_menu_right_column(vp: Vector2) -> void:
 	_quest_badge = _attach_canvas_badge(quests_btn, QuestManager.has_daily_badge())
 	_tour_quests_btn = quests_btn
 
-	_build_menu_icon_btn(vp, MENU_ICON_LEADERS, Vector2(350, 128),
+	_tour_leaders_btn = _build_menu_icon_btn(vp, MENU_ICON_LEADERS, Vector2(350, 128),
 		"ЛИДЕРЫ", _show_leaderboard.bind(0))
 
 	# _achieve_badge is wired up directly on the book button now (see

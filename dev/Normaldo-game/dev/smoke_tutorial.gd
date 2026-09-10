@@ -30,7 +30,7 @@ func _beats() -> Array:
 # Такт «веди пальцем» ждёт до двадцати секунд, «поешь» — до двадцати двух. Все
 # ожидания в тесте ставятся С ЗАПАСОМ ОТ ОБРАТНОГО: проверка обязана падать,
 # когда такт НЕ сдвинулся сам, а не когда он не успел.
-const EXPECTED_CHECKS : int = 22
+const EXPECTED_CHECKS : int = 27
 
 var _fails  : int = 0
 var _checks : int = 0
@@ -56,6 +56,8 @@ func _initialize() -> void:
 	await _test_skip_releases()
 	print("── Тур по меню: один раз и после забега ──")
 	await _test_menu_tour()
+	print("── Подсказки по поводу ──")
+	await _test_menu_tips()
 	print("── Сценарий не врёт про себя ──")
 	_test_script_sane()
 
@@ -257,7 +259,10 @@ func _test_menu_tour() -> void:
 	game.queue_free()
 	await process_frame
 
-	# И второй раз не заводится.
+	# И второй раз не заводится. Поводы для остальных кнопок при этом гасим:
+	# проверяем здесь именно тур, а не то, что меню вообще молчит.
+	_save().set("menu_tips_seen",
+		{"tour": true, "slots": true, "leaders": true, "book": true, "awards": true})
 	var game2 : Node = load("res://scenes/game.tscn").instantiate()
 	get_root().add_child(game2)
 	await process_frame
@@ -266,6 +271,57 @@ func _test_menu_tour() -> void:
 	_check(again == null, "а во второй раз меню молчит")
 	game2.queue_free()
 	await process_frame
+
+# ── ПОДСКАЗКИ ПО ПОВОДУ ─────────────────────────────────────────────────────
+# Проверяется не «всплыло окно», а само правило: подсказка появляется, КОГДА
+# случился её повод, метит в свою кнопку, показывается по одной за заход и
+# больше не возвращается.
+func _test_menu_tips() -> void:
+	await process_frame
+	_save().set("tutorial_done", true)
+	_save().set("skin_progress", {"classic": {"runs": 3}})
+	# Книга и достижения гасятся сразу: их повод («открылась история», «есть
+	# первое достижение») на прожитом сейве уже наступил, и проверять на них
+	# «повода нет» нечестно. Остаются жетоны и таблица — их можно занулить.
+	_save().set("menu_tips_seen", {"tour": true, "book": true, "awards": true})
+	_save().set("tokens", 0)
+	_save().set("mode_best", {})
+	var quiet : Array = await _menu_with_tip(3.0)
+	_check(quiet[1] == null, "без повода меню молчит")
+	(quiet[0] as Node).queue_free()
+	await process_frame
+
+	# Упал жетон — вот и повод.
+	_save().set("tokens", 3)
+	var got : Array = await _menu_with_tip(8.0)
+	var tip : Node = got[1]
+	_check(tip != null, "упал жетон — подсказка про слоты пришла")
+	if tip != null:
+		_check(String(tip.get("_key")) == "slots",
+			"и это именно она: «%s»" % [tip.get("_key")])
+		var stops : Array = tip.get("_stops")
+		_check(stops.size() == 1, "остановка ровно одна: %d" % stops.size())
+		# ПО ОДНОЙ ЗА ЗАХОД: повод у «лидеров» тоже есть, но лезть вдвоём нельзя.
+		tip.call("_show", 1)
+		await process_frame
+	(got[0] as Node).queue_free()
+	await process_frame
+
+	# Показанная — больше не возвращается, зато приходит следующая по поводу.
+	_save().set("mode_best", {"ep1": 42})
+	var next : Array = await _menu_with_tip(8.0)
+	_check(next[1] != null and String((next[1] as Node).get("_key")) == "leaders",
+		"следующий заход — следующая по поводу: «%s»"
+		% [(next[1] as Node).get("_key") if next[1] != null else "молчит"])
+	(next[0] as Node).queue_free()
+	await process_frame
+
+func _menu_with_tip(limit: float) -> Array:
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	await process_frame
+	var hud : Node = game.get_node_or_null("HUD")
+	return [game, await _wait_node(hud, "MenuTour", limit)]
 
 func _wait_node(host: Node, name: String, limit: float) -> Node:
 	var t0 := Time.get_ticks_msec()

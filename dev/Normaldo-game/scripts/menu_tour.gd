@@ -23,26 +23,34 @@ class_name MenuTour
 
 const UI_FONT := preload("res://assets/fonts/RussoOne-Regular.ttf")
 
-const DIM       : Color = Color(0.0, 0.0, 0.0, 0.72)
-const RING      : Color = Color(1.00, 0.85, 0.35, 0.95)
-const RING_PAD  : float = 8.0     # насколько рамка шире самой кнопки
-const RING_W    : float = 3.0
+const DIM : Color = Color(0.0, 0.0, 0.0, 0.72)
+
+# Облачко подсказки — того же размера, что и в забеге, чтобы тур не выглядел
+# другой игрой.
+const TIP_W : float = 360.0
+const TIP_H : float = 108.0
 
 signal finished
 
 var _stops : Array = []
 var _idx   : int   = 0
+var _key   : String = "tour"
 var _body  : Control = null
 
 # `stops` — список словарей { rect: Rect2, big: String, small: String }.
 # Прямоугольники, а не сами кнопки: тур живёт своим слоем и переживает
 # перестройку меню, а ссылка на чужой Control — нет.
-static func play(host: Node, stops: Array) -> MenuTour:
+# `key` — под каким именем запомнить показанное в `SaveData.menu_tips_seen`.
+# Тот же узел работает и разовой подсказкой по поводу: одна остановка вместо
+# трёх, свой ключ. Заводить ради неё второй вид всплывашки значило бы иметь два
+# места, где решается, как подсказка выглядит.
+static func play(host: Node, stops: Array, key: String = "tour") -> MenuTour:
 	if host == null or stops.is_empty():
 		return null
 	var t := MenuTour.new()
 	t.name   = "MenuTour"
 	t._stops = stops
+	t._key   = key
 	host.add_child(t)
 	return t
 
@@ -86,7 +94,7 @@ func _show(idx: int) -> void:
 		c.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_body.add_child(c)
 
-	_ring(hole)
+	TipCloud.ring(_body, hole)
 	_caption(stop, hole, vp)
 
 	# Тап куда угодно — дальше. Отдельной кнопки «ДАЛЬШЕ» нет намеренно: искать
@@ -102,80 +110,23 @@ func _show(idx: int) -> void:
 	var tw := _body.create_tween()
 	tw.tween_property(_body, "modulate:a", 1.0, 0.18)
 
-# Рамка вокруг кнопки — четыре полоски, пульсируют. Именно рамка, а не заливка:
-# кнопку надо ПОКАЗАТЬ, а закрашенная поверх она перестаёт быть узнаваемой.
-func _ring(hole: Rect2) -> void:
-	var box := hole.grow(RING_PAD)
-	var ring := Control.new()
-	ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_body.add_child(ring)
-	for side in [
-		Rect2(box.position.x, box.position.y, box.size.x, RING_W),
-		Rect2(box.position.x, box.end.y - RING_W, box.size.x, RING_W),
-		Rect2(box.position.x, box.position.y, RING_W, box.size.y),
-		Rect2(box.end.x - RING_W, box.position.y, RING_W, box.size.y),
-	]:
-		var r : Rect2 = side
-		var c := ColorRect.new()
-		c.color        = RING
-		c.position     = r.position
-		c.size         = r.size
-		c.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		ring.add_child(c)
-	var tw := ring.create_tween().set_loops()
-	tw.tween_property(ring, "modulate:a", 0.45, 0.55).set_trans(Tween.TRANS_SINE)
-	tw.tween_property(ring, "modulate:a", 1.00, 0.55).set_trans(Tween.TRANS_SINE)
-
 # Подпись встаёт ПОД кнопкой, а если та у нижнего края — над ней. Иначе текст
 # уезжает за экран ровно у тех кнопок, что стоят внизу.
 func _caption(stop: Dictionary, hole: Rect2, vp: Vector2) -> void:
-	var below : bool = hole.end.y + 78.0 < vp.y
-	var y : float = (hole.end.y + 16.0) if below else (hole.position.y - 74.0)
-	var root := Control.new()
-	root.position     = Vector2(clampf(hole.get_center().x, 170.0, vp.x - 170.0), y)
-	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_body.add_child(root)
-
-	# Плашка обязательна: подсветка снимает затемнение вокруг кнопки, и подпись
-	# у большой кнопки ложится на неприглушённое меню — на логотип, на надпись
-	# «нажмите, чтобы начать». Обводки букв на такой мешанине не хватает.
-	var plate := ColorRect.new()
-	plate.color        = Color(0.04, 0.04, 0.07, 0.80)
-	plate.size         = Vector2(360.0, 70.0)
-	plate.position     = Vector2(-180.0, -4.0)
-	plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(plate)
-
-	var big := _label(String(stop.get("big", "")), 20)
-	big.position = Vector2(-260.0, 0.0)
-	root.add_child(big)
-
-	var small := _label(String(stop.get("small", "")), 12)
-	small.modulate = Color(0.82, 0.82, 0.88)
-	small.position = Vector2(-260.0, 26.0)
-	root.add_child(small)
-
+	var below : bool = hole.end.y + TipCloud.outer(TIP_W, TIP_H).y < vp.y
+	var y : float = (hole.end.y + 8.0) if below else (hole.position.y - TIP_H - 8.0)
 	var last : bool = _idx >= _stops.size() - 1
-	var more := _label("ПОНЯТНО" if last else "ДАЛЬШЕ ›", 11)
-	more.modulate = Color(1.00, 0.85, 0.35)
-	more.position = Vector2(-260.0, 48.0)
-	root.add_child(more)
-
-func _label(text: String, size: int) -> Label:
-	var l := Label.new()
-	l.add_theme_font_override("font", UI_FONT)
-	l.add_theme_font_size_override("font_size", size)
-	l.add_theme_color_override("font_color", Color(1, 1, 1))
-	l.add_theme_color_override("font_outline_color", Color(0, 0, 0))
-	l.add_theme_constant_override("outline_size", 6)
-	l.text                 = text
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.size                 = Vector2(520.0, 24.0)
-	l.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	return l
+	var cloud := TipCloud.build(String(stop.get("big", "")),
+		String(stop.get("small", "")), TIP_W, TIP_H,
+		"ПОНЯТНО" if last else "ДАЛЬШЕ ›")
+	var out := TipCloud.outer(TIP_W, TIP_H)
+	cloud.position = Vector2(
+		clampf(hole.get_center().x, out.x * 0.5, vp.x - out.x * 0.5),
+		clampf(y + TIP_H * 0.5, out.y * 0.5, vp.y - out.y * 0.5))
+	_body.add_child(cloud)
 
 func _done() -> void:
-	SaveData.menu_tips_seen["tour"] = true
+	SaveData.menu_tips_seen[_key] = true
 	SaveData._save()
 	finished.emit()
 	queue_free()

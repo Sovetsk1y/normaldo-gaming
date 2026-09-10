@@ -53,7 +53,9 @@ const BEATS : Array = [
 	{ "id": "move",   "big": "ВЕДИ ПАЛЬЦЕМ",       "small": "голова идёт следом",      "limit": 20.0 },
 	{ "id": "eat",    "big": "ЕШЬ ПИЦЦУ",          "small": "это очки и вес",          "limit": 22.0 },
 	{ "id": "dodge",  "big": "МУСОР — ОБЛЕТАЙ",    "small": "в него нельзя",           "limit": 14.0 },
-	{ "id": "fat",    "big": "НАЕЛСЯ — ПОТЯЖЕЛЕЛ", "small": "тяжёлый слушается хуже",  "limit": 20.0 },
+	{ "id": "fat",    "big": "ВЕС — ЭТО ЖИЗНИ",    "small": "полоса слева: удар съедает одну", "limit": 22.0 },
+	{ "id": "slow",   "big": "БЬЁТ НЕ ВСЁ",        "small": "банан не ударит, но занесёт", "limit": 16.0 },
+	{ "id": "bonus",  "big": "А ЭТО — БОНУС",      "small": "часы замедлят мир, хватай", "limit": 16.0 },
 	{ "id": "dollar", "big": "ДОЛЛАР — НЕ ЕДА",    "small": "на них берут скины",      "limit": 14.0 },
 	{ "id": "skill",  "big": "ДВОЙНОЙ ТАП",        "small": "это способность скина",   "limit": 20.0 },
 ]
@@ -75,6 +77,7 @@ var _normaldo : Node2D = null
 var _layer   : CanvasLayer = null
 var _caption : Control     = null
 var _arrows  : Node2D      = null
+var _ring    : Control     = null
 
 var _skipped   : bool = false
 var _running   : bool = false
@@ -190,11 +193,24 @@ func _serve(id: String) -> void:
 			if trash != null:
 				_spawner.call("set_world_speed", DODGE_SLOW)
 		"fat":
+			# ПОКАЗАТЬ, ГДЕ ЭТО НАПИСАНО. Полоса веса живёт в левом верхнем углу
+			# и до сих пор была для новичка просто картинкой. Слова «вес — это
+			# жизни» без указания на счётчик оставляют гадать, по чему следить.
+			_ring_fat_panel()
 			for i in 5:
 				if not _alive():
 					return
 				_send("pizza", _lane_of_normaldo() + (1 if i % 2 == 0 else -1))
 				await _breath(0.45)
+		"slow":
+			# Банан — лучший пример «не бьёт, но мешает»: веса он не отнимает, и
+			# игрок, выучивший «всё, что не еда, — удар», впервые видит третий
+			# вид предмета.
+			_send("banana", _lane_of_normaldo())
+		"bonus":
+			# И четвёртый: за таким надо ГОНЯТЬСЯ. Часы — самый читаемый из них,
+			# их действие видно всем экраном сразу.
+			_send("hourglass", _lane_of_normaldo())
 		"dollar":
 			_send("dollar", _lane_of_normaldo() + 1)
 		"skill":
@@ -224,6 +240,10 @@ func _cond_for(id: String) -> Callable:
 		"fat":
 			return func() -> bool:
 				return int(_normaldo.get("fat_state")) >= 1 or _ate >= 5
+		"slow":
+			return func() -> bool: return _no_items_of("slowing")
+		"bonus":
+			return func() -> bool: return _no_items_of("hourglass")
 		"dollar":
 			return func() -> bool:
 				return _got_buck > 0 or _no_items_of("dollar")
@@ -361,54 +381,51 @@ func _build_ui() -> void:
 # надо читать.
 const SAY_Y : float = 56.0
 
+# ОБЛАЧКО ИЗ ДОЛЛАРОВ, а не тёмная плашка. Тем же языком с игроком говорит
+# переход между эпизодами — деньги как поверхность, на которой написан текст.
+# Прямоугольная плашка была ниоткуда: таких в игре больше нет нигде.
+const SAY_W : float = 430.0
+const SAY_H : float = 104.0
+
 func _say(big: String, small: String) -> void:
 	_hush()
 	var vp := get_viewport().get_visible_rect().size
-	_caption = Control.new()
-	_caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_caption.position     = Vector2(vp.x * 0.5, SAY_Y)
+	_caption = TipCloud.build(big, small, SAY_W, SAY_H)
+	_caption.position = Vector2(vp.x * 0.5, SAY_Y + SAY_H * 0.5 - 12.0)
 	_layer.add_child(_caption)
 
-	var plate := ColorRect.new()
-	plate.color        = Color(0.04, 0.04, 0.07, 0.72)
-	plate.size         = Vector2(420.0, 30.0 if small == "" else 48.0)
-	plate.position     = Vector2(-210.0, -6.0)
-	plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_caption.add_child(plate)
-
-	var b := _label(big, 22)
-	b.position = Vector2(-260.0, -4.0)
-	_caption.add_child(b)
-	if small != "":
-		var s := _label(small, 13)
-		s.modulate  = Color(0.80, 0.80, 0.86)
-		s.position  = Vector2(-260.0, 22.0)
-		_caption.add_child(s)
-
-	_caption.modulate = Color(1, 1, 1, 0.0)
-	var tw := _caption.create_tween()
+	# Влетает СБОКУ и слегка покачивается — как и большое облако на переходе.
+	# Просто проявиться на месте умеет плашка, а не масса бумаги.
+	var home : float = _caption.position.x
+	_caption.position.x = home + 90.0
+	_caption.modulate   = Color(1, 1, 1, 0.0)
+	var tw := _caption.create_tween().set_parallel(true)
 	tw.tween_property(_caption, "modulate:a", 1.0, 0.22)
-
-func _label(text: String, size: int) -> Label:
-	var l := Label.new()
-	l.add_theme_font_override("font", UI_FONT)
-	l.add_theme_font_size_override("font_size", size)
-	l.add_theme_color_override("font_color", Color(1, 1, 1))
-	l.add_theme_color_override("font_outline_color", Color(0, 0, 0))
-	l.add_theme_constant_override("outline_size", 6)
-	l.text                 = text
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.size                 = Vector2(520.0, 26.0)
-	l.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	return l
+	tw.tween_property(_caption, "position:x", home, 0.30)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func _hush() -> void:
 	if is_instance_valid(_caption):
 		_caption.queue_free()
 	_caption = null
+	if is_instance_valid(_ring):
+		_ring.queue_free()
+	_ring = null
 	if is_instance_valid(_arrows):
 		_arrows.queue_free()
 	_arrows = null
+
+# Рамка вокруг полосы веса в интерфейсе. Прямоугольник спрашивается У САМОГО
+# HUD: панель считается от размера экрана и ширины левого столбца, и выписанные
+# сюда числа разъехались бы с ней на первом же телефоне другой формы.
+func _ring_fat_panel() -> void:
+	var hud := _game.get_node_or_null("HUD")
+	if hud == null or not hud.has_method("fat_panel_rect"):
+		return
+	var r : Rect2 = hud.call("fat_panel_rect")
+	if r.size.x <= 1.0 or r.size.y <= 1.0:
+		return
+	_ring = TipCloud.ring(_layer, r)
 
 # Две стрелки над головой и под ней, качаются врозь: показывают ось, по которой
 # и ходит Нормальдо.
@@ -454,9 +471,17 @@ func _build_skip() -> void:
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(bg)
 
-	var l := _label("ПРОПУСТИТЬ", 11)
-	l.size     = root.size
-	l.position = Vector2(0.0, 4.0)
+	var l := Label.new()
+	l.add_theme_font_override("font", UI_FONT)
+	l.add_theme_font_size_override("font_size", 11)
+	l.add_theme_color_override("font_color", Color(1, 1, 1))
+	l.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	l.add_theme_constant_override("outline_size", 4)
+	l.text                 = "ПРОПУСТИТЬ"
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	l.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	l.size                 = root.size
 	root.add_child(l)
 
 	var btn := Button.new()

@@ -29,6 +29,25 @@ func _initialize() -> void:
 	await _wait(2.6)
 	get_root().get_texture().get_image().save_png(out + "/tut_eat.png")
 	print("XX такт 2 снят")
+
+	# Такт про вес показывается ОТДЕЛЬНО: доиграть до него по-настоящему значит
+	# съесть в снимке восемь предметов, а проверить надо одно — попала ли рамка
+	# в полосу веса и не налезло ли облачко на интерфейс.
+	var tut : Node = game.get_node_or_null("Tutorial")
+	if is_instance_valid(tut):
+		tut.call("_say", "ВЕС — ЭТО ЖИЗНИ", "полоса слева: удар съедает одну")
+		tut.call("_ring_fat_panel")
+		await _wait(1.2)
+		get_root().get_texture().get_image().save_png(out + "/tut_fat.png")
+		print("XX такт про вес снят")
+
+		tut.call("_say", "А ЭТО — БОНУС", "часы замедлят мир, хватай")
+		var sp : Node = game.get_node_or_null("Spawner")
+		sp.call("tutorial_send", "hourglass", 2, 0.0)
+		sp.call("tutorial_send", "banana", 3, 0.0)
+		await _wait(1.1)
+		get_root().get_texture().get_image().save_png(out + "/tut_bonus.png")
+		print("XX такт про бонус снят")
 	quit()
 
 func _wait(sec: float) -> void:

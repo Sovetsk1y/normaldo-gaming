@@ -1376,6 +1376,11 @@ func tutorial_send(kind: String, lane: int, speed: float = 0.0) -> Node:
 			_spawn_item(y, vp_w, PIZZA_TEX, 0.09, v, 0, true, true, true)
 		"dollar":
 			_spawn_dollar(y, vp_w, v)
+		# Песочные часы в раскладку угроз не входят — они выпадают из розыгрыша
+		# ресурсов и по имени не вызываются ниоткуда. Обучению они нужны именно
+		# по имени: это его пример «предмета, который не бьёт, а даёт эффект».
+		"hourglass", "mushroom", "cola", "magic_hat", "casey_mask":
+			_spawn_effect_item(kind, y, vp_w, v)
 		_:
 			_spawn_level_hazard(kind, y, vp_w, v)
 	if get_child_count() > before:
