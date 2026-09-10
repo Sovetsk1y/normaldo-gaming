@@ -30,6 +30,10 @@ func _initialize() -> void:
 	nd.position = Vector2(200.0, vp.y * 0.5)
 	await _wait(0.4)
 
+	# Ряд кружков ДО каста: оба готовы, чисел на них нет и картинки видно.
+	get_root().get_texture().get_image().save_png(out + "/spider_row_ready.png")
+	print("XX ряд снят")
+
 	# Добыча на пути паутины — её и утащит.
 	sp.call("tutorial_send", "pizza", 2, 120.0)
 	await _wait(0.2)

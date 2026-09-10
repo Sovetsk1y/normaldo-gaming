@@ -19,7 +19,7 @@ var _checks : int = 0
 #
 # Число — нижняя граница, а не точное совпадение: добавлять проверки можно, а
 # терять — нет. Не сошлось — прогон падает и говорит, сколько недосчитался.
-const EXPECTED_CHECKS : int = 71
+const EXPECTED_CHECKS : int = 72
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -931,6 +931,51 @@ func _test_ability_icons() -> void:
 	var tab : Dictionary = sk.call("get_ability", "tyson")
 	_check(float(tab.get("icon_k", 1.0)) > 1.0,
 		"перчатка активки крупнее обычного: ×%.2f" % [float(tab.get("icon_k", 1.0))])
+
+	# ── В ОДНОМ РЯДУ НЕТ ДВУХ ОДИНАКОВЫХ КРУЖКОВ ──────────────────────────
+	# Ровно этим и сломалось: венец Спайдера носил ту же руку, что и активка, и
+	# в ряду забега стояли две неотличимые картинки. Кружок, повторяющий соседа,
+	# не сообщает ничего — он читается как один, нарисованный дважды.
+	#
+	# Ряд — это резисты, активка и венец десятого уровня. Пассивки в ряду нет
+	# (см. `skill_badges.setup`), поэтому её картинка может совпадать с венцом:
+	# рядом они не стоят никогда.
+	#
+	# ЕДИНСТВЕННОЕ ПОСЛАБЛЕНИЕ — размер. У Тайсона и пирата спелл и резист это
+	# буквально один предмет: перчатка и штурвал. Разводить их разными рисунками
+	# значило бы соврать про то, чем он бьёт; поэтому активка носит `icon_k` и
+	# рисуется заметно крупнее. Повтор разрешён ровно при нём — то есть тогда,
+	# когда игра сама показывает разницу.
+	var prog : Node = get_root().get_node_or_null("SkinProgression")
+	var twins : Array = []
+	for skin in reg.get("SKINS"):
+		var sid : String = String((skin as Dictionary).get("id", ""))
+		var ab2 : Dictionary = sk.call("get_ability", sid)
+		var act : String = String(ab2.get("icon", ""))
+		var big : bool = not is_equal_approx(float(ab2.get("icon_k", 1.0)), 1.0)
+		var row : Array = []
+		for r in sk.call("all_resists", sid):
+			var t : Texture2D = prog.call("resist_icon", String((r as Dictionary).get("item", "")))
+			if t != null:
+				row.append(t.resource_path)
+		var rew : Dictionary = prog.call("reward_for", sid, 10)
+		var pid : String = String(rew.get("perk", ""))
+		if pid != "":
+			var pt : Texture2D = prog.call("perk_icon", pid)
+			if pt != null:
+				row.append(pt.resource_path)
+		var dup : Array = []
+		var used : Dictionary = {}
+		for path in row:
+			if used.has(path):
+				dup.append(String(path).get_file())
+			used[path] = true
+		# Активка добавляется последней: только у неё есть право на повтор.
+		if act != "" and used.has(act) and not big:
+			dup.append(String(act).get_file() + " (и активка, без icon_k)")
+		if not dup.is_empty():
+			twins.append("%s: %s" % [sid, dup])
+	_check(twins.is_empty(), "и в ряду нет двух одинаковых кружков: %s" % [twins])
 
 # ── ПОЗА КАСТА ПРИ ВЗГЛЯДЕ ВЛЕВО ─────────────────────────────────────────────
 # Кадры вариантов (каст, «доллары в глазах», «ест») нарисованы в СВОИХ рамках, и

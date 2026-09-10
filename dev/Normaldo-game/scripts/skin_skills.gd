@@ -149,8 +149,12 @@ const DATA : Dictionary = {
 	},
 	"pirate": {
 		"skills": [], "resists": [],
+		# `icon_k` — как у перчатки Тайсона, и по той же причине: штурвал лежит у
+		# пирата и в спелле, и в резистах. Разводить их разными рисунками значило
+		# бы соврать про то, чем он бьёт, — поэтому кружок активки крупнее.
 		"ability": { "type": SPELL, "id": "helm_throw",
-			"icon": "res://assets/skills/ship_wheel.png", "combat": RANGED, "cd": 3.0,
+			"icon": "res://assets/skills/ship_wheel.png", "icon_k": 1.28,
+			"combat": RANGED, "cd": 3.0,
 			"label": "ШТУРВАЛ",
 			"desc": "Штурвал прошивает всё на линии и не разбивается" },
 		"unique": { "id": "treasure",
