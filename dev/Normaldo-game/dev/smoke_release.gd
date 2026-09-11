@@ -52,7 +52,7 @@ const DEV_TEXTS : Array = [
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 17
+const EXPECTED_CHECKS : int = 22
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -73,7 +73,55 @@ func _initialize() -> void:
 	_test_placeholder_art()
 	print("── Нижняя версия iOS ──")
 	_test_ios_min_version()
+	print("── Системная заставка iOS чёрная ──")
+	_test_ios_launch_black()
 	_finish()
+
+# ── СИСТЕМНАЯ ЗАСТАВКА iOS — ЧЁРНЫЙ ЭКРАН И НИЧЕГО НА НЁМ ──────────────────
+# Своя заставка игры (scripts/splash.gd) начинается с чёрного, и системная перед
+# ней обязана быть таким же чёрным: тогда переход от «система запускает игру» к
+# «игра проснулась» не виден вовсе — экран просто перестаёт быть пустым.
+#
+# Здесь показывалась ЗАГЛУШКА GODOT на тёмно-фиолетовом. Собралось это само:
+# картинку заставки в настройках проекта убрали (там теперь просто чёрный цвет),
+# а экспортёр iOS, не найдя её, подставляет свой логотип — и первым, что видит
+# игрок, оказывается чужая эмблема движка.
+#
+# Поэтому картинка задана явно и она ЧЁРНАЯ. Проверяется не имя файла, а сам
+# рисунок: файл с правильным именем и чужим содержимым — это ровно та же беда.
+const IOS_LAUNCH_IMG : String = "res://assets/ui/ios_launch.png"
+const IOS_STORYBOARD : String = "res://ios_export/Normaldo/Launch Screen.storyboard"
+
+func _test_ios_launch_black() -> void:
+	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
+	_check(preset.contains("storyboard/custom_bg_color=Color(0, 0, 0, 1)"),
+		"фон системной заставки в пресете — чёрный")
+	_check(preset.contains('storyboard/custom_image@2x="%s"' % IOS_LAUNCH_IMG)
+			and preset.contains('storyboard/custom_image@3x="%s"' % IOS_LAUNCH_IMG),
+		"и картинка задана явно — иначе экспорт подставит логотип Godot")
+
+	var tex : Texture2D = load(IOS_LAUNCH_IMG) as Texture2D
+	var img : Image = tex.get_image() if tex != null else null
+	var dirty : Array = []
+	if img != null:
+		for y in img.get_height():
+			for x in img.get_width():
+				var c := img.get_pixel(x, y)
+				if c.r > 0.02 or c.g > 0.02 or c.b > 0.02 or c.a < 0.98:
+					dirty.append([x, y, c])
+					break
+			if not dirty.is_empty():
+				break
+	_check(img != null and dirty.is_empty(),
+		"и сама она чёрная без просветов: %s" % [dirty])
+
+	# И то же в уже собранном проекте: если его не пересобирали, на устройство
+	# уедет именно эта раскадровка.
+	var board := FileAccess.get_file_as_string(IOS_STORYBOARD)
+	_check(board.contains('red="0.0" green="0.0" blue="0.0"'),
+		"в собранной раскадровке фон чёрный")
+	_check(not board.contains("<imageView"),
+		"и картинки на ней нет вовсе")
 
 # ── APP STORE ОТКАЗЫВАЕТ ЗА НИЗКУЮ НИЖНЮЮ ВЕРСИЮ iOS ───────────────────────
 # Загрузка падает так: «This bundle is invalid. The value provided for the key

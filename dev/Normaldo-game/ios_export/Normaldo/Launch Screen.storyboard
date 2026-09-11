@@ -15,18 +15,7 @@
                     <view key="view" contentMode="scaleToFill" id="Ze5-6b-2t3">
                         <rect key="frame" x="0.0" y="0.0" width="414" height="896"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
-                        <subviews>
-                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFill" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="SplashImage" translatesAutoresizingMaskIntoConstraints="NO" id="tjZ-vn-Lsv">
-                                <rect key="frame" x="0.0" y="0.0" width="414" height="896"/>
-                            </imageView>
-                        </subviews>
-                        <color key="backgroundColor" red="0.03999999910593" green="0.02999999932945" blue="0.07999999821186" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                        <constraints>
-                            <constraint firstItem="tjZ-vn-Lsv" firstAttribute="top" secondItem="Ze5-6b-2t3" secondAttribute="top" id="Ak7-I4-yrQ"/>
-                            <constraint firstAttribute="trailing" secondItem="tjZ-vn-Lsv" secondAttribute="trailing" id="Fon-JO-5cz"/>
-                            <constraint firstItem="tjZ-vn-Lsv" firstAttribute="leading" secondItem="Ze5-6b-2t3" secondAttribute="leading" id="bkx-rj-PKc"/>
-                            <constraint firstAttribute="bottom" secondItem="tjZ-vn-Lsv" secondAttribute="bottom" id="yjq-MJ-tym"/>
-                        </constraints>
+                        <color key="backgroundColor" red="0.0" green="0.0" blue="0.0" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <viewLayoutGuide key="safeArea" id="Bcu-3y-fUS"/>
                     </view>
                 </viewController>
@@ -35,8 +24,5 @@
             <point key="canvasLocation" x="52.173913043478265" y="375"/>
         </scene>
     </scenes>
-    <resources>
-        <image name="SplashImage" width="266.66665649414062" height="200"/>
-    </resources>
 </document>
 
