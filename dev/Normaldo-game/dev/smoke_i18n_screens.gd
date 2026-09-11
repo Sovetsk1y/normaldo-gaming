@@ -183,6 +183,34 @@ func _initialize() -> void:
 				ru_notif.append(txt)
 	_check(ru_notif.is_empty(), "уведомления переведены: %s" % [ru_notif])
 
+	# ── ПУШИ ОТ СЕРВЕРА ──────────────────────────────────────────────────
+	# «Тебя обогнали» и «итоги недели» собираются НА СЕРВЕРЕ: когда они
+	# приходят, игра не запущена, и переводить некому. Язык сервер знает только
+	# из регистрации токена — и узнаёт его ровно тогда, когда клиент решит
+	# зарегистрироваться заново.
+	#
+	# Вот это решение здесь и проверяется. Сверка по одному токену (как было)
+	# смену языка пропускала целиком: токен не меняется, регистрация не идёт,
+	# сервер навсегда остаётся при русском. Увидеть это можно было бы только на
+	# живом устройстве, с настоящим сервером и через неделю ожидания.
+	print("── Язык уезжает на сервер вместе с токеном ──")
+	var notif := get_root().get_node_or_null("Notifications")
+	if notif == null:
+		_check(false, "автолоад Notifications не поднялся")
+	else:
+		var was_token := String(save.get("registered_push_token"))
+		var was_lang  := String(save.get("registered_push_lang"))
+		save.set("registered_push_token", "TOKEN-1")
+		save.set("registered_push_lang",  "ru")
+		_check(not notif.call("push_registration_stale", "TOKEN-1", "ru"),
+			"тот же токен и тот же язык — сервер не дёргаем")
+		_check(notif.call("push_registration_stale", "TOKEN-1", "en"),
+			"язык сменился — регистрируемся заново, хотя токен прежний")
+		_check(notif.call("push_registration_stale", "TOKEN-2", "ru"),
+			"токен сменился — тоже заново")
+		save.set("registered_push_token", was_token)
+		save.set("registered_push_lang",  was_lang)
+
 	print("")
 	if _fails == 0:
 		print("ВСЁ ЗЕЛЁНОЕ (проверок: %d)" % _checks)

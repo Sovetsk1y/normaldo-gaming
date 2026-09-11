@@ -61,19 +61,49 @@ func _on_push_token(token: String) -> void:
 func _register_push_token(token: String) -> void:
 	if token == "" or _native == null:
 		return
-	if token == SaveData.registered_push_token:
+	# ЯЗЫК — ЧАСТЬ РЕГИСТРАЦИИ, а не довесок к ней. Пуши от сервера (обгон в
+	# таблице, итоги недели) собираются на сервере, и перевод в игре их не
+	# касается: язык он знает только отсюда.
+	#
+	# Поэтому и сравнивается ПАРА. Сверка по одному токену пропускала бы смену
+	# языка целиком: токен-то не поменялся, и сервер так и остался бы думать,
+	# что игрок русский.
+	var lang := _push_lang()
+	if not push_registration_stale(token, lang):
 		return
 	var platform := _push_platform()
 	if platform == "":
 		return
-	var resp : Dictionary = await LeaderboardClient.register_push_token(token, platform)
+	var resp : Dictionary = await LeaderboardClient.register_push_token(
+		token, platform, lang)
 	if bool(resp.get("ok", false)):
 		SaveData.registered_push_token = token
+		SaveData.registered_push_lang  = lang
 		SaveData._save()
 		if _has_logger():
-			Logger.info(_TAG, "push token registered (%s)" % platform)
+			Logger.info(_TAG, "push token registered (%s, %s)" % [platform, lang])
 	elif _has_logger():
 		Logger.warn(_TAG, "push token registration failed: %s" % str(resp.get("error", "")))
+
+# Пара «токен + язык» разошлась с тем, что уже лежит на сервере. Вынесено
+# отдельно, чтобы проверялось тестом: на этом держится ВСЯ серверная
+# локализация пушей, а поймать ошибку иначе можно только живым устройством,
+# настоящим сервером и неделей ожидания.
+func push_registration_stale(token: String, lang: String) -> bool:
+	return token != SaveData.registered_push_token \
+		or lang != SaveData.registered_push_lang
+
+func _push_lang() -> String:
+	var loc := get_tree().root.get_node_or_null("Loc") if is_inside_tree() else null
+	return String(loc.call("current")) if loc != null else "ru"
+
+# Перерегистрация по требованию: зовётся из `Loc.set_language`, когда игрок
+# переключил язык. Токен тот же, а сервер должен узнать новый язык до того, как
+# соберётся слать следующий пуш, — иначе игрок увидит его на прежнем языке.
+func resend_push_registration() -> void:
+	if _native == null or not _native.has_method("get_push_token"):
+		return
+	_register_push_token(str(_native.get_push_token()))
 
 func _push_platform() -> String:
 	match OS.get_name():

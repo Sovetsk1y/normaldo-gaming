@@ -86,6 +86,14 @@ func set_language(code: String) -> void:
 	var planner := get_tree().root.get_node_or_null("NotifPlanner")
 	if planner != null:
 		planner.call("replan_all")
+	# ── И СЕРВЕР ТОЖЕ ДОЛЖЕН УЗНАТЬ ────────────────────────────────────────
+	# Часть пушей приходит НЕ отсюда: обгон в таблице лидеров и итоги недели
+	# собираются на сервере, и перевод в игре до них не достаёт. Язык сервер
+	# берёт из регистрации токена — значит её надо повторить, иначе следующий
+	# пуш придёт на прежнем языке.
+	var notif := get_tree().root.get_node_or_null("Notifications")
+	if notif != null and notif.has_method("resend_push_registration"):
+		notif.call("resend_push_registration")
 	changed.emit()
 
 func apply() -> void:

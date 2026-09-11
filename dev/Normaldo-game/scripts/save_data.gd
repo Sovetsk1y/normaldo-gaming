@@ -159,6 +159,12 @@ var last_session_end_at : int  = 0
 # Last remote-push token (FCM/APNs) successfully registered server-side. Lets
 # Notifications skip redundant registerPushToken calls when nothing changed.
 var registered_push_token : String = ""
+# Язык, с которым токен был зарегистрирован. Серверные пуши (обгон в таблице,
+# итоги недели) собираются НА СЕРВЕРЕ и клиентский перевод их не касается —
+# сервер берёт язык отсюда. Хранится рядом с токеном, чтобы смена языка тоже
+# считалась поводом зарегистрироваться заново: сам токен при этом не меняется,
+# и проверка «токен тот же — не дёргаем сервер» пропустила бы смену.
+var registered_push_lang : String = ""
 # Flips true the moment NotifPlanner schedules the endless-unlock celebration
 # push (E2). Lets the planner ship that notification exactly once per save —
 # subsequent replans see the flag and skip it.
@@ -532,6 +538,7 @@ func _save() -> void:
 		"last_session_end_at": last_session_end_at,
 		"notif_endless_announced": notif_endless_announced,
 		"registered_push_token": registered_push_token,
+		"registered_push_lang":  registered_push_lang,
 	}))
 
 func _load() -> void:
@@ -616,6 +623,7 @@ func _load() -> void:
 	last_session_end_at = int(d.get("last_session_end_at",  0))
 	notif_endless_announced = bool(d.get("notif_endless_announced", false))
 	registered_push_token = str(d.get("registered_push_token", ""))
+	registered_push_lang  = str(d.get("registered_push_lang",  ""))
 	var raw_rewards = d.get("pending_rewards", [])
 	pending_rewards = []
 	for r in raw_rewards:

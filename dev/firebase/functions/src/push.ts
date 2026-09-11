@@ -38,6 +38,22 @@ interface PushMessage {
   data?: Record<string, unknown>;
 }
 
+// ─── Язык получателя ────────────────────────────────────────────────────────────
+// Пуши, которые шлёт сервер (G2 «тебя обогнали», G3 «итоги недели»), собираются
+// ЗДЕСЬ, и перевод внутри игры до них не достаёт: когда пуш приходит, игра не
+// запущена, а система показывает ровно тот текст, что уехал в APNs/FCM.
+//
+// Поэтому язык едет вместе с токеном (registerPushToken) и лежит в users/{uid}.
+// Строится сообщение функцией от языка — см. sendPushToUser.
+export type Lang = "ru" | "en";
+
+// Нет поля — значит регистрация старше этой правки, а все такие игроки пришли
+// из русской сборки: русский тут не вкусовщина, а единственное, что про них
+// известно наверняка.
+function langOf(snap: admin.firestore.DocumentSnapshot): Lang {
+  return String(snap.get("push_lang") ?? "") === "en" ? "en" : "ru";
+}
+
 // ─── Token registration ────────────────────────────────────────────────────────
 
 export const registerPushToken = onCall({region: FN_REGION}, async (request: CallableRequest) => {
@@ -48,9 +64,14 @@ export const registerPushToken = onCall({region: FN_REGION}, async (request: Cal
   if (!token || (platform !== "android" && platform !== "ios")) {
     throw new HttpsError("invalid-argument", "token + platform(android|ios) required");
   }
+  // Язык необязателен НАРОЧНО: клиенты старых сборок его не шлют, и отказывать
+  // им в регистрации токена из-за этого нельзя — они перестали бы получать
+  // пуши вовсе. Не прислали — остаётся русский, как и было.
+  const lang: Lang = String(request.data?.lang ?? "") === "en" ? "en" : "ru";
   await admin.firestore().doc(`users/${uid}`).set({
     push_token:      token,
     push_platform:   platform,
+    push_lang:       lang,
     push_updated_at: admin.firestore.FieldValue.serverTimestamp(),
   }, {merge: true});
   return {ok: true};
@@ -149,17 +170,25 @@ async function sendApns(token: string, msg: PushMessage): Promise<void> {
 
 /** Resolve the user's stored token + platform and dispatch. Returns false when
  *  the user has no registered token. */
-export async function sendPushToUser(uid: string, msg: PushMessage): Promise<boolean> {
+// Единственная дверь отправки — и единственное место, где выбирается язык.
+// `msg` можно передать готовым (дев- и админ-отправки, там язык ни при чём) или
+// функцией от языка: она вызывается уже после чтения users/{uid}, когда язык
+// получателя известен.
+export async function sendPushToUser(
+  uid: string,
+  msg: PushMessage | ((lang: Lang) => PushMessage),
+): Promise<boolean> {
   const snap = await admin.firestore().doc(`users/${uid}`).get();
   const token = snap.get("push_token") as string | undefined;
   const platform = snap.get("push_platform") as string | undefined;
   if (!token) return false;
+  const built = typeof msg === "function" ? msg(langOf(snap)) : msg;
   if (platform === "android") {
-    await sendFcm(token, msg);
+    await sendFcm(token, built);
     return true;
   }
   if (platform === "ios") {
-    await sendApns(token, msg);
+    await sendApns(token, built);
     return true;
   }
   return false;
@@ -220,11 +249,19 @@ export const sendCampaign = onCall({region: FN_REGION, secrets: APNS_SECRETS}, a
 export async function sendResetPrizePush(
   uid: string, place: number, dollars: number, tokens: number,
 ): Promise<void> {
-  const prize = dollars > 0 ? `$${dollars} + ${tokens} жет.` : `${tokens} жет.`;
-  await sendPushToUser(uid, {
-    title: "Новая неделя — новые места",
-    body:  `Награды прошлой недели в кармане: ${prize} (#${place}).`,
-    data:  {id: "notif_g3", deep_link: "leaderboard", category: "G"},
+  await sendPushToUser(uid, (lang) => {
+    const prize = lang === "en"
+      ? (dollars > 0 ? `$${dollars} + ${tokens} tok.` : `${tokens} tok.`)
+      : (dollars > 0 ? `$${dollars} + ${tokens} жет.` : `${tokens} жет.`);
+    return lang === "en" ? {
+      title: "New week — new places",
+      body:  `Last week's rewards are yours: ${prize} (#${place}).`,
+      data:  {id: "notif_g3", deep_link: "leaderboard", category: "G"},
+    } : {
+      title: "Новая неделя — новые места",
+      body:  `Награды прошлой недели в кармане: ${prize} (#${place}).`,
+      data:  {id: "notif_g3", deep_link: "leaderboard", category: "G"},
+    };
   }).catch((e) => console.error(`G3 send failed ${uid}: ${String(e)}`));
 }
 
@@ -250,7 +287,9 @@ export const onLeaderboardWrite = onDocumentWritten(
     const week = event.params.week as string;
     const metric = event.params.metric as string;
     const moverUid = event.params.uid as string;
-    const moverName = String(after.get("display_name") ?? "Кто-то");
+    // Запасное имя выбирается ВНУТРИ сборки сообщения (ниже), а не здесь:
+    // «Кто-то» посреди английской фразы — ровно то, ради чего всё это затеяно.
+    const moverRaw = String(after.get("display_name") ?? "");
     const nowSecs = Math.floor(Date.now() / 1000);
 
     // Players the mover just passed: score in (oldScore, newScore), closest first.
@@ -279,10 +318,17 @@ export const onLeaderboardWrite = onDocumentWritten(
       if (place > 100) continue; // top-100 only, per the concept
 
       try {
-        await sendPushToUser(uid, {
-          title: "Тебя обогнали",
-          body:  `${moverName} забрал ${place}-е место. Реванш?`,
-          data:  {id: "notif_g2", deep_link: "leaderboard", category: "G"},
+        await sendPushToUser(uid, (lang) => {
+          const moverName = moverRaw || (lang === "en" ? "Someone" : "Кто-то");
+          return lang === "en" ? {
+            title: "You've been passed",
+            body:  `${moverName} took place #${place}. Rematch?`,
+            data:  {id: "notif_g2", deep_link: "leaderboard", category: "G"},
+          } : {
+            title: "Тебя обогнали",
+            body:  `${moverName} забрал ${place}-е место. Реванш?`,
+            data:  {id: "notif_g2", deep_link: "leaderboard", category: "G"},
+          };
         });
         await db.doc(`users/${uid}`).update({g2_last_sent_at: nowSecs});
       } catch (e) {

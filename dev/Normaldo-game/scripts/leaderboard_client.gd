@@ -243,15 +243,20 @@ func send_test_push() -> Dictionary:
 		await _await_ready()
 	return await _call_function("sendTestPush", {})
 
-func register_push_token(token: String, platform: String) -> Dictionary:
+func register_push_token(token: String, platform: String, lang: String) -> Dictionary:
 	# Persists the device's push token server-side (users/{uid}) so Cloud
 	# Functions can target this player. Needs auth — waits for it like the other
 	# calls. `platform` is "android" (FCM) or "ios" (APNs).
+	#
+	# `lang` уезжает вместе с токеном: пуши, которые шлёт сервер, собираются
+	# ТАМ, и клиентский перевод до них не достаёт. Язык устройства — всё, по
+	# чему сервер может выбрать, на каком языке разбудить игрока.
 	if not is_ready():
 		await _await_ready()
 	return await _call_function("registerPushToken", {
 		"token":    token,
 		"platform": platform,
+		"lang":     lang,
 	})
 
 func claim_reward(index: int) -> Dictionary:
