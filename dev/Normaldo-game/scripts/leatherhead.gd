@@ -965,7 +965,7 @@ func _on_lunge_tap() -> void:
 	# Сколько ещё бить. Без счётчика такт читается как «тапай, пока не надоест»:
 	# видно, что что-то происходит, но не видно, что это работает.
 	if is_instance_valid(_lunge_hint):
-		_lunge_hint.text = "ТАПАЙ!  %d" % _lunge_hp
+		_lunge_hint.text = tr("ТАПАЙ!  %d") % _lunge_hp
 	var tw := create_tween()
 	tw.tween_property(_sprite, "modulate", Color(1.7, 0.7, 0.7), 0.05)
 	tw.tween_property(_sprite, "modulate", Color.WHITE, 0.12)
@@ -977,7 +977,7 @@ func _tap_hint() -> Label:
 	l.add_theme_font_size_override("font_size", 20)
 	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	l.add_theme_constant_override("outline_size", 5)
-	l.text                 = "ТАПАЙ!  %d" % LUNGE_TAPS
+	l.text                 = tr("ТАПАЙ!  %d") % LUNGE_TAPS
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.modulate             = Color(1.0, 0.92, 0.25)
 	l.size                 = Vector2(vp.x, 30.0)

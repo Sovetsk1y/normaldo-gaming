@@ -205,8 +205,12 @@ func _chapter_has_ready(ch_idx: int) -> bool:
 	return false
 
 # «Глава 1 — Первый полёт» → «ПЕРВЫЙ ПОЛЁТ»: номер главы уже написан в медальоне.
+#
+# Перевод берётся ДО резки: «ПЕРВЫЙ ПОЛЁТ» — строка, собранная на ходу, её в
+# словаре нет и быть не может. Ищем в словаре целый заголовок, а режем уже
+# переведённый.
 func _chapter_short(title: String) -> String:
-	var parts := title.split("—")
+	var parts := tr(title).split("—")
 	var tail : String = parts[parts.size() - 1]
 	return tail.strip_edges().to_upper()
 
@@ -419,7 +423,7 @@ func _build_cat_overall() -> void:
 	lbl.add_theme_font_override("font", UI_FONT)
 	lbl.add_theme_font_size_override("font_size", 12)
 	_apply_text_fx(lbl)
-	lbl.text                 = "ВСТРЕЧЕНО  %d / %d" % [pr.x, pr.y]
+	lbl.text                 = tr("ВСТРЕЧЕНО  %d / %d") % [pr.x, pr.y]
 	lbl.modulate             = CLR_GOLD
 	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
@@ -547,7 +551,7 @@ func _build_overall() -> void:
 	cap.add_theme_font_override("font", UI_FONT)
 	cap.add_theme_font_size_override("font_size", 12)
 	_apply_text_fx(cap)
-	cap.text               = "ПРОЙДЕНО %d / %d" % [pr.x, pr.y]
+	cap.text               = tr("ПРОЙДЕНО %d / %d") % [pr.x, pr.y]
 	cap.modulate           = CLR_GOLD
 	cap.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	cap.size               = Vector2(r.size.x, 16.0)
@@ -705,7 +709,7 @@ func _build_page() -> void:
 	title.add_theme_font_override("font", UI_FONT)
 	title.add_theme_font_size_override("font_size", 15)
 	_apply_text_fx(title)
-	title.text               = (chapter["title"] as String).to_upper()
+	title.text               = tr(chapter["title"] as String).to_upper()
 	title.modulate           = CLR_GOLD
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	title.size               = Vector2(head.size.x - 70.0, head.size.y)

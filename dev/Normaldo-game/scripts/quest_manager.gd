@@ -447,16 +447,16 @@ func daily_progress_text(slot: int) -> String:
 	var key   := parts[0]
 	var need  := int(parts[1]) if parts.size() > 1 else 1
 	match key:
-		"pizzas_today":   return "%d / %d пицц"  % [mini(pizzas_today, need), need]
+		"pizzas_today":   return tr("%d / %d пицц")  % [mini(pizzas_today, need), need]
 		"dollars_today":  return "%d / %d $"     % [mini(dollars_today, need), need]
-		"runs_today":     return "%d / %d забегов"% [mini(runs_today, need), need]
-		"campaigns_today":return "%d / 2 кампании"% mini(campaigns_today, 2)
-		"dollars_run":    return "%d / %d $ (забег)" % [mini(dollars_best_run, need), need]
+		"runs_today":     return tr("%d / %d забегов")% [mini(runs_today, need), need]
+		"campaigns_today":return tr("%d / 2 кампании")% mini(campaigns_today, 2)
+		"dollars_run":    return tr("%d / %d $ (забег)") % [mini(dollars_best_run, need), need]
 		"endless_secs":   var s := int(endless_best_secs); return "%d:%02d / %d:%02d" % [s/60, s%60, need/60, need%60]
-		"campaign_phases":return "%d / 3 фазы" % mini(campaign_best_phases, 3)
-		"campaign_nodmg": return "%d / 3 фазы без урона" % mini(campaign_nodmg_best, 3)
-		"slot_match":     return "%d / %d совп." % [mini(slot_best_match, need), need]
-		"fat_run":        var names := ["Худой","Стройный","Жирный","Убер"]; return names[mini(fat_best_run, 3)] + " / Убер"
+		"campaign_phases":return tr("%d / 3 фазы") % mini(campaign_best_phases, 3)
+		"campaign_nodmg": return tr("%d / 3 фазы без урона") % mini(campaign_nodmg_best, 3)
+		"slot_match":     return tr("%d / %d совп.") % [mini(slot_best_match, need), need]
+		"fat_run":        var names := ["Худой","Стройный","Жирный","Убер"]; return tr(names[mini(fat_best_run, 3)]) + tr(" / Убер")
 		"endless_today":  return "1 / 1 бесконечность" if endless_today else "0 / 1 бесконечность"
 		"slot_today":     return "1 / 1 спин" if slot_today else "0 / 1 спин"
 		"campaign_today": return "1 / 1 кампания" if (campaigns_today > 0) else "0 / 1 кампания"

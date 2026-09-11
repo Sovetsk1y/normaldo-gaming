@@ -154,14 +154,27 @@ func _apply_daily_cap(specs: Array) -> Array:
 func _now() -> int:
 	return int(Time.get_unix_time_from_system())
 
+# ── ЕДИНСТВЕННАЯ ДВЕРЬ ПЕРЕВОДА ДЛЯ УВЕДОМЛЕНИЙ ─────────────────────────────
+# Пуш — не Control: он уходит в систему обычной строкой, и автоперевод Godot,
+# которым живёт весь остальной интерфейс, до него не достаёт. Переводить
+# приходится руками, и делается это ЗДЕСЬ, а не в двадцати местах сборки:
+# мимо `_spec` уведомление не проходит.
+#
+# Строки, собранные подстановкой, переводятся ЗАГОТОВКОЙ на месте (там свой
+# `tr()` до `%`), а сюда приходят уже готовыми — повторный `tr()` их не тронет:
+# такого ключа в словаре нет, и строка возвращается собой.
+#
+# Поймалось в логе прогона: рядом стояли «Your 3-day streak is hanging by a
+# thread» и «Свежие задания дня» — половина уведомлений была переведена, другая
+# половина нет, и на экране это увидел бы только английский игрок.
 func _spec(id: String, fire_at: int, title: String, body: String,
 		category: String, payload: Dictionary = {}) -> Dictionary:
 	return {
 		"id":       id,
 		"category": category,
 		"fire_at":  fire_at,
-		"title":    title,
-		"body":     body,
+		"title":    tr(title),
+		"body":     tr(body),
 		"payload":  payload,
 	}
 
@@ -193,12 +206,12 @@ func _plan_a() -> Array:
 		"A"))
 	var a3_title : String
 	if name != "":
-		a3_title = "%s, твой скин просит апа" % name
+		a3_title = tr("%s, твой скин просит апа") % name
 	else:
 		a3_title = "Твой скин просит апа"
 	specs.append(_spec("notif_a3", _on_day_at(last_seen + 7 * DAY, 18),
 		a3_title,
-		"До нового уровня %s оставался один забег." % skin,
+		tr("До нового уровня %s оставался один забег.") % skin,
 		"A"))
 	specs.append(_spec("notif_a4", _on_day_at(last_seen + 14 * DAY, 18),
 		"Учитель закрыл книгу",
@@ -213,7 +226,7 @@ func _plan_a() -> Array:
 func _with_streak_hint(base: String) -> String:
 	var streak : int = int(QuestManager.streak_days)
 	if streak >= 3:
-		return base + " Стрик %d дней — не теряй." % streak
+		return base + tr(" Стрик %d дней — не теряй.") % streak
 	return base
 
 func _skin_display_name() -> String:
@@ -248,7 +261,7 @@ func _plan_b() -> Array:
 		var t_b3 := _on_day_at(now, 22) + 30 * 60
 		if t_b3 > now:
 			specs.append(_spec("notif_b3", t_b3,
-				"Стрик %d дней висит на волоске" % streak,
+				tr("Стрик %d дней висит на волоске") % streak,
 				"Один забег — и стрик целый.",
 				"B"))
 	return specs
@@ -277,7 +290,7 @@ func _plan_c() -> Array:
 	if level < 10 and progress >= _C1_PROGRESS_THRESHOLD:
 		var next_level := level + 1
 		specs.append(_spec("notif_c1", last_seen + HOUR,
-			"%s вот-вот возьмёт уровень %d" % [_skin_display_name(), next_level],
+			tr("%s вот-вот возьмёт уровень %d") % [_skin_display_name(), next_level],
 			"Один нормальный забег — и уровень в кармане.",
 			"C"))
 	elif level >= 10 and progress >= _C3_PROGRESS_THRESHOLD:
@@ -349,10 +362,12 @@ func _plan_e() -> Array:
 		var idx : int = _first_unclaimed_story_quest()
 		if idx >= 0:
 			var def : Dictionary = QuestManager.STORY_QUESTS[idx]
-			var qtitle : String = str(def.get("title", "Глава"))
+			# Название задания переводится ОТДЕЛЬНО: подстановка отдаёт готовую
+			# строку, и словарь её уже не увидит — пуш уходил наполовину русским.
+			var qtitle : String = tr(str(def.get("title", "Глава")))
 			specs.append(_spec("notif_e3", last_seen + DAY,
 				"Учитель машет страницей",
-				"Глава «%s» собрана — забирай награду." % qtitle,
+				tr("Глава «%s» собрана — забирай награду.") % qtitle,
 				"E",
 				{ "deep_link": "book_of_teacher", "story_idx": idx }))
 	return specs
@@ -386,7 +401,7 @@ func _plan_f() -> Array:
 	var fire_at : int = max(now + HOUR, last_seen + 6 * HOUR)
 	return [_spec("notif_f1", fire_at,
 		"Тебе пришёл подарок",
-		"%d незабранных награды в канализации." % unclaimed,
+		tr("%d незабранных награды в канализации.") % unclaimed,
 		"F",
 		{ "deep_link": "pending_rewards" })]
 

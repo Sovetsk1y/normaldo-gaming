@@ -133,7 +133,7 @@ func _build_run_panel() -> void:
 	flbl.add_theme_font_override("font", UI_FONT)
 	flbl.add_theme_font_size_override("font_size", 11)
 	_apply_text_fx(flbl)
-	flbl.text               = "ЖИР · %s" % fat_name
+	flbl.text               = tr("ЖИР · %s") % fat_name
 	flbl.modulate           = CLR_TEXT
 	flbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	flbl.mouse_filter       = Control.MOUSE_FILTER_IGNORE
@@ -149,7 +149,7 @@ func _build_run_panel() -> void:
 	blbl.add_theme_font_override("font", UI_FONT)
 	blbl.add_theme_font_size_override("font_size", 10)
 	_apply_text_fx(blbl)
-	blbl.text               = "Рекорд скина: %d пицц" % best if best > 0 else "Рекорда пока нет"
+	blbl.text               = tr("Рекорд скина: %d пицц") % best if best > 0 else "Рекорда пока нет"
 	blbl.modulate           = CLR_TEXT_DIM
 	blbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	blbl.mouse_filter       = Control.MOUSE_FILTER_IGNORE
@@ -253,7 +253,7 @@ func _quest_row(pos: Vector2, size: Vector2, slot: int) -> void:
 	var frac : float
 	var bcol : Color = col
 	if on_cd:
-		line = "новое через %s" % _fmt_cooldown(QuestManager.slot_cooldown_remaining(slot))
+		line = tr("новое через %s") % _fmt_cooldown(QuestManager.slot_cooldown_remaining(slot))
 		frac = 0.0
 		bcol = Color(0.45, 0.46, 0.52)
 	elif taken:

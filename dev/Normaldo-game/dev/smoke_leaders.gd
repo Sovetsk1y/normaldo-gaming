@@ -23,6 +23,17 @@ func _initialize() -> void:
 	get_root().add_child(game)
 	await process_frame
 	await process_frame
+
+	# ── ЯЗЫК ПРИБИТ К РУССКОМУ ───────────────────────────────────────────────
+	# Тест сверяет РУССКИЕ надписи — те, что написаны в коде. А игра выбирает
+	# язык по телефону (Loc.device_default), и на английской машине честно
+	# выбирает английский: проверки падают не потому, что что-то сломалось, а
+	# потому, что она заговорила на другом языке.
+	#
+	# Ставится ЛОКАЛЬ ПРОЦЕССА, а не выбор игрока: `Loc.set_language` пишет в
+	# сохранение, а оно на диске и переживает прогон — тест бы навязал русский
+	# всем следующим сюитам и самому разработчику.
+	TranslationServer.set_locale("ru")
 	var hud  : Node = game.get_node_or_null("HUD")
 	var qm   : Node = get_root().get_node_or_null("QuestManager")
 	var mock : Node = get_root().get_node_or_null("LeaderboardModes")

@@ -224,7 +224,7 @@ func level_name() -> String:
 # на первом же новом эпизоде.
 func level_title() -> String:
 	var i : int = clampi(level, 0, CAMPAIGN_LEVELS.size() - 1)
-	return "УРОВЕНЬ %d · %s" % [i + 1, String(CAMPAIGN_LEVELS[i]["name"])]
+	return tr("УРОВЕНЬ %d · %s") % [i + 1, String(CAMPAIGN_LEVELS[i]["name"])]
 
 func level_boss() -> String:
 	return String(CAMPAIGN_LEVELS[clampi(level, 0, CAMPAIGN_LEVELS.size() - 1)]["boss"])

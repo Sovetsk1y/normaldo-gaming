@@ -564,7 +564,7 @@ func _build_skin_panel() -> void:
 		Vector2(name_w, 20.0))
 
 	var is_mastery := SaveData.skin_level >= 10
-	_skin_lvl_lbl = _make_label("МАСТЕРСТВО" if is_mastery else "УР. %d" % SaveData.skin_level,
+	_skin_lvl_lbl = _make_label("МАСТЕРСТВО" if is_mastery else tr("УР. %d") % SaveData.skin_level,
 		11, Color(0.55, 0.85, 1.0))
 	_apply_text_fx(_skin_lvl_lbl)
 	_skin_lvl_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -647,8 +647,8 @@ func _set_bar_color(col: Color) -> void:
 
 func _xp_hint() -> String:
 	if SaveData.skin_level >= 10:
-		return "ещё %d XP до жетона" % SaveData.xp_to_next_level()
-	return "ещё %d XP до ур. %d" % [SaveData.xp_to_next_level(), SaveData.skin_level + 1]
+		return tr("ещё %d XP до жетона") % SaveData.xp_to_next_level()
+	return tr("ещё %d XP до ур. %d") % [SaveData.xp_to_next_level(), SaveData.skin_level + 1]
 
 const HISTORY_MAX : int = 3
 
@@ -1099,7 +1099,7 @@ func _refresh_skin_panel() -> void:
 	_skin_avatar.texture  = avatar_tex
 	_skin_name_lbl.text   = skin_data.get("name_ru", "НОРМАЛЬДО") as String
 	var is_mastery := SaveData.skin_level >= 10
-	_skin_lvl_lbl.text    = "МАСТЕРСТВО" if is_mastery else "УР. %d" % SaveData.skin_level
+	_skin_lvl_lbl.text    = "МАСТЕРСТВО" if is_mastery else tr("УР. %d") % SaveData.skin_level
 	_skin_bar_fill.size.x = maxf(2.0, (_skin_bar_w - 4.0) * SaveData.xp_level_progress())
 	if is_instance_valid(_skin_xp_lbl):
 		_skin_xp_lbl.text = _xp_hint()
@@ -1401,7 +1401,7 @@ func _show_level_up_popup_slots(new_level: int, reward_d: int, reward_t: int, on
 	stripe.position = Vector2(ox, oy)
 	popup.add_child(stripe)
 
-	var lvl_str := "МАСТЕРСТВО!" if new_level <= 0 or new_level >= 10 else "УРОВЕНЬ %d!" % new_level
+	var lvl_str := "МАСТЕРСТВО!" if new_level <= 0 or new_level >= 10 else tr("УРОВЕНЬ %d!") % new_level
 	var hdr := Label.new()
 	hdr.add_theme_font_override("font", UI_FONT)
 	hdr.add_theme_font_size_override("font_size", 20)
@@ -1438,7 +1438,7 @@ func _show_level_up_popup_slots(new_level: int, reward_d: int, reward_t: int, on
 		t_lbl.add_theme_font_override("font", UI_FONT)
 		t_lbl.add_theme_font_size_override("font_size", 18)
 		_apply_text_fx(t_lbl)
-		t_lbl.text     = "+%d жетон" % reward_t
+		t_lbl.text     = tr("+%d жетон") % reward_t
 		t_lbl.modulate = Color(1.0, 0.72, 0.25)
 		t_lbl.size     = Vector2(popup_w - 60.0, 28.0)
 		t_lbl.position = Vector2(ox + 58.0, cur_y + 2.0)

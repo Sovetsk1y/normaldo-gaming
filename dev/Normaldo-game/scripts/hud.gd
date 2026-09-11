@@ -2685,7 +2685,7 @@ func _apply_mode_btn_visuals() -> void:
 		var ei : int = clampi(_mode_btn_pos - 1, 0, MODE_BTN_EPISODES.size() - 1)
 		_mode_btn_icon_atlas.atlas = MODE_BTN_EPISODES[ei]
 		_mode_btn_glow_atlas.atlas = MODE_BTN_EPISODES_GLOW[ei]
-		_mode_btn_caption.text     = "ЭПИЗОД %d" % _mode_btn_pos
+		_mode_btn_caption.text     = tr("ЭПИЗОД %d") % _mode_btn_pos
 		_mode_btn_caption.add_theme_font_size_override("font_size", MODE_FONT_CHAPTER1)
 
 # Окно «Откроется после прохождения Эпизода 1» удалено вместе с замком на чипе:
@@ -2960,7 +2960,7 @@ func _skill_item_textures(sk: Dictionary) -> Array:
 func _skill_short_effect(sk: Dictionary) -> String:
 	match sk["type"]:
 		SkinSkills.DODGE:
-			return "%d%% уклон" % int(sk.get("chance", 0.0) * 100)
+			return tr("%d%% уклон") % int(sk.get("chance", 0.0) * 100)
 		SkinSkills.ADAPT:
 			return "×0.5 длит."
 		SkinSkills.COUNTER:
@@ -2972,10 +2972,10 @@ func _skill_short_effect(sk: Dictionary) -> String:
 		SkinSkills.TRANSFORM:
 			var chance := int(sk.get("chance", 0.0) * 100)
 			match sk.get("into", ""):
-				"pizza":     return "%d%%→пицца" % chance
+				"pizza":     return tr("%d%%→пицца") % chance
 				"dollar_x3": return "%d%%→×3$"   % chance
 				"random":    return "%d%%→?"      % chance
-			return "%d%% трансф." % chance
+			return tr("%d%% трансф.") % chance
 	return ""
 
 # Returns full mechanic description for the detail popup.
@@ -2997,22 +2997,22 @@ func _skill_mechanic_desc(sk: Dictionary) -> String:
 	var item := _tag_name_acc(tags)
 	match sk["type"]:
 		SkinSkills.DODGE:
-			return "%d%% шанс пройти сквозь %s\nбез эффекта" % [int(sk.get("chance", 0.0) * 100), item]
+			return tr("%d%% шанс пройти сквозь %s\nбез эффекта") % [int(sk.get("chance", 0.0) * 100), item]
 		SkinSkills.ADAPT:
 			return "Негативный эффект снижен на 50%"
 		SkinSkills.COUNTER:
 			var xp := sk.get("bonus_xp", 0) as int
 			var dl := sk.get("bonus_dollars", 0) as int
-			if xp > 0: return "Удар засчитывается, но даёт +%d XP" % xp
-			if dl > 0: return "Удар засчитывается, но даёт +%d $"  % dl
+			if xp > 0: return tr("Удар засчитывается, но даёт +%d XP") % xp
+			if dl > 0: return tr("Удар засчитывается, но даёт +%d $")  % dl
 			return "Удар засчитывается, но даёт случайный бонус"
 		SkinSkills.TRANSFORM:
 			var chance := int(sk.get("chance", 0.0) * 100)
 			match sk.get("into", ""):
-				"pizza":     return "%d%% шанс превратить %s в пиццу" % [chance, item]
-				"dollar_x3": return "%d%% шанс: доллар → ×3 долларов"      % chance
-				"random":    return "%d%% шанс превратить %s в случайный предмет" % [chance, item]
-			return "%d%% шанс изменить %s при подборе" % [chance, item]
+				"pizza":     return tr("%d%% шанс превратить %s в пиццу") % [chance, item]
+				"dollar_x3": return tr("%d%% шанс: доллар → ×3 долларов")      % chance
+				"random":    return tr("%d%% шанс превратить %s в случайный предмет") % [chance, item]
+			return tr("%d%% шанс изменить %s при подборе") % [chance, item]
 	return ""
 
 # Visual popup (opened by tapping the badge letter row) — shows item images.
@@ -3282,7 +3282,7 @@ func _show_skill_detail_popup(skin_data: Dictionary, parent_overlay: Control) ->
 	hdr.add_theme_font_override("font", UI_FONT)
 	hdr.add_theme_font_size_override("font_size", 13)
 	_apply_menu_caption_fx(hdr)
-	hdr.text                 = name_ru + "  —  МЕХАНИКА"
+	hdr.text                 = name_ru + tr("  —  МЕХАНИКА")
 	hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hdr.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	hdr.modulate             = Color(rc.r, rc.g, rc.b)
@@ -3408,7 +3408,7 @@ func _show_skill_detail_popup(skin_data: Dictionary, parent_overlay: Control) ->
 			sstar.add_theme_font_override("font", UI_FONT)
 			sstar.add_theme_font_size_override("font_size", 10)
 			_apply_menu_caption_fx(sstar)
-			sstar.text     = "★  " + unique_data.get("label", "")
+			sstar.text     = "★  " + tr(String(unique_data.get("label", "")))
 			sstar.modulate = Color(rc.r, rc.g, rc.b)
 			sstar.size     = Vector2(PW - 32.0, 18.0)
 			sstar.position = Vector2(16.0, sy + 6.0)
@@ -3617,7 +3617,7 @@ func _show_skin_info_popup(skin_data: Dictionary, parent_overlay: Control) -> vo
 			lock_lbl.add_theme_font_override("font", UI_FONT)
 			lock_lbl.add_theme_font_size_override("font_size", 8)
 			_apply_menu_caption_fx(lock_lbl)
-			lock_lbl.text                 = "УР.%d" % fat_unlock[fi]
+			lock_lbl.text                 = tr("УР.%d") % fat_unlock[fi]
 			lock_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			lock_lbl.modulate             = Color(0.70, 0.70, 0.70, 0.90)
 			lock_lbl.size                 = Vector2(FAT_SZ, 14.0)
@@ -3633,7 +3633,7 @@ func _show_skin_info_popup(skin_data: Dictionary, parent_overlay: Control) -> vo
 	var bar_w      := PW - bar_pad * 2.0
 	var bar_h      := 8.0
 
-	var lvl_str2 := "МАСТЕРСТВО" if is_mastery else "УР. %d" % cur_level
+	var lvl_str2 := "МАСТЕРСТВО" if is_mastery else tr("УР. %d") % cur_level
 	var lvl_lbl2 := Label.new()
 	lvl_lbl2.add_theme_font_override("font", UI_FONT)
 	lvl_lbl2.add_theme_font_size_override("font_size", 10)
@@ -3683,11 +3683,11 @@ func _show_skin_info_popup(skin_data: Dictionary, parent_overlay: Control) -> vo
 	if is_mastery:
 		var over2    := cur_xp - SaveData.LEVEL_XP[9]
 		var in_cycle := over2 % SaveData.MASTERY_XP_PER_TOKEN
-		xp_sub_str = "МАСТЕРСТВО: %d / %d XP" % [in_cycle, SaveData.MASTERY_XP_PER_TOKEN]
+		xp_sub_str = tr("МАСТЕРСТВО: %d / %d XP") % [in_cycle, SaveData.MASTERY_XP_PER_TOKEN]
 	else:
 		var from_xp2 = SaveData.LEVEL_XP[cur_level - 1]
 		var to_xp2   = SaveData.LEVEL_XP[cur_level]
-		xp_sub_str = "%d / %d XP до ур. %d" % [cur_xp - from_xp2, to_xp2 - from_xp2, cur_level + 1]
+		xp_sub_str = tr("%d / %d XP до ур. %d") % [cur_xp - from_xp2, to_xp2 - from_xp2, cur_level + 1]
 
 	var xp_sub_lbl := Label.new()
 	xp_sub_lbl.add_theme_font_override("font", UI_FONT)
@@ -4052,7 +4052,7 @@ func _build_shop_card(hbox: HBoxContainer, skin_data: Dictionary,
 		cur_tag.add_theme_font_override("font", UI_FONT)
 		cur_tag.add_theme_font_size_override("font_size", 8)
 		_apply_menu_caption_fx(cur_tag)
-		cur_tag.text                 = "★" if ready else "ур.%d" % card_lvl
+		cur_tag.text                 = "★" if ready else tr("ур.%d") % card_lvl
 		cur_tag.modulate             = Color(0.55, 0.85, 1.0)
 		cur_tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		cur_tag.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
@@ -4065,7 +4065,7 @@ func _build_shop_card(hbox: HBoxContainer, skin_data: Dictionary,
 		next_tag.add_theme_font_override("font", UI_FONT)
 		next_tag.add_theme_font_size_override("font_size", 8)
 		_apply_menu_caption_fx(next_tag)
-		next_tag.text                 = "★" if ready else "ур.%d" % next_lvl
+		next_tag.text                 = "★" if ready else tr("ур.%d") % next_lvl
 		next_tag.modulate             = Color(0.85, 0.95, 1.0)
 		next_tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		next_tag.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
@@ -4508,11 +4508,11 @@ func _ability_items(skin_id: String) -> Array:
 		var unlocked : bool = bool(r.get("unlocked", true))
 		var lv : int = int(r.get("level", 0))
 		items.append({ "ring": RING_RESIST, "tex": SkinProgression.resist_icon(tag), "mod": Color(1, 1, 1), "star": "",
-			"kind": "РЕЗИСТ" if unlocked else "РЕЗИСТ · %d УРОВЕНЬ" % lv,
+			"kind": "РЕЗИСТ" if unlocked else tr("РЕЗИСТ · %d УРОВЕНЬ") % lv,
 			"kind_col": RING_RESIST if unlocked else Color(0.62, 0.40, 0.38),
 			"locked": not unlocked,
-			"title": ("Откат " + str(int(r.get("cd", 8))) + " c") if unlocked else ("Откроется на %d уровне" % lv),
-			"desc": "Разбиваешь «" + nm + "» без вреда для себя." })
+			"title": (tr("Откат %d с") % int(r.get("cd", 8))) if unlocked else (tr("Откроется на %d уровне") % lv),
+			"desc": tr("Разбиваешь «%s» без вреда для себя.") % nm })
 	var passive := SkinSkills.get_passive(skin_id)
 	if not passive.is_empty():
 		# Своей картинкой, а не звёздочкой. «★» у всех пассивок одна и та же и о
@@ -4572,7 +4572,7 @@ func _fill_desc(desc_root: VBoxContainer, skin_id: String) -> void:
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		l.modulate = Color(0.55, 0.53, 0.58) if bool(it.get("locked", false)) else Color(0.9, 0.9, 0.95)
-		l.text = it["title"] + "\n" + it["desc"]
+		l.text = tr(it["title"]) + "\n" + tr(it["desc"])
 		col.add_child(l)
 		row.add_child(col)
 		desc_root.add_child(row)
@@ -4959,7 +4959,10 @@ func _build_skin_card(parent: Control, pos: Vector2, w: float, h: float,
 	# карточке есть.
 	var ab : Dictionary = SkinSkills.get_ability(skin_id)
 	if not ab.is_empty():
-		var sp_lbl := _strong_label("%s · %.0f с" % [ab.get("label", ""), ab.get("cd", 0.0)],
+		# Имя способности переводится ОТДЕЛЬНО: подстановка отдаёт готовую
+		# строку, и словарь её уже не увидит — «РАЗМЕН · 2 s» так и висел.
+		var sp_lbl := _strong_label(tr("%s · %.0f с")
+				% [tr(String(ab.get("label", ""))), ab.get("cd", 0.0)],
 			9, Color(0.72, 0.86, 1.0), 2)
 		sp_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		sp_lbl.clip_text            = true
@@ -4969,7 +4972,7 @@ func _build_skin_card(parent: Control, pos: Vector2, w: float, h: float,
 
 	if is_owned:
 		var lvl := SaveData.get_skin_level_for(skin_id)
-		var lv := _strong_label("★ МАСТЕРСТВО" if lvl >= 10 else "УРОВЕНЬ %d" % lvl,
+		var lv := _strong_label("★ МАСТЕРСТВО" if lvl >= 10 else tr("УРОВЕНЬ %d") % lvl,
 			9, Color(0.70, 0.92, 1.0), 2)
 		lv.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lv.mouse_filter         = Control.MOUSE_FILTER_IGNORE
@@ -5114,7 +5117,7 @@ func _build_skin_grid_cell(parent: Control, pos: Vector2, w: float, h: float,
 		var lv := Label.new()
 		lv.add_theme_font_override("font", UI_FONT); lv.add_theme_font_size_override("font_size", 9)
 		_apply_menu_caption_fx(lv)
-		lv.text = "★" if maxed else "ур.%d" % lvl
+		lv.text = "★" if maxed else tr("ур.%d") % lvl
 		lv.modulate = Color(0.70, 0.92, 1.0)
 		lv.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lv.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
@@ -5205,7 +5208,7 @@ func _build_skin_stats(parent: Control, cx: float, cw: float, y: float, skin_id:
 	else:
 		# Пиццы словом, а не эмодзи: в шрифте игры значка пиццы нет, и он вылезал
 		# бы заглушкой. Строкой ниже про опыт сказано так же — «пицц».
-		text = "Забегов: %d   ·   Рекорд: %d пицц" % [runs, best]
+		text = tr("Забегов: %d   ·   Рекорд: %d пицц") % [runs, best]
 	var l := _strong_label(text, 10, Color(0.72, 0.80, 0.88), 2)
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.size         = Vector2(cw - 20.0, 16.0)
@@ -5250,7 +5253,7 @@ func _build_fat_ladder(parent: Control, cx: float, cw: float, y: float, skin_id:
 		lk.position      = Vector2(px + SZ * 0.28, row_y + SZ * 0.20)
 		lk.mouse_filter  = Control.MOUSE_FILTER_IGNORE
 		parent.add_child(lk)
-		var ul := _strong_label("ур.%d" % _fat_unlock_level(fi, skin_id), 9,
+		var ul := _strong_label(tr("ур.%d") % _fat_unlock_level(fi, skin_id), 9,
 			Color(0.90, 0.90, 0.95), 2)
 		ul.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		ul.size = Vector2(SZ, 12.0); ul.position = Vector2(px, row_y + SZ - 2.0)
@@ -5407,11 +5410,11 @@ func _show_skin_detail(skin_data: Dictionary, from_slots: bool, shop_overlay: Co
 		var lvl := SaveData.get_skin_level_for(skin_id)
 		var ready := lvl >= 10
 		var xp_y : float = act_y - 62.0
-		var l_lbl := _strong_label("★" if ready else "ур.%d" % lvl, 13, Color(0.55, 0.85, 1.0), 3)
+		var l_lbl := _strong_label("★" if ready else tr("ур.%d") % lvl, 13, Color(0.55, 0.85, 1.0), 3)
 		l_lbl.size = Vector2(60.0, 16.0); l_lbl.position = Vector2(cx + 14.0, xp_y)
 		l_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		overlay.add_child(l_lbl)
-		var r_lbl := _strong_label("★" if ready else "ур.%d" % mini(lvl + 1, 10), 13,
+		var r_lbl := _strong_label("★" if ready else tr("ур.%d") % mini(lvl + 1, 10), 13,
 			Color(0.85, 0.95, 1.0), 3)
 		r_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		r_lbl.size = Vector2(60.0, 16.0); r_lbl.position = Vector2(cx + cw - 74.0, xp_y)
@@ -5431,7 +5434,7 @@ func _show_skin_detail(skin_data: Dictionary, from_slots: bool, shop_overlay: Co
 		# «сколько ещё забегов».
 		var left : int = SaveData.xp_to_next_level_for(skin_id)
 		var need := _strong_label(
-			("ещё %d пицц до жетона" % left) if ready else ("ещё %d пицц до ур.%d" % [left, mini(lvl + 1, 10)]),
+			(tr("ещё %d пицц до жетона") % left) if ready else (tr("ещё %d пицц до ур.%d") % [left, mini(lvl + 1, 10)]),
 			10, Color(0.86, 0.88, 0.92), 2)
 		need.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		need.size = Vector2(cw - 20.0, 14.0); need.position = Vector2(cx + 10.0, xby + 14.0)
@@ -5590,7 +5593,7 @@ func _build_reward_card(vbox: VBoxContainer, lvl: int, cw: float, skin_id: Strin
 			var av := _skin_head_icon(skin_id, int(rw.get("fat", 3)), FAV)
 			av.position = Vector2(8.0, (CH - FAV) * 0.5)
 			panel.add_child(av)
-			_reward_caption(panel, pw, "НОВЫЙ ЖИР!", "Открывает %d-е состояние" % (int(rw.get("fat", 3)) + 1))
+			_reward_caption(panel, pw, "НОВЫЙ ЖИР!", tr("Открывает %d-е состояние") % (int(rw.get("fat", 3)) + 1))
 		"immunity":
 			var tag : String = String(rw.get("item", ""))
 			var bc := Control.new()
@@ -5600,7 +5603,7 @@ func _build_reward_card(vbox: VBoxContainer, lvl: int, cw: float, skin_id: Strin
 			_ability_badge(bc, 0.0, 0.0, 52.0, Color(0.88, 0.18, 0.16),
 				SkinProgression.resist_icon(tag), Color(1, 1, 1), "")
 			_reward_caption(panel, pw, "НОВЫЙ РЕЗИСТ!",
-				"%s — разбиваешь без вреда" % SkinProgression.item_name(tag).to_upper())
+				tr("%s — разбиваешь без вреда") % SkinProgression.item_name(tag).to_upper())
 		"perk":
 			var pc := Control.new()
 			pc.position = Vector2(10.0, (CH - 52.0) * 0.5); pc.size = Vector2(52.0, 52.0)
@@ -5709,16 +5712,20 @@ func _skin_desc_text(skin_id: String) -> String:
 	var lines : Array = []
 	var ab := SkinSkills.get_ability(skin_id)
 	if not ab.is_empty():
-		lines.append("● %s\n%s" % [ab.get("label", ""), ab.get("desc", "")])
+		# Заготовка «● %s\n%s» по-русски не написана, и словарь её не увидит —
+		# переводить надо то, что в неё подставляют.
+		lines.append("● %s\n%s" % [tr(String(ab.get("label", ""))),
+			tr(String(ab.get("desc", "")))])
 	var resists := SkinSkills.get_resists(skin_id)
 	if not resists.is_empty():
 		var names : Array = []
 		for r in resists:
 			names.append(SkinProgression.item_name(String(r["item"])))
-		lines.append("● Резисты: %s" % ", ".join(names))
+		lines.append(tr("● Резисты: %s") % ", ".join(names))
 	var pas := SkinSkills.get_passive(skin_id)
 	if not pas.is_empty():
-		lines.append("● %s\n%s" % [pas.get("label", ""), pas.get("desc", "")])
+		lines.append("● %s\n%s" % [tr(String(pas.get("label", ""))),
+			tr(String(pas.get("desc", "")))])
 	return "\n\n".join(lines)
 
 # Dollar + token resources, top-right (same layout as the other screens).
@@ -5964,7 +5971,7 @@ func _fill_desc_fat_lock(desc_root, fat_idx: int, lvl_req: int) -> void:
 	li.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED; li.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	li.custom_minimum_size = Vector2(18.0, 18.0)
 	head.add_child(li)
-	var t := _strong_label("ЖИР «%s»" % fat_name, 11, Color(1.0, 0.82, 0.30), 2)
+	var t := _strong_label(tr("ЖИР «%s»") % fat_name, 11, Color(1.0, 0.82, 0.30), 2)
 	t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	head.add_child(t)
 	desc_root.add_child(head)
@@ -5974,7 +5981,7 @@ func _fill_desc_fat_lock(desc_root, fat_idx: int, lvl_req: int) -> void:
 	l1.add_theme_color_override("font_outline_color", Color(0, 0, 0)); l1.add_theme_constant_override("outline_size", 2)
 	l1.autowrap_mode = TextServer.AUTOWRAP_WORD; l1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	l1.modulate = Color(0.92, 0.94, 1.0)
-	l1.text = "Новые жиры открываются по мере прокачки скина. Этот жир станет доступен на " + str(lvl_req) + "-м уровне."
+	l1.text = tr("Новые жиры открываются по мере прокачки скина. Этот жир станет доступен на %d-м уровне.") % lvl_req
 	desc_root.add_child(l1)
 
 	var l2 := Label.new()
@@ -6135,7 +6142,7 @@ func _show_skin_levels_popup(parent_overlay: Control, skin_id: String = "") -> v
 		lvl_lbl.add_theme_font_override("font", UI_FONT)
 		lvl_lbl.add_theme_font_size_override("font_size", 12)
 		_apply_menu_caption_fx(lvl_lbl)
-		lvl_lbl.text                 = "ур. %d" % lvl
+		lvl_lbl.text                 = tr("ур. %d") % lvl
 		lvl_lbl.modulate             = (Color(0.85, 0.95, 1.0) if is_cur else Color(0.85, 0.80, 0.65)) * row_mod
 		lvl_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 		lvl_lbl.size                 = Vector2(60.0, row_h)
@@ -6164,7 +6171,7 @@ func _show_skin_levels_popup(parent_overlay: Control, skin_id: String = "") -> v
 			"immunity":
 				var tag : String = String(rw.get("item", ""))
 				slot_tex = SkinProgression.resist_icon(tag)
-				rwd_text = "РЕЗИСТ: %s" % SkinProgression.item_name(tag).to_upper()
+				rwd_text = tr("РЕЗИСТ: %s") % SkinProgression.item_name(tag).to_upper()
 				rwd_col  = Color(1.00, 0.55, 0.50)
 			"perk":
 				# Картинка венца, если она заведена (см. SkinProgression.PERK_ICONS),
@@ -7574,7 +7581,7 @@ func _refresh_dev_phase_lbl(spawner) -> void:
 		return
 	var idx : int = spawner._phase
 	var total : int = (spawner.CAMPAIGN_PHASES as Array).size()
-	_dev_phase_lbl.text = "Ф%d/%d" % [idx + 1, total]
+	_dev_phase_lbl.text = tr("Ф%d/%d") % [idx + 1, total]
 
 func _dev_skip_phase() -> void:
 	_play_btn_sfx()
@@ -7970,7 +7977,7 @@ func _enter_hardcore() -> void:
 # Ступенька усложнения в хвосте. Отбивается титром: молча растущая сложность
 # читается как «игра сломалась», а не как «стало труднее».
 func _on_hardcore_tier_up(tier: int) -> void:
-	_show_shout("СУПЕР ХАРД %d" % (tier + 1), "", 1.1,
+	_show_shout(tr("СУПЕР ХАРД %d") % (tier + 1), "", 1.1,
 		Color(1.0, 0.42, 0.30), Color(1.0, 0.80, 0.55))
 
 # Общий титр по центру экрана: крупная строка и подпись под ней. Один кирпич на
@@ -8117,9 +8124,9 @@ func _show_level_card(next_level: int) -> void:
 		spawner.call("advance_level")
 		nm.text  = String(spawner.call("level_name"))
 		st.text  = String(spawner.call("level_story"))
-		num.text = "УРОВЕНЬ %d" % (int(spawner.get("level")) + 1)
+		num.text = tr("УРОВЕНЬ %d") % (int(spawner.get("level")) + 1)
 	else:
-		num.text = "УРОВЕНЬ %d" % (next_level + 1)
+		num.text = tr("УРОВЕНЬ %d") % (next_level + 1)
 	if bg and bg.has_method("set_level"):
 		bg.call("set_level", next_level + 1)
 	_clear_apartment(next_level + 1)
@@ -8594,14 +8601,14 @@ func _build_go_left(r: Rect2, total_pizzas: int, level_rewards: Array,
 	# «×2 ДВОЙНАЯ ВЫГОДА» — это имя из книги скина, по которому он находит, за
 	# что ему это дали.
 	_go_stat_row(Vector2(sx0, y + 26.0), sw, DOLLAR_TEXTURE,
-		("+ %d  ×2 ДВОЙНАЯ ВЫГОДА" % paid) if paid != _dollars_this_run else ("+ %d" % paid),
+		(tr("+ %d  ×2 ДВОЙНАЯ ВЫГОДА") % paid) if paid != _dollars_this_run else ("+ %d" % paid),
 		Color(1.0, 0.88, 0.35), _pm, false)
 
 	var t_lbl := Label.new()
 	t_lbl.add_theme_font_override("font", UI_FONT)
 	t_lbl.add_theme_font_size_override("font_size", 12)
 	_apply_menu_caption_fx(t_lbl)
-	t_lbl.text                 = "ВРЕМЯ  %d:%02d" % [int(_elapsed_time) / 60, int(_elapsed_time) % 60]
+	t_lbl.text                 = tr("ВРЕМЯ  %d:%02d") % [int(_elapsed_time) / 60, int(_elapsed_time) % 60]
 	t_lbl.modulate             = Color(0.82, 0.86, 0.94)
 	t_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	t_lbl.process_mode         = _pm
@@ -8616,7 +8623,7 @@ func _build_go_left(r: Rect2, total_pizzas: int, level_rewards: Array,
 	hist.add_theme_font_override("font", UI_FONT)
 	hist.add_theme_font_size_override("font_size", 10)
 	_apply_menu_caption_fx(hist)
-	hist.text                 = "Забегов этим скином: %d · Рекорд: %d" % [
+	hist.text                 = tr("Забегов этим скином: %d · Рекорд: %d") % [
 		runs, maxi(_go_best_before, total_pizzas)]
 	hist.modulate             = Color(0.72, 0.76, 0.84)
 	hist.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -8634,10 +8641,10 @@ func _build_go_left(r: Rect2, total_pizzas: int, level_rewards: Array,
 		rec_txt = "ПЕРВЫЙ ЗАБЕГ ЭТИМ СКИНОМ"
 		rec_col = Color(0.80, 0.84, 0.92)
 	elif total_pizzas > _go_best_before:
-		rec_txt = "НОВЫЙ РЕКОРД!  БЫЛО %d" % _go_best_before
+		rec_txt = tr("НОВЫЙ РЕКОРД!  БЫЛО %d") % _go_best_before
 		rec_col = Color(1.0, 0.88, 0.30)
 	else:
-		rec_txt = "ДО РЕКОРДА НЕ ХВАТИЛО %d" % (_go_best_before - total_pizzas)
+		rec_txt = tr("ДО РЕКОРДА НЕ ХВАТИЛО %d") % (_go_best_before - total_pizzas)
 		rec_col = Color(0.86, 0.88, 0.95)
 	UiKit.panel(self, Vector2(x, y), Vector2(w, 24.0),
 		Color(0.12, 0.10, 0.14, 0.95), 8,
@@ -8676,12 +8683,12 @@ func _build_go_left(r: Rect2, total_pizzas: int, level_rewards: Array,
 			rt += int(rr["tokens"])
 		var bits : Array = []
 		if rd > 0: bits.append("+%d $" % rd)
-		if rt > 0: bits.append("+%d жетон" % rt)
+		if rt > 0: bits.append(tr("+%d жетон") % rt)
 		var lv := Label.new()
 		lv.add_theme_font_override("font", UI_FONT)
 		lv.add_theme_font_size_override("font_size", 12)
 		_apply_menu_caption_fx(lv)
-		lv.text                 = ("МАСТЕРСТВО!" if max_level == 0 else "УРОВЕНЬ %d!" % max_level) \
+		lv.text                 = ("МАСТЕРСТВО!" if max_level == 0 else tr("УРОВЕНЬ %d!") % max_level) \
 			+ ("   " + "  ".join(bits) if not bits.is_empty() else "")
 		lv.modulate             = Color(1.0, 0.92, 0.25)
 		lv.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -8756,7 +8763,7 @@ func _build_go_xp_block(x: float, y: float, w: float,
 	cur_tag.add_theme_font_override("font", UI_FONT)
 	cur_tag.add_theme_font_size_override("font_size", 9)
 	_apply_menu_caption_fx(cur_tag)
-	cur_tag.text               = "★" if level_before >= 10 else "ур.%d" % level_before
+	cur_tag.text               = "★" if level_before >= 10 else tr("ур.%d") % level_before
 	cur_tag.modulate           = Color(0.55, 0.85, 1.0)
 	cur_tag.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	cur_tag.process_mode       = _pm
@@ -8767,7 +8774,7 @@ func _build_go_xp_block(x: float, y: float, w: float,
 	_go_level_lbl.add_theme_font_override("font", UI_FONT)
 	_go_level_lbl.add_theme_font_size_override("font_size", 9)
 	_apply_menu_caption_fx(_go_level_lbl)
-	_go_level_lbl.text                 = "★" if level_before >= 10 else "ур.%d" % mini(level_before + 1, 10)
+	_go_level_lbl.text                 = "★" if level_before >= 10 else tr("ур.%d") % mini(level_before + 1, 10)
 	_go_level_lbl.modulate             = Color(0.85, 0.95, 1.0)
 	_go_level_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_go_level_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
@@ -9306,7 +9313,7 @@ func _flash_level_up_bar(new_level: int, reward_d: int, reward_t: int) -> void:
 	tw_flash.tween_property(_go_fill_rect, "color", Color(1.0, 0.85, 0.20), 0.12)
 	tw_flash.tween_property(_go_fill_rect, "color", Color(0.22, 0.58, 1.0), 0.30)
 	if _go_level_lbl and is_instance_valid(_go_level_lbl):
-		_go_level_lbl.text = "★" if new_level >= 10 else "ур.%d" % mini(new_level + 1, 10)
+		_go_level_lbl.text = "★" if new_level >= 10 else tr("ур.%d") % mini(new_level + 1, 10)
 	# Level-up dollar reward → bump the running "Мой баланс" so the final
 	# value still matches SaveData.dollars by the end of the animation.
 	if reward_d > 0 and is_instance_valid(_go_balance_lbl):
@@ -9378,7 +9385,7 @@ func _show_level_reward_popup(new_level: int, reward_d: int, reward_t: int) -> v
 		"immunity":
 			var tag : String = String(rw.get("item", ""))
 			unlock_title = "+ РЕЗИСТ"
-			unlock_desc  = "%s разбивается без вреда" % SkinProgression.item_name(tag).to_upper()
+			unlock_desc  = tr("%s разбивается без вреда") % SkinProgression.item_name(tag).to_upper()
 			unlock_tex   = SkinProgression.resist_icon(tag)
 			unlock_col   = Color(1.00, 0.62, 0.55)
 			unlock_bg    = Color(0.28, 0.10, 0.10, 0.92)
@@ -9427,7 +9434,7 @@ func _show_level_reward_popup(new_level: int, reward_d: int, reward_t: int) -> v
 	stripe.position = Vector2(ox, oy)
 	popup.add_child(stripe)
 
-	var lvl_str := "УРОВЕНЬ %d!" % new_level
+	var lvl_str := tr("УРОВЕНЬ %d!") % new_level
 	var hdr := Label.new()
 	hdr.add_theme_font_override("font", UI_FONT)
 	hdr.add_theme_font_size_override("font_size", 20)
@@ -9464,7 +9471,7 @@ func _show_level_reward_popup(new_level: int, reward_d: int, reward_t: int) -> v
 		t_lbl.add_theme_font_override("font", UI_FONT)
 		t_lbl.add_theme_font_size_override("font_size", 18)
 		_apply_menu_caption_fx(t_lbl)
-		t_lbl.text     = "+%d жетон" % reward_t
+		t_lbl.text     = tr("+%d жетон") % reward_t
 		t_lbl.modulate = Color(1.0, 0.72, 0.25)
 		t_lbl.size     = Vector2(popup_w - 60.0, 28.0)
 		t_lbl.position = Vector2(ox + 58.0, cur_y + 2.0)
@@ -9739,13 +9746,13 @@ func _show_chest_tooltip() -> void:
 	var unlock_bg   := Color(0.10, 0.26, 0.12, 0.85)
 	match kind:
 		"fat":
-			unlock_text = "+ ЖИР «%s»  (+1 ЖИЗНЬ)" % _FAT_NAMES[clampi(int(rw.get("fat", 3)), 0, 3)]
+			unlock_text = tr("+ ЖИР «%s»  (+1 ЖИЗНЬ)") % _FAT_NAMES[clampi(int(rw.get("fat", 3)), 0, 3)]
 		"immunity":
-			unlock_text = "+ РЕЗИСТ: %s" % SkinProgression.item_name(String(rw.get("item", ""))).to_upper()
+			unlock_text = tr("+ РЕЗИСТ: %s") % SkinProgression.item_name(String(rw.get("item", ""))).to_upper()
 			unlock_col  = Color(1.00, 0.62, 0.55)
 			unlock_bg   = Color(0.28, 0.10, 0.10, 0.85)
 		"perk":
-			unlock_text = "★ %s" % String(rw.get("label", ""))
+			unlock_text = "★ %s" % tr(String(rw.get("label", "")))
 			unlock_col  = Color(1.00, 0.85, 0.30)
 			unlock_bg   = Color(0.26, 0.20, 0.05, 0.85)
 
@@ -9780,7 +9787,7 @@ func _show_chest_tooltip() -> void:
 	_chest_tooltip.add_child(tip_stripe)
 
 	var hdr_text := "МАСТЕРСТВО:" if is_mastery else \
-		"УРОВЕНЬ %d — НАГРАДЫ:" % next_lvl
+		tr("УРОВЕНЬ %d — НАГРАДЫ:") % next_lvl
 	var hdr := Label.new()
 	hdr.add_theme_font_override("font", UI_FONT)
 	hdr.add_theme_font_size_override("font_size", 10)
@@ -9827,7 +9834,7 @@ func _show_chest_tooltip() -> void:
 			var t_lbl := Label.new()
 			t_lbl.add_theme_font_override("font", UI_FONT)
 			t_lbl.add_theme_font_size_override("font_size", 14)
-			t_lbl.text     = "+%d жетон" % next_t
+			t_lbl.text     = tr("+%d жетон") % next_t
 			t_lbl.modulate = Color(1.0, 0.72, 0.25)
 			t_lbl.size     = Vector2(tip_w - 54.0, 22.0)
 			t_lbl.position = Vector2(54.0, cur_y)
@@ -9922,7 +9929,7 @@ func _refresh_menu_skin_card() -> void:
 	if not is_instance_valid(_menu_lvl_lbl):
 		return
 	var is_mastery := SaveData.skin_level >= 10
-	_menu_lvl_lbl.text = "МАСТЕРСТВО" if is_mastery else "УР. %d" % SaveData.skin_level
+	_menu_lvl_lbl.text = "МАСТЕРСТВО" if is_mastery else tr("УР. %d") % SaveData.skin_level
 	var progress   := SaveData.xp_level_progress()
 	var fill_w     := maxf(4.0, _menu_bar_w * progress)
 	_menu_bar_fill.size.x    = fill_w
@@ -10210,7 +10217,7 @@ func _build_go_rank_row_for_mode(mode: int) -> void:
 		delta  = 0
 		is_new = false
 	_build_go_rank_row(float(_go_rank_geom["x"]), float(_go_rank_geom["y"]),
-		float(_go_rank_geom["w"]), LeaderboardModes.mode_label(mode).capitalize(),
+		float(_go_rank_geom["w"]), tr(LeaderboardModes.mode_label(mode)).capitalize(),
 		rank, delta, is_new, int(_go_rank_geom["pm"]))
 
 # Насколько поднялся и впервые ли попал — считается в момент ответа сервера,
@@ -10374,7 +10381,7 @@ func _show_unclaimed_pending_rewards(rewards: Array) -> void:
 			var label := ""
 			var mi : int = LeaderboardModes.MODE_KEYS.find(metric)
 			if mi >= 0:
-				label = LeaderboardModes.mode_label(mi).capitalize()
+				label = tr(LeaderboardModes.mode_label(mi)).capitalize()
 			_show_prize_claim_modal({
 				"metric":       metric,
 				"metric_label": label,
@@ -10449,8 +10456,8 @@ func _show_prize_claim_modal(reward: Dictionary) -> void:
 	place_lbl.add_theme_font_override("font", UI_FONT)
 	place_lbl.add_theme_font_size_override("font_size", 18)
 	_apply_menu_caption_fx(place_lbl)
-	place_lbl.text = ("#%d МЕСТО" % place) if metric_label.is_empty() \
-		else ("%s — #%d МЕСТО" % [metric_label, place])
+	place_lbl.text = (tr("#%d МЕСТО") % place) if metric_label.is_empty() \
+		else (tr("%s — #%d МЕСТО") % [metric_label, place])
 	place_lbl.modulate             = Color(1.0, 0.88, 0.40)
 	place_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	place_lbl.size                 = Vector2(panel_w, 24.0)
@@ -10714,7 +10721,7 @@ func _spawn_intro_quest_toast(title: String, desc: String, done_cb: Callable) ->
 	hdr.add_theme_font_override("font", UI_FONT)
 	hdr.add_theme_font_size_override("font_size", 11)
 	_apply_menu_caption_fx(hdr)
-	hdr.text                 = ("ЗАДАНИЕ: %s" % title.to_upper()) if title != "" else "ЗАДАНИЕ"
+	hdr.text                 = (tr("ЗАДАНИЕ: %s") % tr(title).to_upper()) if title != "" else "ЗАДАНИЕ"
 	hdr.modulate             = Color(0.65, 0.90, 1.0)
 	hdr.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	hdr.size                 = Vector2(TOAST_W - 16.0, 18.0)
@@ -10835,7 +10842,7 @@ func _show_achievement_toast(a: Dictionary) -> void:
 	lbl_name.add_theme_font_override("font", UI_FONT)
 	lbl_name.add_theme_font_size_override("font_size", 13)
 	_apply_menu_caption_fx(lbl_name)
-	lbl_name.text               = String(a.get("title", "")).to_upper()
+	lbl_name.text               = tr(String(a.get("title", ""))).to_upper()
 	lbl_name.modulate           = Color(1.00, 0.96, 0.88)
 	lbl_name.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	lbl_name.clip_text          = true
@@ -10905,7 +10912,7 @@ func _show_quest_complete_toast(slot: int, title: String, desc: String) -> void:
 
 	var header_text : String = "ЗАДАНИЕ ВЫПОЛНЕНО"
 	if title.length() > 0:
-		header_text = "ВЫПОЛНЕНО: " + title.to_upper()
+		header_text = tr("ВЫПОЛНЕНО: ") + tr(title).to_upper()
 
 	var lbl_header := Label.new()
 	lbl_header.add_theme_font_override("font", UI_FONT)
@@ -11349,7 +11356,7 @@ func _build_notif_remote_row(parent: Node, x: float, y: float, w: float) -> void
 			lbl.text  = "DEV · ОТПРАВЛЕНО ✓ (СВЕРНИ ИГРУ)"
 			bg.color  = Color(0.16, 0.34, 0.20, 0.95)
 		else:
-			lbl.text  = "DEV · ОШИБКА: %s" % reason.substr(0, 40)
+			lbl.text  = tr("DEV · ОШИБКА: %s") % reason.substr(0, 40)
 			bg.color  = Color(0.40, 0.16, 0.16, 0.95))
 	parent.add_child(btn)
 

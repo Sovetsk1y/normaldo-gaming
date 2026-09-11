@@ -148,7 +148,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_reset_seconds_left = maxf(0.0, _reset_seconds_left - delta)
 	if is_instance_valid(_timer_lbl):
-		_timer_lbl.text = "Призы через %s" % _fmt_duration(_reset_seconds_left)
+		_timer_lbl.text = tr("Призы через %s") % _fmt_duration(_reset_seconds_left)
 
 # ── Build ────────────────────────────────────────────────────────────────────
 
@@ -237,7 +237,7 @@ func _build(vp: Vector2) -> void:
 	_timer_lbl.add_theme_font_override("font", UI_FONT)
 	_timer_lbl.add_theme_font_size_override("font_size", 12)
 	_apply_text_fx(_timer_lbl)
-	_timer_lbl.text                 = "ПРИЗЫ ЧЕРЕЗ %s" % _fmt_duration(_reset_seconds_left)
+	_timer_lbl.text                 = tr("ПРИЗЫ ЧЕРЕЗ %s") % _fmt_duration(_reset_seconds_left)
 	_timer_lbl.modulate             = Color(1.0, 0.88, 0.45)
 	_timer_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_timer_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
@@ -588,9 +588,9 @@ func _refresh_my_strip() -> void:
 	var total : int = int(_server_total.get(_active_metric, 0))
 	var known := rank > 0 and total > 0
 	if known:
-		_my_strip_lbl.text = "%d место из %d   ·   %s" % [rank, total, nick]
+		_my_strip_lbl.text = tr("%d место из %d   ·   %s") % [rank, total, nick]
 	else:
-		_my_strip_lbl.text = "Место появится, когда придёт таблица   ·   %s" % nick
+		_my_strip_lbl.text = tr("Место появится, когда придёт таблица   ·   %s") % nick
 	# Предлагать «показать в списке», когда списка нет, — обещание, которое
 	# некому выполнить: нажатие не сделает ничего, и игрок решит, что сломалось.
 	if is_instance_valid(_my_pos_hint):
@@ -766,7 +766,7 @@ func _is_mode_unlocked(mode: int) -> bool:
 func _mode_lock_hint(mode: int) -> String:
 	if mode == LeaderboardModes.Mode.ENDLESS:
 		return "Пройди все эпизоды"
-	return "Сначала пройди эпизод %d" % (LeaderboardModes.mode_episode(mode) - 1)
+	return tr("Сначала пройди эпизод %d") % (LeaderboardModes.mode_episode(mode) - 1)
 
 func _on_tab(mode: int) -> void:
 	if not _is_mode_unlocked(mode):
@@ -1007,9 +1007,9 @@ func _add_player_row(r: Dictionary, cy: float, alt: bool) -> void:
 func _reward_str(reward: Dictionary) -> String:
 	var d := int(reward.get("dollars", 0))
 	var t := int(reward.get("tokens",  0))
-	if d > 0 and t > 0: return "+%d $ +%d ж" % [d, t]
+	if d > 0 and t > 0: return tr("+%d $ +%d ж") % [d, t]
 	if d > 0:           return "+%d $" % d
-	if t > 0:           return "+%d ж" % t
+	if t > 0:           return tr("+%d ж") % t
 	return "—"
 
 func _make_icon(tex: Texture2D, sz: float) -> TextureRect:
@@ -1027,9 +1027,9 @@ func _fmt_duration(secs: float) -> String:
 	var h := s / 3600
 	s -= h * 3600
 	var m := s / 60
-	if d > 0: return "%dд %dч" % [d, h]
-	if h > 0: return "%dч %dм" % [h, m]
-	return "%dм" % m
+	if d > 0: return tr("%dд %dч") % [d, h]
+	if h > 0: return tr("%dч %dм") % [h, m]
+	return tr("%dм") % m
 
 # ── Замок ────────────────────────────────────────────────────────────────────
 # Рисованный замок на закрытой вкладке. Раньше он стоял на модалке «ЛИДЕРБОРД
@@ -1151,9 +1151,10 @@ func _show_metric_tooltip(_metric: int) -> void:
 	# Одна подсказка на всю полосу вкладок: объяснять надо не каждую по
 	# отдельности, а САМО РАЗБИЕНИЕ — почему таблиц четыре и чем они разные.
 	var title : String = "ЧЕТЫРЕ ТАБЛИЦЫ"
-	var body  : String = "Своя таблица у каждого эпизода и у Бесконечного режима. " \
-		+ "В зачёт идёт лучший забег за неделю. Эпизоды одинаковой длины у всех, " \
-		+ "поэтому счёт в них сравним честно; в Бесконечном сравнивается, кто уехал дальше."
+	# Одной строкой нарочно: склейка из кусков до перевода не доживает — на
+	# перевод уходит СКЛЕЕННАЯ фраза, а её в словаре нет, и подсказка осталась
+	# бы русской на английском языке.
+	var body  : String = "Своя таблица у каждого эпизода и у Бесконечного режима. В зачёт идёт лучший забег за неделю. Эпизоды одинаковой длины у всех, поэтому счёт в них сравним честно; в Бесконечном сравнивается, кто уехал дальше."
 	var vp := get_viewport().get_visible_rect().size
 	if is_instance_valid(_toast_node):
 		_toast_node.queue_free()
@@ -1297,12 +1298,12 @@ func _show_player_card(r: Dictionary) -> void:
 		_card_node)
 	nm.clip_text = true
 
-	_label("%d место · %s" % [int(r.get("rank", 0)),
+	_label(tr("%d место · %s") % [int(r.get("rank", 0)),
 			LeaderboardModes.mode_label(_active_metric)],
 		12, Color(0.86, 0.86, 0.78),
 		Vector2(x + 14.0 + AV + 12.0, y + 40.0), Vector2(CARD_W - AV - 40.0, 20.0),
 		_card_node)
-	_label("%d пицц" % int(r.get("score", 0)), 14, CLR_GOLD,
+	_label(tr("%d пицц") % int(r.get("score", 0)), 14, CLR_GOLD,
 		Vector2(x + 14.0 + AV + 12.0, y + 60.0), Vector2(CARD_W - AV - 40.0, 20.0),
 		_card_node)
 
@@ -1505,7 +1506,7 @@ func _fetch_from_server_async() -> void:
 		var why : String = LeaderboardClient.explain(resp)
 		Logger.warn("Leaderboard", "getLeaderboard failed: %s" % why)
 		if captured_metric == _active_metric:
-			_show_empty_state("Таблица не пришла: %s." % why, "")
+			_show_empty_state(tr("Таблица не пришла: %s.") % why, "")
 		return
 	_server_rows[captured_metric]  = resp.data.get("rows", [])
 	_server_total[captured_metric] = int(resp.data.get("total_players", 0))
@@ -1538,7 +1539,9 @@ func _show_empty_state(reason: String, detail: String = "") -> void:
 	match int(LeaderboardClient.last_submit_ok()):
 		1:  tail = "\nПопробуй позже — результат последнего забега уже засчитан."
 		0:  tail = "\nРезультат последнего забега тоже не ушёл на сервер."
-	lbl.text                 = reason + tail
+	# Переводится КАЖДЫЙ кусок отдельно и ДО склейки: склеенной фразы в
+	# словаре нет, и целиком она не переведётся никогда.
+	lbl.text                 = tr(reason) + tr(tail)
 	lbl.modulate             = Color(0.62, 0.62, 0.68)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER

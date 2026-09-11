@@ -83,12 +83,13 @@ func setup(nrm: Node) -> void:
 				continue
 			specs.append({ "key": "resist:" + str(tag), "tex": icon,
 				"sym": "", "mod": Color(1, 1, 1), "ring": RING_RESIST,
-				"title": "РЕЗИСТ · " + nm, "desc": "Ломает «" + nm + "» без урона. Откат " + str(cd) + " c." })
+				"title": tr("РЕЗИСТ · ") + nm,
+				"desc": tr("Ломает «%s» без урона. Откат %d с.") % [nm, cd] })
 
 	# Active ability.
 	var ab : Dictionary = SkinSkills.get_ability(sid)
 	if not ab.is_empty():
-		var a_title : String = "АКТИВКА · " + str(ab.get("label", ""))
+		var a_title : String = tr("АКТИВКА · ") + tr(String(ab.get("label", "")))
 		var a_desc  : String = str(ab.get("desc", ""))
 		var a_charges : bool = int(ab.get("charges", 1)) > 1   # show a charge counter
 		if ab.get("type", "") == SkinSkills.RYAGALITY:

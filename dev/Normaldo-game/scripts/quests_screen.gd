@@ -356,7 +356,7 @@ func _build_bonus_banner(pos: Vector2, size: Vector2) -> void:
 	lbl.add_theme_font_override("font", UI_FONT)
 	lbl.add_theme_font_size_override("font_size", 14)
 	_apply_quests_text_fx(lbl)
-	lbl.text                 = "БОНУС ЗА ВХОД   +%d $" % QuestManager.ENTRY_BONUS
+	lbl.text                 = tr("БОНУС ЗА ВХОД   +%d $") % QuestManager.ENTRY_BONUS
 	lbl.modulate             = Color(0.85, 1.0, 0.60) if avail else Color(0.62, 0.62, 0.58)
 	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	lbl.size                 = Vector2(w - 120.0, h)
@@ -627,7 +627,7 @@ func _build_reward_row(root: Node2D, pos: Vector2, w: float, def: Dictionary) ->
 		txt = "+%d" % t
 	elif x > 0:
 		tex = null
-		txt = "+%d ОПЫТ" % x
+		txt = tr("+%d ОПЫТ") % x
 
 	var ico_sz := 26.0
 	if tex != null:
@@ -706,8 +706,8 @@ func _reward_str(def: Dictionary) -> String:
 	var x := int(def.get("reward_xp", 0))
 	if d > 0:  return "+%d $" % d
 	if t == 1: return "+1 жетон"
-	if t > 1:  return "+%d жетона" % t
-	if x > 0:  return "+%d ОПЫТ" % x
+	if t > 1:  return tr("+%d жетона") % t
+	if x > 0:  return tr("+%d ОПЫТ") % x
 	return ""
 
 func _time_to_midnight() -> String:
@@ -719,7 +719,7 @@ func _time_to_midnight() -> String:
 	var rh     := rem / 3600
 	var rm     := (rem % 3600) / 60
 	var rs     := rem % 60
-	return "ДО СБРОСА  %02d:%02d:%02d" % [rh, rm, rs]
+	return tr("ДО СБРОСА  %02d:%02d:%02d") % [rh, rm, rs]
 
 func _refresh() -> void:
 	if not is_instance_valid(_slide_root):

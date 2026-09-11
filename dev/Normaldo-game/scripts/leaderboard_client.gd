@@ -338,13 +338,13 @@ func explain(resp: Dictionary) -> String:
 	if status == 404:
 		return "функция не развёрнута на сервере (404)"
 	if status == 401 or status == 403:
-		return "сервер отказал в доступе (%d)" % status
+		return tr("сервер отказал в доступе (%d)") % status
 	if status >= 500:
-		return "сервер ответил ошибкой (%d)" % status
+		return tr("сервер ответил ошибкой (%d)") % status
 	if err.begins_with("http_result="):
-		return "нет связи с сервером (%s)" % err
+		return tr("нет связи с сервером (%s)") % err
 	if err.begins_with("request enqueue failed"):
-		return "запрос не ушёл (%s)" % err
+		return tr("запрос не ушёл (%s)") % err
 	if status > 0:
 		return "%d: %s" % [status, err]
 	return err

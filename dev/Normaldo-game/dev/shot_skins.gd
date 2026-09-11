@@ -40,6 +40,14 @@ func _initialize() -> void:
 	save.owned_skins = ["classic", "viking", "tyson", "harry_potter"]
 	save.active_skin = "harry_potter"
 	save.skin_level  = lvl
+	# Язык — последним аргументом: экран скина надо смотреть и на английском,
+	# там самые длинные надписи и все подстановки с числами.
+	#
+	# Ставится ЛОКАЛЬ ПРОЦЕССА, а не `Loc.set_language`: тот пишет выбор в
+	# сохранение, а оно на диске и переживает прогон — снимок экрана оставил бы
+	# английский язык и разработчику, и всем следующим прогонам.
+	if argv.size() > 5:
+		TranslationServer.set_locale(String(argv[5]))
 
 	if detail == "cards" or detail == "cards_fat":
 		# Карточный вид: тот же экран, другой режим показа.

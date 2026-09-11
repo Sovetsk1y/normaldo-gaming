@@ -278,8 +278,15 @@ const PERK_ICONS : Dictionary = {
 func perk_icon(perk_id: String) -> Texture2D:
 	return PERK_ICONS.get(perk_id, null)
 
+# ПЕРЕВОД ЖИВЁТ ЗДЕСЬ, а не в семи местах вызова. Имя предмета подставляется в
+# готовые строки («РЕЗИСТ: %s», «Ломает «%s» без урона»), и переводить его надо
+# ДО подстановки: собранная строка ключом уже не является.
+#
+# Место одно на всю игру, и оно же единственное, где имя вообще берётся, —
+# значит и перевести его надо ровно здесь. Иначе «птица» превращалась бы в
+# «ПТИЦА» посреди английской фразы: `to_upper()` над непереведённым словом.
 func item_name(item: String) -> String:
-	return String(ITEM_NAMES.get(item, item))
+	return tr(String(ITEM_NAMES.get(item, item)))
 
 func is_dormant(item: String) -> bool:
 	return item in DORMANT_ITEMS
@@ -291,13 +298,14 @@ func reward_label(skin_id: String, level: int) -> String:
 		"money":
 			var parts : Array = []
 			if int(r.get("dollars", 0)) > 0: parts.append("%d $" % int(r["dollars"]))
-			if int(r.get("tokens", 0))  > 0: parts.append("%d жетон" % int(r["tokens"]))
+			if int(r.get("tokens", 0))  > 0: parts.append(tr("%d жетон") % int(r["tokens"]))
 			return " / ".join(parts)
 		"fat":
-			return "Открыто %d-е состояние жира" % (int(r.get("fat", 3)) + 1)
+			return tr("Открыто %d-е состояние жира") % (int(r.get("fat", 3)) + 1)
 		"immunity":
 			var nm := item_name(String(r.get("item", "")))
-			return "Иммунитет: %s%s" % [nm, " (скоро)" if is_dormant(String(r.get("item", ""))) else ""]
+			return tr("Иммунитет: %s%s") % [nm,
+				tr(" (скоро)") if is_dormant(String(r.get("item", ""))) else ""]
 		"perk":
-			return String(r.get("label", ""))
+			return tr(String(r.get("label", "")))
 	return ""

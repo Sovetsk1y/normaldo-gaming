@@ -78,6 +78,14 @@ func set_language(code: String) -> void:
 	SaveData.language = code
 	SaveData._save()
 	apply()
+	# ── УВЕДОМЛЕНИЯ ПЕРЕСОБИРАЮТСЯ ЗАНОВО ──────────────────────────────────
+	# Пуши не переводятся при показе: текст вшивается в них В МОМЕНТ ПОСТАНОВКИ
+	# В ОЧЕРЕДЬ и уходит в систему как есть. Уже назначенные так и всплыли бы
+	# на старом языке — через день, через неделю, когда игрок давно забыл, что
+	# что-то переключал.
+	var planner := get_tree().root.get_node_or_null("NotifPlanner")
+	if planner != null:
+		planner.call("replan_all")
 	changed.emit()
 
 func apply() -> void:

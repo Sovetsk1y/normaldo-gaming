@@ -517,7 +517,7 @@ func _page_notif(w: float) -> float:
 	var q := Label.new()
 	q.add_theme_font_override("font", UI_FONT)
 	q.add_theme_font_size_override("font_size", 9)
-	q.text          = "С %02d:00 до %02d:00 пуши не приходят." % [
+	q.text          = tr("С %02d:00 до %02d:00 пуши не приходят.") % [
 		int(SaveData.notif_quiet_start), int(SaveData.notif_quiet_end)]
 	q.modulate      = Color(0.66, 0.68, 0.74)
 	q.mouse_filter  = Control.MOUSE_FILTER_IGNORE
@@ -751,7 +751,7 @@ func _profile_stats(w: float, y0: float) -> float:
 		var v : int = int((SaveData.mode_best as Dictionary).get(
 			LeaderboardModes.mode_key(int(m)), 0))
 		if v > 0:
-			recs.append([LeaderboardModes.mode_label(int(m)).capitalize(), _num(v)])
+			recs.append([tr(LeaderboardModes.mode_label(int(m))).capitalize(), _num(v)])
 	if recs.is_empty():
 		recs.append(["Пока пусто", "сыграй забег"])
 	y = _stat_group(w, y, "РЕКОРДЫ НЕДЕЛИ", recs)
