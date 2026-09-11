@@ -746,10 +746,7 @@ const STRINGS : Dictionary = {
 	"НАЙТМЕН":          "NIGHTMAN",
 	"ПУГАЛО":           "SCARECROW",
 	"КЛОУН":            "CLOWN",
-	# «МАЛЬЧИК, КОТОРЫЙ ВЫЖИЛ» уже лежит ниже, среди венцов: так зовут
-	# способность этого же скина на 10-м уровне. Второй раз тот же ключ GDScript
-	# не прощает — словарь с повтором не собирается вовсе, и перевод пропадает
-	# весь разом.
+	"МАЛЬЧИК, КОТОРЫЙ ВЫЖИЛ": "THE BOY WHO LIVED",
 	"ГЛАЙД":            "GLIDE",
 	"ПАУК САПИЕНС":     "SPIDER SAPIENS",
 	"ДРАКУЛА":          "DRACULA",
@@ -848,7 +845,7 @@ const STRINGS : Dictionary = {
 		"The throw sends two spatulas in a row — the second follows the first",
 	"ДВОЙНАЯ ВЫГОДА":   "DOUBLE PROFIT",
 	"Все доллары за забег идут ×2": "Every dollar in the run counts ×2",
-	"МАЛЬЧИК, КОТОРЫЙ ВЫЖИЛ": "THE BOY WHO LIVED",
+	"ВТОРОЙ ШАНС":      "SECOND CHANCE",
 	"Один раз за забег переживаешь смертельный удар":
 		"Once per run you survive a lethal hit",
 	"ПАУЧЬЯ РЕАКЦИЯ":   "SPIDER REFLEX",

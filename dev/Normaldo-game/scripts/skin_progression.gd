@@ -124,7 +124,7 @@ func _init() -> void:
 		"harry_potter": {
 			2: _FAT_MAX, 3: _money(100, 2), 4: _imm("snake"), 5: _money(100, 2),
 			6: _imm("dog"), 7: _money(100, 2), 8: _imm("bird"), 9: _money(100, 3),
-			10: _perk("second_chance", "МАЛЬЧИК, КОТОРЫЙ ВЫЖИЛ",
+			10: _perk("second_chance", "ВТОРОЙ ШАНС",
 				"Один раз за забег переживаешь смертельный удар"),
 		},
 		"pirate": {
