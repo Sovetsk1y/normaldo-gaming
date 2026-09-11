@@ -599,22 +599,33 @@ func _test_fit_helper(hud: Node) -> void:
 	# 90 px, в карточном виде около 140. Меньше 90 не проверяется: там и кегль 7
 	# не спасает, а мельче делать нечего — надпись перестаёт читаться, и уж
 	# лучше она вылезет, чем исчезнет.
+	# С ОБРЕЗКОЙ И БЕЗ. `clip_text` стоит у подписи в ячейке сетки, и именно на
+	# ней ужимание не срабатывало: с обрезкой узел сообщает ширину в 1 px вместо
+	# 137, замер отвечает «влезает», и кегль остаётся прежним. Проверка без
+	# обрезки этого не видела вовсе — на ней всё было зелено.
 	var bad : Array = []
 	var sizes : Array = []
-	for box in [90.0, 140.0]:
+	for case in [[90.0, false], [140.0, false], [90.0, true], [140.0, true]]:
+		var box : float = (case as Array)[0]
+		var clip : bool = (case as Array)[1]
 		var lbl := Label.new()
 		lbl.add_theme_font_override("font", hud.UI_FONT)
 		lbl.add_theme_font_size_override("font_size", 13)
+		lbl.clip_text = clip
 		lbl.text = longest
 		# В ДЕРЕВО — иначе узел не знает своей ширины и ужимание идёт вслепую.
 		get_root().add_child(lbl)
 		hud.call("_fit_label_width", lbl, box, 13)
 		var fs : int = lbl.get_theme_font_size("font_size")
-		# Тем же мерилом, что и вёрстка: сколько узел РЕАЛЬНО займёт.
+		# Мерить надо БЕЗ обрезки — с ней узел про свою ширину и не скажет.
+		lbl.clip_text = false
 		var w := lbl.get_combined_minimum_size().x
+		lbl.clip_text = clip
 		if w > box + 0.5:
-			bad.append("в %.0f px «%s» занял %.0f при кегле %d" % [box, longest, w, fs])
-		sizes.append("%.0f px → кегль %d" % [box, fs])
+			bad.append("в %.0f px «%s» занял %.0f при кегле %d%s"
+				% [box, longest, w, fs, " (с обрезкой)" if clip else ""])
+		sizes.append("%.0f px%s → кегль %d"
+			% [box, " c обрезкой" if clip else "", fs])
 		lbl.queue_free()
 	_check(bad.is_empty(), "«%s» ужимается под узкую карточку (%s): %s"
 		% [longest, ", ".join(sizes), bad])

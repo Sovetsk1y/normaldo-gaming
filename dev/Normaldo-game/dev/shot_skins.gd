@@ -53,6 +53,12 @@ func _initialize() -> void:
 		# Карточный вид: тот же экран, другой режим показа.
 		hud.set("_skins_card_view", true)
 		hud.call("_show_shop")
+	elif detail == "grid":
+		# Вид СЕТКОЙ. Задаётся явно: режим показа лежит в сохранении и переживает
+		# прогоны — без этого снимок «сетки» выходил карточками, смотря что
+		# осталось от прошлого запуска.
+		hud.set("_skins_card_view", false)
+		hud.call("_show_shop")
 	elif detail != "":
 		var reg : Node = get_root().get_node_or_null("SkinRegistry")
 		hud.call("_show_skin_detail", reg.get_skin(detail), true, null, true)

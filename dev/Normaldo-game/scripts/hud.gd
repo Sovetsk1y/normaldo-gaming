@@ -5487,13 +5487,20 @@ func _fit_label_width(lbl: Label, max_w: float, base_size: int,
 		min_size: int = 7) -> void:
 	if max_w <= 0.0:
 		return
+	# ── ОБРЕЗКУ НА ВРЕМЯ ЗАМЕРА СНИМАЕМ ────────────────────────────────────
+	# `clip_text` в том и состоит, чтобы узел МОГ быть уже своего текста: с ней
+	# он сообщает минимум в 1 px вместо 137. Замер отвечал «влезает» на любой
+	# строке, ужимание не срабатывало ни разу — имя так и уезжало под обрез.
+	var was_clip := lbl.clip_text
+	lbl.clip_text = false
 	var sz := base_size
 	while sz > min_size:
 		lbl.add_theme_font_size_override("font_size", sz)
 		if lbl.get_combined_minimum_size().x <= max_w:
-			return
+			break
 		sz -= 1
 	lbl.add_theme_font_size_override("font_size", sz)
+	lbl.clip_text = was_clip
 
 func _strong_label(text: String, size: int, col: Color, outline: int = 3) -> Label:
 	var l := Label.new()
