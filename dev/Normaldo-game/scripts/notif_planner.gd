@@ -223,19 +223,26 @@ func _plan_a() -> Array:
 		"A"))
 	return specs
 
+# Приписка про стрик КЛЕИТСЯ к тексту, а значит переводить надо обе половины
+# здесь: дальше, в `_spec`, приедет уже склейка, а такого ключа в словаре нет.
+# Так и вышло: «Нормальдо смотрит на сковородку и грустит. A 3-day streak —
+# don't lose it.» — одно уведомление на двух языках сразу.
 func _with_streak_hint(base: String) -> String:
 	var streak : int = int(QuestManager.streak_days)
 	if streak >= 3:
-		return base + tr(" Стрик %d дней — не теряй.") % streak
-	return base
+		return tr(base) + tr(" Стрик %d дней — не теряй.") % streak
+	return tr(base)
 
 func _skin_display_name() -> String:
 	if not Engine.has_singleton("SkinRegistry") and get_node_or_null("/root/SkinRegistry") == null:
 		return "скин"
 	var data = SkinRegistry.get_skin(str(SaveData.active_skin))
+	# Имя скина уезжает В ПОДСТАНОВКУ, и словарь его там уже не увидит —
+	# переводится оно здесь. Иначе «ТАЙК МАЙСОН was one run away from a new
+	# level.»: фраза английская, имя кириллицей.
 	if data is Dictionary:
-		return str(data.get("name_ru", "скин"))
-	return "скин"
+		return tr(str(data.get("name_ru", "скин")))
+	return tr("скин")
 
 # ── Category B — daily cycle ─────────────────────────────────────────────────
 

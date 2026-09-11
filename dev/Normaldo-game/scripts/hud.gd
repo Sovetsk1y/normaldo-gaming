@@ -5583,8 +5583,6 @@ func _build_reward_card(vbox: VBoxContainer, lvl: int, cw: float, skin_id: Strin
 	card.add_child(panel)
 
 	var icon_sz := 46.0
-	# Lowered a touch so the icon+count block reads centred (count sits below icon).
-	var row_y := (CH - icon_sz) * 0.5 + 5.0
 
 	match kind:
 		"fat":
@@ -5617,7 +5615,9 @@ func _build_reward_card(vbox: VBoxContainer, lvl: int, cw: float, skin_id: Strin
 				Color(1, 1, 1), "" if ptex != null else "★")
 			_reward_caption(panel, pw, String(rw.get("label", "")), String(rw.get("desc", "")))
 		_:
-			_reward_pair(panel, Vector2(8.0, row_y), pw - 16.0, TOKEN_TEXTURE, t_rwd, DOLLAR_TEXTURE, d_rwd, icon_sz)
+			# Полоса — вся карточка: блок встаёт по её середине сам.
+			_reward_pair(panel, 8.0, 0.0, CH, pw - 16.0,
+				TOKEN_TEXTURE, t_rwd, DOLLAR_TEXTURE, d_rwd, icon_sz)
 
 	# ── «ВЗЯТО» — УГЛОВАЯ ПЕЧАТЬ, А НЕ НАДПИСЬ ПОПЕРЁК КАРТОЧКИ ──────────────
 	# Здесь была подпись «Награда получена», растянутая на всю карточку и
@@ -5675,22 +5675,44 @@ func _reward_caption(panel: Control, pw: float, title: String, sub: String) -> v
 	panel.add_child(d)
 
 # Two reward icons (icon + "x{n}" beneath) spread across `w` starting at `pos`.
-func _reward_pair(parent: Control, pos: Vector2, w: float, tex_a: Texture2D, n_a: int,
-		tex_b: Texture2D, n_b: int, icon_sz: float) -> void:
+# ── БЛОК «ИКОНКА + ЧИСЛО» ЦЕНТРИРУЕТСЯ ЦЕЛИКОМ ──────────────────────────────
+# Число стоит ПОД иконкой и заезжает на неё на REWARD_NUM_OVERLAP, так что блок
+# ВЫШЕ самой иконки. Центрировали по одной иконке — блок уезжал вниз и ложился
+# на нижнюю рамку карточки, оставляя сверху пустоту.
+#
+# Высота подписи НЕ КОНСТАНТА: Label не даёт сделать себя ниже собственного
+# минимума, и у шрифта игры на 16 кеглях это 48 px, а не 20, как казалось. Взяв
+# 20 на веру, блок промахивался мимо центра ещё на 28 px — вниз, туда же.
+# Поэтому высота спрашивается у САМОЙ подписи, уже собранной.
+const REWARD_NUM_OVERLAP : float = 6.0
+
+func _reward_pair(parent: Control, x: float, band_y: float, band_h: float,
+		w: float, tex_a: Texture2D, n_a: int, tex_b: Texture2D, n_b: int,
+		icon_sz: float) -> void:
 	var slots : Array = []
 	if n_a > 0: slots.append([tex_a, n_a])
 	if n_b > 0: slots.append([tex_b, n_b])
 	if slots.is_empty():
 		return
 	var step := w / float(slots.size())
+	# Собираем подписи заранее — ради их настоящей высоты.
+	var labels : Array = []
 	for i in slots.size():
-		var cx : float = pos.x + step * i + (step - icon_sz) * 0.5
-		var ic := _make_icon(slots[i][0], icon_sz)
-		ic.position = Vector2(cx, pos.y); ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		parent.add_child(ic)
 		var nl := _strong_label("x%d" % slots[i][1], 16, Color(1, 1, 1), 4)
 		nl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		nl.size = Vector2(step, 20.0); nl.position = Vector2(pos.x + step * i, pos.y + icon_sz - 6.0)
+		nl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		labels.append(nl)
+	var num_h : float = (labels[0] as Label).get_combined_minimum_size().y
+	var blk_h := icon_sz - REWARD_NUM_OVERLAP + num_h
+	var top   := band_y + (band_h - blk_h) * 0.5
+	for i in slots.size():
+		var cx : float = x + step * i + (step - icon_sz) * 0.5
+		var ic := _make_icon(slots[i][0], icon_sz)
+		ic.position = Vector2(cx, top); ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		parent.add_child(ic)
+		var nl : Label = labels[i]
+		nl.size     = Vector2(step, num_h)
+		nl.position = Vector2(x + step * i, top + icon_sz - REWARD_NUM_OVERLAP)
 		parent.add_child(nl)
 
 # A rounded dark panel with an optional title.

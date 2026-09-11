@@ -55,6 +55,8 @@ func _initialize() -> void:
 	await _test_all_skins(hud, save, reg)
 	print("── Кружок тот же, что в забеге ──")
 	_test_badge_matches_run()
+	print("── Награда стоит посередине карточки ──")
+	await _test_reward_centred(hud, save, reg)
 
 	print("")
 	if _fails == 0:
@@ -378,3 +380,56 @@ func _test_all_skins(hud: Node, save: Node, reg: Node) -> void:
 			bad.append(id)
 		await _close(ov)
 	_check(bad.is_empty(), "карточка собралась у всех %d скинов, упали: %s" % [reg.SKINS.size(), bad])
+
+# ── НАГРАДА НЕ ЛЕЖИТ НА ГРАНИЦЕ КАРТОЧКИ ──────────────────────────────────────
+# Блок награды — это ИКОНКА ПЛЮС ЧИСЛО ПОД НЕЙ, и он выше самой иконки.
+# Центрировали по одной иконке: блок уезжал на треть карточки вниз и ложился на
+# нижнюю рамку, оставляя сверху пустоту. На глаз это заметно только рядом с
+# соседней карточкой, где награда — картинка без подписи.
+#
+# Меряются НАСТОЯЩИЕ узлы: сколько пустоты осталось сверху и сколько снизу.
+func _test_reward_centred(hud: Node, save: Node, reg: Node) -> void:
+	save.skin_progress = {}
+	var ov : Control = await _open(hud, reg, "viking")
+	if ov == null:
+		_check(false, "карточка не открылась")
+		return
+	var cards := _money_cards(ov, [])
+	_check(not cards.is_empty(), "денежных карточек найдено: %d" % cards.size())
+	var bad : Array = []
+	for c in cards:
+		var card : Control = (c as Array)[0]
+		var top  : float   = (c as Array)[1]
+		var bot  : float   = (c as Array)[2]
+		var over := top
+		var under := card.size.y - bot
+		# Полпикселя разницы даёт нечётная высота — это не перекос.
+		if absf(over - under) > 2.0:
+			bad.append("%s: сверху %.0f, снизу %.0f" % [card.name, over, under])
+	_check(bad.is_empty(), "сверху и снизу поровну: %s" % [bad])
+	_close(ov)
+
+# Карточки, где награда — деньги: у них внутри иконка-TextureRect и подпись
+# «xN». Возвращается [карточка, верх блока, низ блока] в координатах карточки.
+func _money_cards(n: Node, out: Array) -> Array:
+	if n is Control:
+		var icons : Array = []
+		var nums  : Array = []
+		for ch in n.get_children():
+			if ch is TextureRect:
+				icons.append(ch)
+			elif ch is Label and String((ch as Label).text).begins_with("x"):
+				nums.append(ch)
+		if not icons.is_empty() and not nums.is_empty():
+			var top := INF
+			var bot := -INF
+			for i in icons:
+				top = minf(top, (i as Control).position.y)
+				bot = maxf(bot, (i as Control).position.y + (i as Control).size.y)
+			for l in nums:
+				top = minf(top, (l as Control).position.y)
+				bot = maxf(bot, (l as Control).position.y + (l as Control).size.y)
+			out.append([n as Control, top, bot])
+	for ch in n.get_children():
+		_money_cards(ch, out)
+	return out

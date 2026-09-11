@@ -103,8 +103,13 @@ const DATA : Dictionary = {
 	},
 	"batman": {
 		"skills": [], "resists": [],
+		# Батаранг чёрный, с тонкой синей обводкой, и на тёмном диске от него
+		# остаётся только эта обводка — silhouette не читается вовсе. Свет под
+		# ним — жёлтый: bat-signal, и заодно не сливается с собственной синей
+		# каймой значка.
 		"ability": { "type": SPELL, "id": "bat_shuriken",
 			"icon": "res://assets/skills/batman/throw.png", "combat": RANGED, "cd": 3.0,
+			"icon_glow": Color(1.00, 0.82, 0.25, 1.0),
 			"label": "БЭТ-СЮРИКЕН", "projectile": "batarang",
 			"desc": "Батаранг уходит в сторону тапа, вращаясь на лету" },
 		"unique": {},
@@ -140,8 +145,13 @@ const DATA : Dictionary = {
 	},
 	"wizard": {
 		"skills": [], "resists": [],
+		# ОДНА ПАЛОЧКА, а не три. В staff1 их нарисовано три в ряд — это лист
+		# кадров, а не значок: в кружке диаметром 52 px они превращались в
+		# частокол, по которому не понять даже, что это палочка. staff4 — та же
+		# палочка одна и крупно.
 		"ability": { "type": SPELL, "id": "wand_shot",
-			"icon": "res://assets/skills/wizard/staff1.png", "combat": RANGED, "cd": 3.0,
+			"icon": "res://assets/skills/wizard/staff4.png", "icon_k": 1.20,
+			"combat": RANGED, "cd": 3.0,
 			"label": "ВЫСТРЕЛ ПАЛОЧКОЙ", "projectile": "magicball",
 			# Маг не ломает предмет и не выдаёт добычу — он превращает угрозу в
 			# СТАВКУ: ящик ещё надо поймать, и выплюнет он что попало. Откат за
@@ -166,8 +176,15 @@ const DATA : Dictionary = {
 		# размером, как перчатку Тайсона, — но у пирата есть чем развести
 		# по-настоящему: чёрный флаг с черепом узнаётся мгновенно и говорит
 		# «пират» лучше, чем второе колесо.
+		#
+		# Флаг ЧЁРНЫЙ — как и диск кружка, и на нём его попросту нет: виден один
+		# белый череп, висящий в пустоте. Под низ кладётся свет — тот же приём,
+		# что у вороны Пугала (см. halloween выше). Холодный, лунный: тёплый
+		# янтарь уже занят вороной, и рядом два одинаковых пятна читались бы как
+		# одна и та же способность.
 		"ability": { "type": SPELL, "id": "helm_throw",
-			"icon": "res://assets/skills/pirate/flag.png",
+			"icon": "res://assets/skills/pirate/flag_icon.png", "icon_k": 1.10,
+			"icon_glow": Color(0.18, 0.42, 0.92, 1.0),
 			"combat": RANGED, "cd": 3.0,
 			"label": "ШТУРВАЛ",
 			"desc": "Штурвал прошивает всё на линии и не разбивается" },
@@ -177,8 +194,11 @@ const DATA : Dictionary = {
 	},
 	"joker": {
 		"skills": [], "resists": [],
+		# ОДНА КАРТА, а не пара. В card_pair две одинаковые карты, отражённые
+		# друг в друга; в кружке это читалось как раскрытая книга, а не как
+		# карта. Одна крупная карта узнаётся сразу.
 		"ability": { "type": SPELL, "id": "card_deck",
-			"icon": "res://assets/skills/joker/card_pair.png", "combat": RANGED, "cd": 5.0,
+			"icon": "res://assets/skills/joker/card_red1.png", "combat": RANGED, "cd": 5.0,
 			"label": "КОЛОДА КАРТ",
 			"desc": "Четыре карты крестом: бьют плохое, отскакивают от краёв и возвращаются" },
 		"unique": {},

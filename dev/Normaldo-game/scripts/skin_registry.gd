@@ -60,7 +60,7 @@ const SKINS : Array = [
 	},
 	{
 		"id":        "tyson",
-		"name_ru":   "ТАЙСОН",
+		"name_ru":   "ТАЙК МАЙСОН",
 		"rarity":    COMMON,
 		"price":     5000,
 		"tex_dir":   "res://assets/normaldo/tyson/",
@@ -76,7 +76,7 @@ const SKINS : Array = [
 	},
 	{
 		"id":        "batman",
-		"name_ru":   "БЭТМЕН",
+		"name_ru":   "НАЙТМЕН",
 		"rarity":    RARE,
 		"price":     9000,
 		"tex_dir":   "res://assets/normaldo/batman/",
@@ -92,7 +92,7 @@ const SKINS : Array = [
 	},
 	{
 		"id":        "joker",
-		"name_ru":   "ДЖОКЕР",
+		"name_ru":   "КЛОУН",
 		"rarity":    RARE,
 		"price":     9000,
 		"tex_dir":   "res://assets/normaldo/joker/",
@@ -100,7 +100,7 @@ const SKINS : Array = [
 	},
 	{
 		"id":        "harry_potter",
-		"name_ru":   "ГАРРИ",
+		"name_ru":   "МАЛЬЧИК, КОТОРЫЙ ВЫЖИЛ",
 		"rarity":    EPIC,
 		"price":     15000,
 		"tex_dir":   "res://assets/normaldo/harry_potter/",
@@ -120,7 +120,7 @@ const SKINS : Array = [
 	},
 	{
 		"id":        "spider_man",
-		"name_ru":   "СПАЙДЕР",
+		"name_ru":   "ПАУК САПИЕНС",
 		"rarity":    EPIC,
 		"price":     15000,
 		"tex_dir":   "res://assets/normaldo/spider_man/",
@@ -144,7 +144,7 @@ const SKINS : Array = [
 	},
 	{
 		"id":        "pirate",
-		"name_ru":   "ПИРАТ",
+		"name_ru":   "ГааР",
 		"rarity":    LEGENDARY,
 		"price":     20000,
 		"tex_dir":   "res://assets/normaldo/pirate/",
