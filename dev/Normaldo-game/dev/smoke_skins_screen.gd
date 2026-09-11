@@ -38,6 +38,8 @@ func _initialize() -> void:
 	await _test_equip(hud, save)
 	print("── Нет денег ──")
 	await _test_broke(hud, save)
+	print("── Имена влезают в свои коробки ──")
+	await _test_names_fit(hud, save)
 	print("── Карточный вид ──")
 	await _test_cards(hud, save)
 
@@ -514,3 +516,117 @@ func _test_broke(hud: Node, save: Node) -> void:
 		await process_frame
 	_check(int(save.get("dollars")) == d0, "деньги не тронуты")
 	await _close(overlay)
+
+# ── ИМЯ СКИНА ОБЯЗАНО ВЛЕЗТЬ ─────────────────────────────────────────────────
+# Имя стоит в коробке фиксированной ширины. Длинное в неё не влезало и уезжало
+# за края карточки с обеих сторон: «МАЛЬЧИК, КОТОРЫЙ ВЫЖИЛ» читался как «АЛЬЧИК,
+# КОТОРЫЙ ВЫЖИ». Обрезки не видно ни в одном тесте — надпись просто рисуется
+# шире своей коробки, и заметить это можно только глазами и только на том скине,
+# у которого имя длинное.
+#
+# Лечится уменьшением кегля (`hud._fit_label_width`), а проверяется — ЗАМЕРОМ:
+# ширина показываемого текста тем шрифтом, которым он нарисован, против ширины
+# коробки.
+#
+# Оба языка проверяются НАРОЧНО: в свойстве `text` навсегда лежит русский
+# оригинал, а на экране стоит перевод, и длина у них разная — «ПАУК САПИЕНС»
+# против «SPIDER SAPIENS».
+func _test_names_fit(hud: Node, save: Node) -> void:
+	var reg := get_root().get_node_or_null("SkinRegistry")
+	if reg == null:
+		_check(false, "SkinRegistry не поднялся")
+		return
+	_setup_save(save, 99000)
+	var was := TranslationServer.get_locale()
+	var checked := 0
+	var bad : Array = []
+	for lang in ["ru", "en"]:
+		TranslationServer.set_locale(lang)
+		for cards in [false, true]:
+			var ov : Control = await _open(hud, cards)
+			if ov == null:
+				continue
+			var found : Array = []
+			_name_labels(ov, reg, found)
+			checked += found.size()
+			for l in found:
+				var lbl : Label = l
+				# ── МЕРИТЬ НАДО ПО РОДИТЕЛЮ, А НЕ ПО САМОЙ ПОДПИСИ ──────────
+				# `Label` не даёт сделать себя уже своего текста: ставишь
+				# коробку в 100 px, кладёшь надпись на 180 — и `size.x`
+				# становится 180. Сравнение «текст против своей коробки»
+				# поэтому не падает НИКОГДА, оно сравнивает число с самим
+				# собой. Первая версия этой проверки так и зеленела на заведомо
+				# сломанном коде.
+				#
+				# Настоящая граница — карточка, в которой подпись лежит: из неё
+				# надпись и вылезала на экран.
+				var par := lbl.get_parent() as Control
+				if par == null:
+					continue
+				var lo := lbl.global_position.x
+				var hi := lo + lbl.size.x
+				var plo := par.global_position.x
+				var phi := plo + par.size.x
+				if lo < plo - 0.5 or hi > phi + 0.5:
+					bad.append("%s «%s» занял %.0f..%.0f в карточке %.0f..%.0f (%s, %s)"
+						% [lbl.name, lbl.atr(lbl.text), lo, hi, plo, phi, lang,
+							"карточки" if cards else "сетка"])
+			await _close(ov)
+	TranslationServer.set_locale(was)
+	# Ноль найденных подписей означал бы, что проверка ничего не проверила.
+	_check(checked > 0, "подписей с именами найдено: %d" % checked)
+	_check(bad.is_empty(), "каждое имя влезает в свою коробку: %s" % [bad])
+	_test_fit_helper(hud)
+
+# ── САМО УЖИМАНИЕ ────────────────────────────────────────────────────────────
+# Обход экрана выше при 960×430 ничего не ловит: карточка тут широкая, и даже
+# самое длинное имя в неё влезает. А ломается это на ТЕЛЕФОНЕ, где карточка
+# втрое уже, — и проверка, которая зеленеет на заведомо сломанном коде, не
+# проверка вовсе (эта — зеленела).
+#
+# Поэтому механизм проверяется напрямую: узкая коробка, длинное имя, и вопрос
+# один — влезло ли. Ширины взяты руками, а не из вёрстки: от размера экрана
+# ответ зависеть не должен.
+func _test_fit_helper(hud: Node) -> void:
+	var reg := get_root().get_node_or_null("SkinRegistry")
+	var longest := ""
+	for sd in reg.SKINS:
+		var nm := String((sd as Dictionary).get("name_ru", ""))
+		if nm.length() > longest.length():
+			longest = nm
+	# Ширины — с настоящих карточек: на узком телефоне карточка магазина около
+	# 90 px, в карточном виде около 140. Меньше 90 не проверяется: там и кегль 7
+	# не спасает, а мельче делать нечего — надпись перестаёт читаться, и уж
+	# лучше она вылезет, чем исчезнет.
+	var bad : Array = []
+	var sizes : Array = []
+	for box in [90.0, 140.0]:
+		var lbl := Label.new()
+		lbl.add_theme_font_override("font", hud.UI_FONT)
+		lbl.add_theme_font_size_override("font_size", 13)
+		lbl.text = longest
+		# В ДЕРЕВО — иначе узел не знает своей ширины и ужимание идёт вслепую.
+		get_root().add_child(lbl)
+		hud.call("_fit_label_width", lbl, box, 13)
+		var fs : int = lbl.get_theme_font_size("font_size")
+		# Тем же мерилом, что и вёрстка: сколько узел РЕАЛЬНО займёт.
+		var w := lbl.get_combined_minimum_size().x
+		if w > box + 0.5:
+			bad.append("в %.0f px «%s» занял %.0f при кегле %d" % [box, longest, w, fs])
+		sizes.append("%.0f px → кегль %d" % [box, fs])
+		lbl.queue_free()
+	_check(bad.is_empty(), "«%s» ужимается под узкую карточку (%s): %s"
+		% [longest, ", ".join(sizes), bad])
+
+# Подписи, в которых стоит имя какого-нибудь скина. Ищутся по ТЕКСТУ, а не по
+# имени узла: узлы безымянные, а перестановка вёрстки их и вовсе переберёт.
+func _name_labels(n: Node, reg: Node, out: Array) -> void:
+	if n is Label:
+		var t := String((n as Label).text)
+		for sd in reg.SKINS:
+			if t == String((sd as Dictionary).get("name_ru", "")):
+				out.append(n)
+				break
+	for c in n.get_children():
+		_name_labels(c, reg, out)

@@ -107,8 +107,11 @@ const DATA : Dictionary = {
 		# остаётся только эта обводка — silhouette не читается вовсе. Свет под
 		# ним — жёлтый: bat-signal, и заодно не сливается с собственной синей
 		# каймой значка.
+		# Значок ПОВЁРНУТ (dev/tools/bake_ability_icons.py): в исходнике батаранг
+		# лежит набок, и в кружке его не узнать — просто чёрная клякса. Стоймя это
+		# классическая эмблема, которую читают с одного взгляда.
 		"ability": { "type": SPELL, "id": "bat_shuriken",
-			"icon": "res://assets/skills/batman/throw.png", "combat": RANGED, "cd": 3.0,
+			"icon": "res://assets/skills/batman/throw_icon.png", "combat": RANGED, "cd": 3.0,
 			"icon_glow": Color(1.00, 0.82, 0.25, 1.0),
 			"label": "БЭТ-СЮРИКЕН", "projectile": "batarang",
 			"desc": "Батаранг уходит в сторону тапа, вращаясь на лету" },

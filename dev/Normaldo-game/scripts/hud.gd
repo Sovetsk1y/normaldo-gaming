@@ -3955,6 +3955,7 @@ func _build_shop_card(hbox: HBoxContainer, skin_data: Dictionary,
 	name_lbl.size                 = Vector2(cw, 20.0)
 	name_lbl.position             = Vector2(0.0, vp_pad + 10.0 + AV + 4.0)
 	wrapper.add_child(name_lbl)
+	_fit_label_width(name_lbl, cw - 6.0, 13)
 
 	# Rarity
 	var rar_lbl := Label.new()
@@ -4953,6 +4954,7 @@ func _build_skin_card(parent: Control, pos: Vector2, w: float, h: float,
 	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	name_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
 	UiKit.place(card, name_lbl, Vector2(4.0, y), Vector2(w - 8.0, 18.0))
+	_fit_label_width(name_lbl, w - 12.0, 13)
 	y += 20.0
 
 	# Спелл — то, ради чего скин и покупают. В сетке для него нет места, в
@@ -5137,6 +5139,9 @@ func _build_skin_grid_cell(parent: Control, pos: Vector2, w: float, h: float,
 	name_lbl.size = Vector2(w - 8.0, 15.0); name_lbl.position = Vector2(4.0, name_y)
 	name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	cell.add_child(name_lbl)
+	# Обрезка оставлена как последняя защита, но до неё доходить не должно:
+	# обрезанное имя не читается вовсе.
+	_fit_label_width(name_lbl, w - 12.0, 11)
 
 	# Полоса до следующего уровня — тонкая, прямо над кнопкой.
 	if is_owned:
@@ -5351,6 +5356,8 @@ func _show_skin_detail(skin_data: Dictionary, from_slots: bool, shop_overlay: Co
 	title.text = skin_data.get("name_ru", skin_id); title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.size = Vector2(vp.x, 26.0); title.position = Vector2(0.0, 8.0); title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	overlay.add_child(title)
+	# Заголовку оставлены поля под кнопку «назад» слева и деньги справа.
+	_fit_label_width(title, vp.x - 260.0, 20)
 	var rar := Label.new()
 	rar.add_theme_font_override("font", UI_FONT); rar.add_theme_font_size_override("font_size", 12)
 	_apply_menu_caption_fx(rar)
@@ -5458,6 +5465,36 @@ func _show_skin_detail(skin_data: Dictionary, from_slots: bool, shop_overlay: Co
 	_build_rewards_column(overlay, rx, body_y, col_w, body_h, skin_id, rewards_ctx)
 
 # White label with a black stroke outline (no shadow) — matches the reward art.
+# ── НАДПИСЬ УЖИМАЕТСЯ ПОД КОРОБКУ ───────────────────────────────────────────
+# Имя скина стоит в коробке фиксированной ширины, и длинное в неё не влезает:
+# «МАЛЬЧИК, КОТОРЫЙ ВЫЖИЛ» вылезал за карточку с обеих сторон и читался как
+# «АЛЬЧИК, КОТОРЫЙ ВЫЖИ». Обрезать нельзя — имя перестаёт быть именем; переносить
+# некуда — строка одна. Значит уменьшается кегль, пока надпись не встанет.
+#
+# Ширина спрашивается У САМОЙ ПОДПИСИ (`get_combined_minimum_size`), а не
+# считается шрифтом через `get_string_size`: второй отвечает мимо — на том же
+# тексте и кегле он даёт 200 px там, где узел занимает 137. Ужимали бы вслепую и
+# мельче, чем нужно.
+#
+# Заодно это снимает вопрос про язык: узел меряет ТО, ЧТО РИСУЕТ, то есть уже
+# переведённую строку, а не русский оригинал из свойства `text` («ПАУК САПИЕНС»
+# против «SPIDER SAPIENS» — длина разная).
+#
+# Зовётся ПОСЛЕ того, как подпись ПОСТАВЛЕНА В ДЕРЕВО: вне дерева узел своей
+# ширины ещё не знает и отвечает чем попало — вызов до `add_child` ужимал кегль
+# до самого дна на любой строке.
+func _fit_label_width(lbl: Label, max_w: float, base_size: int,
+		min_size: int = 7) -> void:
+	if max_w <= 0.0:
+		return
+	var sz := base_size
+	while sz > min_size:
+		lbl.add_theme_font_size_override("font_size", sz)
+		if lbl.get_combined_minimum_size().x <= max_w:
+			return
+		sz -= 1
+	lbl.add_theme_font_size_override("font_size", sz)
+
 func _strong_label(text: String, size: int, col: Color, outline: int = 3) -> Label:
 	var l := Label.new()
 	l.add_theme_font_override("font", UI_FONT)
