@@ -69,6 +69,7 @@ const TOGGLE_H     : float = 24.0
 # Разделы. Порядок — по частоте: убавить звук заходят чаще всего.
 const SECTIONS : Array = [
 	{ "key": "sound",  "title": "ЗВУК И ОТДАЧА" },
+	{ "key": "lang",   "title": "ЯЗЫК" },
 	{ "key": "notif",  "title": "УВЕДОМЛЕНИЯ" },
 	{ "key": "profile","title": "ПРОФИЛЬ" },
 	{ "key": "account","title": "АККАУНТ" },
@@ -302,6 +303,7 @@ func _build_page() -> void:
 	match _sel:
 		"sound":   h = _page_sound(w)
 		"notif":   h = _page_notif(w)
+		"lang":    h = _page_language(w)
 		"profile": h = _page_profile(w)
 		_:         h = _page_account(w)
 	_page_body.custom_minimum_size = Vector2(w, h)
@@ -311,6 +313,71 @@ func _section_title(key: String) -> String:
 		if String((s as Dictionary)["key"]) == key:
 			return String((s as Dictionary)["title"])
 	return ""
+
+# ── Раздел «Язык» ────────────────────────────────────────────────────────────
+# Отдельным разделом, а не строкой в «Звуке». Раздел из двух строк — это правда
+# лишний корешок (см. довод про вибрацию ниже), но язык ищут ПО НАЗВАНИЮ: игрок,
+# которому игра попалась не на том языке, идёт искать слово «язык», а не думать,
+# в каком из четырёх разделов оно могло спрятаться. И читать эти четыре названия
+# ему как раз нечем.
+#
+# Названия языков — каждое на себе самом («Русский», «English»), и потому в
+# таблицу перевода они не попадают вовсе. Список языков, подписанный на языке,
+# которого читатель не знает, — это список, по которому нельзя выбрать.
+func _page_language(w: float) -> float:
+	var y := 6.0
+	for code in Loc.SUPPORTED:
+		y = _choice_row(w, y, String(Loc.NAMES.get(code, code)),
+			String(code) == Loc.current(),
+			func(): Loc.set_language(String(code)))
+	return y
+
+# Строка выбора: то же тело, что у переключателя, но справа галочка, а не
+# тумблер. Тумблер на языке означал бы, что языков можно включить два.
+func _choice_row(w: float, y: float, label: String, on: bool, pick: Callable) -> float:
+	const H : float = 30.0
+
+	var bg := Panel.new()
+	bg.add_theme_stylebox_override("panel", UiKit.rounded(
+		CLR_ROW, 8,
+		Color(0.60, 0.95, 0.62, 0.95) if on else CLR_ROW_EDGE, 2 if on else 1))
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_page_body, bg, Vector2(0.0, y), Vector2(w, H))
+
+	var lbl := Label.new()
+	lbl.add_theme_font_override("font", UI_FONT)
+	lbl.add_theme_font_size_override("font_size", 12)
+	_apply_text_fx(lbl)
+	lbl.text               = label
+	lbl.modulate           = CLR_TEXT if on else Color(CLR_TEXT.r, CLR_TEXT.g, CLR_TEXT.b, 0.70)
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.mouse_filter       = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_page_body, lbl, Vector2(10.0, y), Vector2(w - 44.0, H))
+
+	var tick := Label.new()
+	tick.add_theme_font_override("font", UI_FONT)
+	tick.add_theme_font_size_override("font_size", 14)
+	_apply_text_fx(tick)
+	tick.text                 = "✓" if on else ""
+	tick.modulate             = Color(0.60, 1.00, 0.62)
+	tick.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tick.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	tick.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	UiKit.place(_page_body, tick, Vector2(w - 34.0, y), Vector2(28.0, H))
+
+	var btn := Button.new()
+	btn.flat       = true
+	btn.focus_mode = Control.FOCUS_NONE
+	btn.pressed.connect(func():
+		if _hud and _hud.has_method("_play_btn_sfx"):
+			_hud._play_btn_sfx()
+		pick.call()
+		# Пересобираем ВЕСЬ экран, а не только страницу: названия разделов слева
+		# написаны на прежнем языке, и оставить их — значит показать игроку
+		# наполовину переключившиеся настройки.
+		_rebuild())
+	UiKit.place(_page_body, btn, Vector2(0.0, y), Vector2(w, H))
+	return y + H + 5.0
 
 # ── Раздел «Звук» ────────────────────────────────────────────────────────────
 func _page_sound(w: float) -> float:

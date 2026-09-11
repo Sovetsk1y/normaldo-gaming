@@ -1,0 +1,263 @@
+extends RefCounted
+
+# ── АНГЛИЙСКАЯ ТАБЛИЦА ───────────────────────────────────────────────────────
+# Ключ — РУССКАЯ НАДПИСЬ ИЗ КОДА, слово в слово. Почему так, а не отдельными
+# именами вроде «MENU_PLAY» — см. scripts/loc.gd.
+#
+# Отсюда следует главное правило: поправил надпись в коде — поправь и здесь.
+# Иначе перевод молча отвалится к русскому, и заметить это можно будет только
+# глазами и только на английском телефоне. За этим следит dev/smoke_i18n.gd: он
+# сверяет каждый ключ с исходниками и падает на тех, которых в коде больше нет.
+#
+# ── ЧЕГО ЗДЕСЬ НЕТ ──────────────────────────────────────────────────────────
+# 1. ДЕВ-КНОПОК. «СБРОС УР.», «БЕСС: ON», строки проверки пушей — их не видит
+#    ни один игрок (DevFlags.ENABLED), и перевод им только мешает искать.
+# 2. ИМЁН СОБСТВЕННЫХ. «НОРМАЛЬДО», «КУСС», «ГЛАЙД» — это имена, а не слова.
+# 3. СТРОК С ПОДСТАНОВКОЙ («УРОВЕНЬ %d · %s»). Их перевод требует правки места
+#    вызова: переводить надо заготовку, ДО `%`, иначе ключа с готовым числом в
+#    таблице не найдётся. Они пойдут отдельным заходом.
+#
+# ── О ТОНЕ ──────────────────────────────────────────────────────────────────
+# Игра разговаривает коротко и на «ты». Английский держит тот же тон: рубленые
+# строчные команды, без вежливых оборотов. «EAT PIZZA», а не «Please eat pizza».
+# Строки стоят в кнопках и облачках шириной в пол-экрана, поэтому длина
+# сопоставима с русской — перевод, вылезающий за кнопку, хуже непереведённого.
+
+const STRINGS : Dictionary = {
+	# ── Главное меню ─────────────────────────────────────────────────────────
+	"Нажмите, чтобы начать игру": "Tap to play",
+	"СКИНЫ":            "SKINS",
+	"СЛОТЫ":            "SLOTS",
+	"ЗАДАНИЯ":          "QUESTS",
+	"ЛИДЕРЫ":           "LEADERS",
+	"ДОСТИЖЕНИЯ":       "AWARDS",
+	"КНИГА УЧИТЕЛЯ":    "TEACHER'S BOOK",
+	"КНИГА\nУЧИТЕЛЯ":   "TEACHER'S\nBOOK",
+	"НАСТРОЙКИ":        "SETTINGS",
+	"МАГАЗИН":          "SHOP",
+	"Магазин":          "Shop",
+	"МОИ СКИНЫ":        "MY SKINS",
+	"Мои скины":        "My skins",
+	"МОЙ БАЛАНС":       "MY BALANCE",
+	"Мой баланс":       "My balance",
+	"ЭПИЗОД 1":         "EPISODE 1",
+
+	# ── Подсказки по меню ────────────────────────────────────────────────────
+	"ДАВАЙ СРАЗУ К ДЕЛУ!":            "STRAIGHT TO IT!",
+	"тапни сюда — и побежали":        "tap here and run",
+	"тапни по центру — и побежали":   "tap the middle and run",
+	"сюда уходят собранные доллары":  "your dollars go here",
+	"тут награда за то, что уже сыграл": "your reward for runs already played",
+	"тут считают всё, что ты успел":  "everything you've done is counted here",
+	"упал жетон — здесь его крутят":  "got a token? spend it here",
+	"открылась история — она тут":    "the story unlocked — it's in here",
+	"твой результат уже в таблице недели": "your score is already in this week's table",
+
+	# ── Подсказки-облачка ────────────────────────────────────────────────────
+	"ПОНЯТНО":          "GOT IT",
+	"ДАЛЬШЕ ›":         "NEXT ›",
+	"▼ ТАП ▼":          "▼ TAP ▼",
+
+	# ── Забег ────────────────────────────────────────────────────────────────
+	"ПАУЗА":            "PAUSE",
+	"ПРОДОЛЖИТЬ":       "RESUME",
+	"ВЫЙТИ":            "QUIT",
+	"ВЫХОД":            "EXIT",
+	"ОСТАТЬСЯ":         "STAY",
+	"ВЫЙТИ ИЗ ЗАБЕГА?": "QUIT THE RUN?",
+	"Пиццы и доллары этого забега не засчитаются":
+		"Pizza and dollars from this run won't count",
+	"ЭТОТ ЗАБЕГ":       "THIS RUN",
+	"ВРЕМЯ":            "TIME",
+	"ЗАДАНИЯ ДНЯ":      "DAILY QUESTS",
+	"Заданий пока нет": "No quests yet",
+	"Рекорда пока нет": "No record yet",
+	"Слот на кулдауне": "Slot on cooldown",
+	"ГОТОВО — ЗАБЕРИ НАГРАДУ": "DONE — CLAIM YOUR REWARD",
+	"ЗАБРАНО":          "CLAIMED",
+	"ЗАБРАТЬ":          "CLAIM",
+	"ЗАБРАТЬ!":         "CLAIM!",
+	"ЗАДАНИЕ":          "QUEST",
+	"ЗАДАНИЕ ВЫПОЛНЕНО": "QUEST COMPLETE",
+	"ВЫПОЛНЕНО: ":      "DONE: ",
+	"новое завтра":     "new one tomorrow",
+
+	# ── Конец забега ─────────────────────────────────────────────────────────
+	"ЗАБЕГ ОКОНЧЕН":    "RUN OVER",
+	"ЕЩЁ РАЗ":          "AGAIN",
+	"ЗАНОВО":           "RESTART",
+	"МЕНЮ":             "MENU",
+	"ПОБЕДА!":          "VICTORY!",
+	"ВЫЙГРАЛ":          "YOU WIN",
+	"ДОСТИЖЕНИЕ ОТКРЫТО": "AWARD UNLOCKED",
+	"БЕСКОНЕЧНЫЙ РЕЖИМ ОТКРЫТ!": "ENDLESS MODE UNLOCKED!",
+	"РАЗБЛОКИРОВАНО:\nБЕСКОНЕЧНЫЙ РЕЖИМ": "UNLOCKED:\nENDLESS MODE",
+	"Ещё ни одного забега": "No runs yet",
+	"ПЕРВЫЙ ЗАБЕГ ЭТИМ СКИНОМ": "FIRST RUN WITH THIS SKIN",
+	"МАСТЕРСТВО":       "MASTERY",
+	"МАСТЕРСТВО!":      "MASTERY!",
+	"★ МАСТЕРСТВО":     "★ MASTERY",
+	"МАСТЕРСТВО:":      "MASTERY:",
+	"ОПЫТ":             "XP",
+	"+1 ЖЕТОН / 200 XP": "+1 TOKEN / 200 XP",
+
+	# ── Обучение ─────────────────────────────────────────────────────────────
+	"ВЕДИ ПАЛЬЦЕМ":     "DRAG YOUR FINGER",
+	"голова идёт следом": "the head follows it",
+	"ЕШЬ ПИЦЦУ":        "EAT PIZZA",
+	"это очки и вес":   "that's points and weight",
+	"МУСОР — ОБЛЕТАЙ":  "DODGE THE JUNK",
+	"в него нельзя":    "don't touch it",
+	"ПОТЕРЯЛ ВЕС":      "LOST WEIGHT",
+	"в следующий раз облетай": "go around it next time",
+	"ВОТ ТАК":          "JUST LIKE THAT",
+	"ТЫ ДОЛЖЕН БЫЛ УМЕРЕТЬ": "THAT SHOULD HAVE KILLED YOU",
+	"в обучении прощаем — но только раз": "we forgive it once, and only once",
+	"ЭТО БЫЛА ЖИЗНЬ":   "THAT WAS A LIFE",
+	"их у тебя столько, сколько веса": "you have as many as you have weight",
+	"КОГДА ОСТАНЕТСЯ ЧЕРЕП": "ONCE ONLY THE SKULL IS LEFT",
+	"следующий удар будет последним": "the next hit is your last",
+	"ВЕС — ЭТО ЖИЗНИ":  "WEIGHT IS LIVES",
+	"полоса слева: удар съедает одну": "the bar on the left: a hit eats one",
+	"БЬЁТ НЕ ВСЁ":      "NOT EVERYTHING HURTS",
+	"банан не ударит, но замедлит": "a banana won't hit you, but it slows you",
+	"А ЭТО — БОНУС":    "AND THIS IS A BONUS",
+	"часы замедлят мир, хватай": "the clock slows the world — grab it",
+	"СОБИРАЙ ДОЛЛАРЫ":  "COLLECT DOLLARS",
+	"на них можно купить крутые скины": "they buy you cool skins",
+	"ДВОЙНОЙ ТАП":      "DOUBLE TAP",
+	"это способность скина": "that's your skin's ability",
+	"ТЕПЕРЬ ТЫ ГОТОВ":  "YOU'RE READY NOW",
+	"предметов много, обо всех не расскажешь — удачи!":
+		"there are far more items than we can show — good luck!",
+	"ПРОПУСТИТЬ":       "SKIP",
+
+	# ── Скины ────────────────────────────────────────────────────────────────
+	"СПОСОБНОСТИ":      "ABILITIES",
+	"ПРОКАЧКА":         "PROGRESS",
+	"НАГРАДЫ ЗА УРОВЕНЬ": "LEVEL REWARDS",
+	"НАГРАДЫ ЗА УРОВНИ": "LEVEL REWARDS",
+	"Награды за уровень": "Level rewards",
+	"СОСТОЯНИЯ ЖИРА":   "FAT STATES",
+	"ЖИРОВЫЕ СОСТОЯНИЯ": "FAT STATES",
+	"АКТИВНАЯ":         "ACTIVE",
+	"ПАССИВНАЯ":        "PASSIVE",
+	"РЕЗИСТ":           "RESIST",
+	"УНИКАЛЬНО":        "UNIQUE",
+	"АКТИВЕН":          "EQUIPPED",
+	"НАДЕТЬ":           "EQUIP",
+	"КУПИТЬ":           "BUY",
+	"ЗАКРЫТО":          "LOCKED",
+	"ЗАКРЫТЬ":          "CLOSE",
+	"ПОДРОБНЕЕ":        "DETAILS",
+	"ВЗЯТО":            "TAKEN",
+	"НОВЫЙ ЖИР":        "NEW FAT",
+	"НОВЫЙ ЖИР!":       "NEW FAT!",
+	"НОВЫЙ РЕЗИСТ!":    "NEW RESIST!",
+	"+ РЕЗИСТ":         "+ RESIST",
+	"НЕТ НАВЫКОВ":      "NO SKILLS",
+	"НАВЫКИ":           "SKILLS",
+	"Нет навыков — чистая проверка скилла": "No skills — pure skill check",
+	"Новое состояние и +1 жизнь": "A new state and +1 life",
+	"Негативный эффект снижен на 50%": "Negative effect cut by 50%",
+	"Уникальная способность": "Unique ability",
+	"Каждый жир — это ещё один пропущенный удар: чем толще Нормальдо, тем больше запаса прочности перед гибелью.":
+		"Every fat state is one more hit you can take: the fatter Normaldo is, the more room you have before you die.",
+	"АДАПТАЦИЯ":        "ADAPTATION",
+	"Адаптация":        "Adaptation",
+	"ТРАНСФОРМАЦИЯ":    "TRANSFORMATION",
+	"Трансформация":    "Transformation",
+	"УКЛОНЕНИЕ":        "EVASION",
+	"Уклонение":        "Evasion",
+	"КОНТР-УДАР":       "COUNTER",
+	"Контратака":       "Counter",
+	"МАГНИТ":           "MAGNET",
+	"УСКОРЕНИЕ":        "SPEED UP",
+	"КОЛДОВСТВО":       "SORCERY",
+	"ВСЁ И СРАЗУ":      "ALL AT ONCE",
+	"БОНУС":            "BONUS",
+	"+бонус":           "+bonus",
+
+	# ── Настройки ────────────────────────────────────────────────────────────
+	"ЗВУК И ОТДАЧА":    "SOUND & HAPTICS",
+	"Громкость звуков": "Sound volume",
+	"Громкость музыки": "Music volume",
+	"Вибрация":         "Vibration",
+	"Отдача на ударах боссов и в мини-играх.": "Haptics on boss hits and in mini-games.",
+	"ЯЗЫК":             "LANGUAGE",
+	"УВЕДОМЛЕНИЯ":      "NOTIFICATIONS",
+	"Все уведомления":  "All notifications",
+	"КАТЕГОРИИ":        "CATEGORIES",
+	"Ежедневные напоминания": "Daily reminders",
+	"Возвращение в игру": "Come back to the game",
+	"Бесплатный спин в автомате": "Free spin in the machine",
+	"События и новый контент": "Events and new content",
+	"Сюжет и босс":     "Story and boss",
+	"Серверные награды": "Server rewards",
+	"ТИХИЕ ЧАСЫ":       "QUIET HOURS",
+	"Начало":           "From",
+	"Конец":            "To",
+	"Если в системных настройках уведомления для Normaldo выключены — переключатели ничего не делают.":
+		"If notifications for Normaldo are off in your system settings, these switches do nothing.",
+	"ПРОФИЛЬ":          "PROFILE",
+	"АККАУНТ":          "ACCOUNT",
+	"ИМЯ В ТАБЛИЦЕ ЛИДЕРОВ": "LEADERBOARD NAME",
+	"ИЗМЕНИТЬ ИМЯ":     "CHANGE NAME",
+	"КОД ВОССТАНОВЛЕНИЯ": "RECOVERY CODE",
+	"КОПИРОВАТЬ":       "COPY",
+	"код скопирован":   "code copied",
+	"ВОССТАНОВИТЬ АККАУНТ": "RESTORE ACCOUNT",
+	"ВОССТАНОВИТЬ":     "RESTORE",
+	"ПРОЖИТОЕ":         "LIFETIME",
+	"Забегов":          "Runs",
+	"Съедено пиццы":    "Pizza eaten",
+	"Лучший забег":     "Best run",
+	"Эпизодов пройдено": "Episodes cleared",
+	"Скинов открыто":   "Skins unlocked",
+	"Прогресс скина":   "Skin progress",
+	"Наград книги":     "Book rewards",
+	"Таблица лидеров":  "Leaderboard",
+	"РЕКОРДЫ НЕДЕЛИ":   "THIS WEEK'S RECORDS",
+	"ПРОШЛАЯ НЕДЕЛЯ":   "LAST WEEK",
+	"Пока пусто":       "Nothing yet",
+	"сыграй забег":     "play a run",
+	"ВКЛ":              "ON",
+	"ВЫКЛ":             "OFF",
+	"Включить":         "Turn on",
+	"ВКЛЮЧИТЬ":         "TURN ON",
+	"Не сейчас":        "Not now",
+	"НЕ СЕЙЧАС":        "NOT NOW",
+	"ОТМЕНА":           "CANCEL",
+	"СОХРАНИТЬ":        "SAVE",
+	"ГОТОВО":           "DONE",
+	"Сохраняю…":        "Saving…",
+	"Восстанавливаю…":  "Restoring…",
+	"Готово, перезагружаю…": "Done, restarting…",
+	"Введи имя…":       "Enter a name…",
+	"3–12 символов, буквы/цифры. Имя должно быть уникальным.":
+		"3–12 characters, letters/digits. The name must be unique.",
+	"Имя должно быть от 3 до 12 символов": "The name must be 3 to 12 characters",
+	"Имя не подходит — буквы/цифры/-/_": "Bad name — letters/digits/-/_ only",
+	"Разрешены только буквы, цифры, _ и -": "Only letters, digits, _ and - are allowed",
+	"Это имя занято — попробуй другое": "That name is taken — try another",
+	"Не получилось сохранить, попробуй ещё раз": "Couldn't save, try again",
+	"Не удалось восстановить": "Couldn't restore",
+	"Код в неверном формате": "Wrong code format",
+	"Код не найден":    "Code not found",
+	"Код слишком короткий": "Code is too short",
+	"Запасной ключ к аккаунту. Поменяешь телефон или удалишь игру — введи его, и весь прогресс вернётся. Сохрани в надёжном месте и никому не показывай.":
+		"A spare key to your account. Change phones or delete the game, enter it, and all your progress comes back. Keep it somewhere safe and show it to no one.",
+	"Включить, чтобы не пропускать ежедневный бонус, новые задания и награды за уровни скина?":
+		"Turn on so you don't miss the daily bonus, new quests and skin level rewards?",
+
+	# ── Режимы и уровни ──────────────────────────────────────────────────────
+	"БЕСКОНЕЧНЫЙ":      "ENDLESS",
+	"СУПЕР ХАРД":       "SUPER HARD",
+	"ЛЁГКОЕ":           "EASY",
+	"СРЕДНЕЕ":          "MEDIUM",
+	"ТЯЖЁЛОЕ":          "HARD",
+	"МАКСИМУМ":         "MAX",
+	"ОТСЮДА ЗАБЕГ":     "RUN STARTS HERE",
+	"ЖИР":              "FAT",
+	"Откат ":           "Cooldown ",
+}

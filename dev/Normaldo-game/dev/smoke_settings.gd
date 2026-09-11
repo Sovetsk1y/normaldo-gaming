@@ -121,6 +121,7 @@ func _test_sections(hud: Node, save: Node) -> void:
 	# Каждый раздел обязан собрать своё содержимое — и не чужое.
 	var marks : Dictionary = {
 		"sound":   "Громкость звуков",
+		"lang":    "English",
 		"notif":   "Все уведомления",
 		"profile": "ИМЯ В ТАБЛИЦЕ ЛИДЕРОВ",
 		"account": "КОД ВОССТАНОВЛЕНИЯ",

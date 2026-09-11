@@ -24,6 +24,7 @@ config/main_scene="res://scenes/game.tscn"
 Logger="*res://scripts/logger.gd"
 SafeArea="*res://scripts/safe_area.gd"
 SaveData="*res://scripts/save_data.gd"
+Loc="*res://scripts/loc.gd"
 SkinRegistry="*res://scripts/skin_registry.gd"
 SkinSkills="*res://scripts/skin_skills.gd"
 SkinProgression="*res://scripts/skin_progression.gd"
@@ -44,6 +45,10 @@ window/size/viewport_height=430
 window/stretch/mode="canvas_items"
 window/handheld/orientation=4
 window/ios/hide_home_indicator=false
+
+[internationalization]
+
+locale/fallback="ru"
 
 [input_devices]
 

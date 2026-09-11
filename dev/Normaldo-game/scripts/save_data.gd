@@ -111,6 +111,12 @@ var record_skin : Dictionary = {}
 var sfx_volume   : float = 1.0
 var music_volume : float = 1.0
 
+# ─── Язык ────────────────────────────────────────────────────────────────────
+# Пусто = игрок не выбирал, и язык берётся у телефона (см. scripts/loc.gd).
+# Выбранный однажды держится навсегда: игрок, поставивший русский на английском
+# телефоне, не должен объяснять это игре при каждом запуске.
+var language : String = ""
+
 # ─── Вибрация ────────────────────────────────────────────────────────────────
 # Не громкость, а выключатель: вибромотор телефона умеет ровно одно — гудеть
 # столько-то миллисекунд, — и ползунок на нём означал бы шкалу, разницы на
@@ -515,6 +521,7 @@ func _save() -> void:
 		"sfx_volume":          sfx_volume,
 		"music_volume":        music_volume,
 		"vibration_on":        vibration_on,
+		"language":            language,
 		"tutorial_done":       tutorial_done,
 		"menu_tips_seen":      menu_tips_seen,
 		"notif_enabled":       notif_enabled,
@@ -592,6 +599,7 @@ func _load() -> void:
 	episodes_done       = int(d.get("episodes_done",       0))
 	total_pizzas        = int(d.get("total_pizzas",        0))
 	record_skin         = (d.get("record_skin", {}) as Dictionary).duplicate()
+	language            = String(d.get("language",          ""))
 	sfx_volume          = float(d.get("sfx_volume",        1.0))
 	music_volume        = float(d.get("music_volume",      1.0))
 	vibration_on        = bool(d.get("vibration_on",       true))
