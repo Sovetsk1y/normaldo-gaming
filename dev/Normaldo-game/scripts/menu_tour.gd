@@ -65,7 +65,6 @@ static func play(host: Node, stops: Array, key: String = "tour",
 	return t
 
 func _ready() -> void:
-	SafeArea.apply(self)
 	layer        = 130
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_show(0)

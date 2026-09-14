@@ -473,7 +473,6 @@ func _breath(sec: float) -> void:
 
 func _build_ui() -> void:
 	_layer = CanvasLayer.new()
-	SafeArea.apply(_layer)
 	_layer.layer        = 95
 	_layer.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(_layer)

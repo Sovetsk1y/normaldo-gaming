@@ -363,7 +363,6 @@ func _ready() -> void:
 	# Островок и полоска «домой»: весь интерфейс уезжает в безопасный
 	# прямоугольник целиком, вместе с экранами, которые к нему подцепляются
 	# детьми (лидеры, задания, настройки). См. scripts/safe_area.gd.
-	SafeArea.apply(self)
 	_btn_sfx = AudioStreamPlayer.new()
 	var _btn_stream := load("res://assets/audio/button.mp3") as AudioStreamMP3
 	if _btn_stream:
@@ -4788,9 +4787,16 @@ func _build_skins_cards(overlay: Control, vp: Vector2, top: float, height: float
 			continue
 		skins.append(sd)
 
+	# ── ЛЕНТА ЖИВЁТ В ПОЛОСЕ, А НЕ ВО ВСЮ ШИРИНУ ────────────────────────────
+	# Двигать сами карточки бесполезно: лента прокручивается, и под островок
+	# рано или поздно уезжает любая. Сужается САМА ПРОКРУТКА — она обрезает
+	# содержимое по своим границам, и карточка просто не рисуется там, где
+	# железо. Без выреза полоса равна всей ширине, и не меняется ничего.
+	var band := SafeArea.band(0.0, vp.x)
+	var lane_w : float = band.y - band.x
 	var scroll := ScrollContainer.new()
-	scroll.size                   = Vector2(vp.x, height)
-	scroll.position               = Vector2(0.0, top)
+	scroll.size                   = Vector2(lane_w, height)
+	scroll.position               = Vector2(band.x, top)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_DISABLED
 	overlay.add_child(scroll)
@@ -4812,7 +4818,9 @@ func _build_skins_cards(overlay: Control, vp: Vector2, top: float, height: float
 	for i in skins.size():
 		if String(skins[i]["id"]) == SaveData.active_skin:
 			active_i = i
-	var target : float = maxf(0.0, SKC_GAP + active_i * (cw + SKC_GAP) - (vp.x - cw) * 0.5)
+	# Центрируется по ПОЛОСЕ, а не по экрану: иначе активный скин встаёт мимо
+	# середины ровно на ширину островка.
+	var target : float = maxf(0.0, SKC_GAP + active_i * (cw + SKC_GAP) - (lane_w - cw) * 0.5)
 	scroll.set_deferred("scroll_horizontal", int(target))
 
 func _build_skin_card(parent: Control, pos: Vector2, w: float, h: float,
@@ -6786,7 +6794,6 @@ const DIALOG_LAYER   : int = 140
 
 func _modal_layer(idx: int) -> CanvasLayer:
 	var cl := CanvasLayer.new()
-	SafeArea.apply(cl)
 	cl.layer        = idx
 	cl.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(cl)
@@ -7224,6 +7231,13 @@ var _boss_menu_row : Node2D = null
 func _dev_chip(text: String, tint: Color, on_press: Callable,
 		icon_tex: Texture2D = null) -> Node2D:
 	var root := Node2D.new()
+	# ── ЧИП ПОМЕЧЕН ГРУППОЙ ────────────────────────────────────────────────
+	# Дев-чипы стоят в тех же углах, что и настоящий интерфейс, и внешне от него
+	# не отличаются ничем. Проверке «не лежит ли что-нибудь под островком» они
+	# честно попадались — а искать их по подписям («БОССЫ», «МИНИ») значит
+	# переписывать тест при каждом новом чипе. Метка ставится в одном месте —
+	# здесь, — и любой новый чип получает её сам.
+	root.add_to_group("dev_ui")
 
 	var bg := ColorRect.new()
 	bg.color = Color(tint.r * 0.22, tint.g * 0.18, tint.b * 0.22, 0.92)
@@ -8053,7 +8067,6 @@ func _show_shout(big: String, small: String, hold: float,
 		big_col: Color, small_col: Color) -> void:
 	var vp := get_viewport().get_visible_rect().size
 	var cl := CanvasLayer.new()
-	SafeArea.apply(cl)
 	cl.layer = 96
 	add_child(cl)
 
@@ -8127,7 +8140,6 @@ func _show_level_card(next_level: int) -> void:
 
 	var vp := get_viewport().get_visible_rect().size
 	var cl := CanvasLayer.new()
-	SafeArea.apply(cl)
 	cl.layer = 96
 	add_child(cl)
 	# ПОДЛОЖКА ТА ЖЕ, ЧТО У ЗАНАВЕСА, И ДОВОДИТСЯ ДО НЕПРОЗРАЧНОЙ.
@@ -8591,8 +8603,13 @@ func _show_game_over(total_pizzas: int, level_rewards: Array, xp_before: int, le
 	# забега, как и в нём.
 	var show_rank_block := not _boss_test_mode
 
-	var left  := Rect2(GO_LEFT_X  * sx, GO_COL_Y * sy, GO_LEFT_W  * sx, GO_COL_H * sy)
-	var right := Rect2(GO_RIGHT_X * sx, GO_COL_Y * sy, GO_RIGHT_W * sx, GO_COL_H * sy)
+	# Обе колонки ОБХОДЯТ ОСТРОВОК: экран смерти прижат к краям, и на айфоне с
+	# вырезом крайняя панель заезжала под железо. Ужимается только та сторона,
+	# которая закрыта, — вторая колонка не сдвигается вовсе.
+	var left  := SafeArea.clear_rect(
+		Rect2(GO_LEFT_X  * sx, GO_COL_Y * sy, GO_LEFT_W  * sx, GO_COL_H * sy))
+	var right := SafeArea.clear_rect(
+		Rect2(GO_RIGHT_X * sx, GO_COL_Y * sy, GO_RIGHT_W * sx, GO_COL_H * sy))
 	_go_layout = { "left": left, "right": right }
 
 	# Начисления уже применены в `_on_normaldo_died` — восстанавливаем, каким

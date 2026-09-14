@@ -309,9 +309,13 @@ func _layout(vp: Vector2) -> Dictionary:
 	var hgt : float = COL_H * sy
 	return {
 		"sx": sx, "sy": sy,
-		"skin": Rect2(SKIN_X * sx, top, SKIN_W * sx, hgt),
+		# Крайние панели ОБХОДЯТ ОСТРОВОК: экран из трёх колонок прижат к обоим
+		# краям, и на айфоне с вырезом левая уезжала под железо (замер показывал
+		# её начало на x = 22 при островке до 66). Ужимается только та сторона,
+		# которая закрыта; автомат посередине не трогается вовсе.
+		"skin": SafeArea.clear_rect(Rect2(SKIN_X * sx, top, SKIN_W * sx, hgt)),
 		"mach": Rect2(MACH_X * sx, top, MACH_W * sx, hgt),
-		"pay":  Rect2(PAY_X  * sx, top, PAY_W  * sx, hgt),
+		"pay":  SafeArea.clear_rect(Rect2(PAY_X  * sx, top, PAY_W  * sx, hgt)),
 	}
 
 func _build_ui() -> void:

@@ -125,7 +125,6 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	# Тот же отступ, что у HUD: добыча летит в счётчики, которые живут ТАМ, и
 	# два слоя с разными отступами промахнулись бы друг мимо друга.
-	SafeArea.apply(self)
 	_build()
 	_run()
 

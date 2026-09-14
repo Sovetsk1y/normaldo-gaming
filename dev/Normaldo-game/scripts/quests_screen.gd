@@ -217,15 +217,22 @@ func _build(vp: Vector2) -> void:
 func _compute_layout(vp: Vector2) -> Dictionary:
 	var margin : float = vp.x * 0.022
 	var gap    : float = vp.x * 0.016
+	# ── ПОЛЯ РАЗНЫЕ, ЕСЛИ ЕСТЬ ОСТРОВОК ─────────────────────────────────────
+	# Три карточки стоят от поля до поля. Поле было одно на обе стороны, и на
+	# айфоне с вырезом левая карточка уезжала под железо (замер: с x = 21 при
+	# островке до 66). Расширяется только та сторона, которая закрыта.
+	var band := SafeArea.band(margin, vp.x - margin)
+	var mar_l : float = band.x
+	var mar_r : float = vp.x - band.y
 	var banner_y : float = vp.y * 0.145
 	var banner_h : float = vp.y * 0.115
 	var cards_y  : float = banner_y + banner_h + vp.y * 0.035
 	var cards_h  : float = vp.y - cards_y - vp.y * 0.045
-	var card_w   : float = (vp.x - margin * 2.0 - gap * 2.0) / 3.0
+	var card_w   : float = (vp.x - mar_l - mar_r - gap * 2.0) / 3.0
 	return {
-		"margin": margin, "gap": gap, "cards_y": cards_y,
-		"banner_pos":  Vector2(margin, banner_y),
-		"banner_size": Vector2(vp.x - margin * 2.0, banner_h),
+		"margin": mar_l, "gap": gap, "cards_y": cards_y,
+		"banner_pos":  Vector2(mar_l, banner_y),
+		"banner_size": Vector2(vp.x - mar_l - mar_r, banner_h),
 		"card_size":   Vector2(card_w, cards_h),
 	}
 

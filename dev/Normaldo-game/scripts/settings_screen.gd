@@ -125,8 +125,14 @@ func _layout(vp: Vector2) -> Dictionary:
 	var sy : float = vp.y / CANVAS_H
 	var top : float = SPREAD_Y * sy
 	var hgt : float = SPREAD_H * sy
-	var spine := Rect2(SPINE_X * sx, top, SPINE_W * sx, hgt)
-	var page  := Rect2(PAGE_X * sx,  top, PAGE_W * sx,  hgt)
+	# ── КОРЕШОК ОБХОДИТ ОСТРОВОК ────────────────────────────────────────────
+	# Разворот прижат к левому краю, и на айфоне с вырезом левая панель уезжает
+	# ПОД ЖЕЛЕЗО: замеры показывали её начало на x = 27 при островке до 66.
+	# Ужимается она С ТОЙ СТОРОНЫ, С КОТОРОЙ ЗАКРЫТА, — противоположный край и
+	# правая страница остаются на месте. На телефоне без выреза не меняется
+	# ничего: `clear_rect` отдаёт то же, что дали.
+	var spine := SafeArea.clear_rect(Rect2(SPINE_X * sx, top, SPINE_W * sx, hgt))
+	var page  := SafeArea.clear_rect(Rect2(PAGE_X * sx,  top, PAGE_W * sx,  hgt))
 	return {
 		"sx": sx, "sy": sy,
 		"spine": spine,

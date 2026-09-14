@@ -70,8 +70,11 @@ func _layout(vp: Vector2) -> Dictionary:
 	var hgt : float = COL_H * sy
 	return {
 		"sx": sx, "sy": sy,
-		"left":  Rect2(LEFT_X  * sx, top, LEFT_W  * sx, hgt),
-		"right": Rect2(RIGHT_X * sx, top, RIGHT_W * sx, hgt),
+		# Обе колонки ОБХОДЯТ ОСТРОВОК: экран-разворот прижат к краям, и на
+		# айфоне с вырезом крайняя панель заезжала под железо на восемь
+		# пикселей. Ужимается только закрытая сторона.
+		"left":  SafeArea.clear_rect(Rect2(LEFT_X  * sx, top, LEFT_W  * sx, hgt)),
+		"right": SafeArea.clear_rect(Rect2(RIGHT_X * sx, top, RIGHT_W * sx, hgt)),
 	}
 
 func _build(vp: Vector2) -> void:

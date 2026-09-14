@@ -1,35 +1,53 @@
 extends SceneTree
 
-# Headless smoke-тест безопасной области — островка, чёлки и полоски «домой».
+# Островок, чёлка и полоска «домой».
 #   godot --headless --path . --script res://dev/smoke_safe_area.gd
 #
-# Проверяется НЕ то, что где-то присвоен масштаб, а само обещание: весь холст
-# 960 × 430 после отступа лежит внутри безопасного прямоугольника, все слои
-# интерфейса получили ОДИН И ТОТ ЖЕ отступ, поворот телефона пересчитывает уже
-# выданные слои, а мир остаётся во весь экран.
+# ── ЧТО ЗДЕСЬ ПРОВЕРЯЕТСЯ ──────────────────────────────────────────────────
+# Обещание сменилось, и вместе с ним сменился тест.
+#
+# БЫЛО: слой интерфейса ужимался в безопасный прямоугольник целиком, и проверка
+# сверяла масштаб. Стоило это семи процентов размера НА КАЖДОМ ЭКРАНЕ, включая
+# те, где островку закрывать нечего, — и кнопка паузы отъезжала от угла, хотя
+# железо к ней и близко не подходит.
+#
+# СТАЛО: слои не двигаются вовсе, а разметка обходит САМО ПЯТНО там, где
+# содержимое до него дотягивается. Проверять теперь надо не масштаб (его нет), а
+# то, ради чего всё затевалось: НЕ ЛЕЖИТ ЛИ ЧТО-НИБУДЬ ПОД ЖЕЛЕЗОМ.
+#
+# Поэтому экраны открываются по-настоящему, островок подменяется на левый и на
+# правый, и по дереву собирается всё, что попало под пятно. Список пустой —
+# значит обещание держится.
+#
+# ── ДВЕ ЛОВУШКИ ЗАМЕРА ────────────────────────────────────────────────────
+# У подписи КОРОБКА ШИРЕ БУКВ: по коробке «под островком» оказывались надписи,
+# чьи буквы до него не доходят. Меряются буквы.
+#
+# Содержимое ПРОКРУТКИ обрезается её границами: глобальный прямоугольник
+# карточки торчит наружу, а на экране её там нет. Такие узлы пропускаются — за
+# них отвечает сама прокрутка, а её границы проверяются наравне со всеми.
 
 const CANVAS : Vector2 = Vector2(960.0, 430.0)
+const SIM_L  : Vector4 = Vector4(66.0, 0.0,  0.0, 18.0)
+const SIM_R  : Vector4 = Vector4( 0.0, 0.0, 66.0, 18.0)
 
-# Слои, которые обязаны остаться ВО ВЕСЬ ЭКРАН. Вспышка с полями по краям — не
-# вспышка, а шторка сирены, не доходящая до края, — не шторка.
-#
-# Список именно разрешительный: новый CanvasLayer без отступа обязан попасть
-# сюда руками, то есть решение «этот во весь экран» будет принято, а не забыто.
-const FULLBLEED_FUNCS : Array = [
-	"_screen_flash",   # club_boss, leatherhead, ninja_foot
-	"_cast_expecto",   # normaldo — белая вспышка спелла
-	"_siren",          # club_boss — шторки по краям экрана
-	"_strobe",         # club_boss — стробоскоп танцпола
-	"_draw_safe_sim",  # дев-подсветка САМОГО островка
+# Экраны, которые обязаны обойти островок. Список именно перечислительный: новый
+# экран сюда вписывается руками, то есть решение «а этот проверяем» будет
+# принято, а не забыто.
+const SCREENS : Array = [
+	"меню", "сетка", "карточки", "задания", "лидеры",
+	"достижения", "настройки", "слоты", "забег", "пауза", "смерть",
 ]
 
-# Сколько проверок обязано отработать. Упавшая корутина обрывается молча: её
-# `_check`-и просто не случаются, счётчик провалов остаётся нулём, и набор
-# рапортует «всё зелёное», не проверив ничего. Так уже было один раз.
-const EXPECTED_CHECKS : int = 12
+# Во весь экран остаются НАРОЧНО: фон обязан доходить до краёв, иначе по бокам
+# появятся пустые поля, а затемнение с каймой по краю — это не затемнение.
+# Узнаются по размеру: ровно холст.
+func _is_backdrop(r: Rect2) -> bool:
+	return r.size.x >= CANVAS.x - 1.0 and r.size.y >= CANVAS.y - 1.0
 
 var _fails  : int = 0
 var _checks : int = 0
+const EXPECTED_CHECKS : int = 7
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -40,18 +58,12 @@ func _check(ok: bool, what: String) -> void:
 		print("  FAIL ", what)
 
 func _initialize() -> void:
-	print("── Без выреза интерфейс не трогается ──")
-	await _test_no_cutout()
-	print("── Островок слева и справа ──")
-	await _test_both_sides()
-	print("── Все слои интерфейса с одним отступом ──")
-	await _test_layers_agree()
-	print("── Поворот пересчитывает выданные слои ──")
-	await _test_rotation()
-	print("── Мир остаётся во весь экран ──")
-	await _test_world_full_bleed()
-	print("── Каждый новый слой решает про отступ ──")
-	_test_every_layer_decides()
+	print("── Пятно железа ──")
+	_test_island_geometry()
+	print("── Слои не двигаются ──")
+	await _test_layers_untouched()
+	print("── Под островком пусто ──")
+	await _test_screens()
 
 	print("")
 	if _checks < EXPECTED_CHECKS:
@@ -64,180 +76,168 @@ func _initialize() -> void:
 		print("ПРОВАЛОВ: ", _fails)
 	quit(1 if _fails > 0 else 0)
 
-func _sa() -> Node:
-	return get_root().get_node_or_null("SafeArea")
-
-# Прямоугольник, в который слой превращает весь холст.
-func _mapped(cl: CanvasLayer) -> Rect2:
-	return Rect2(cl.offset, CANVAS * cl.scale)
-
-func _test_no_cutout() -> void:
-	var sa := _sa()
+# ── Само пятно ────────────────────────────────────────────────────────────
+func _test_island_geometry() -> void:
+	var sa := get_root().get_node_or_null("SafeArea")
+	if sa == null:
+		_check(false, "автолоад SafeArea не поднялся")
+		return
+	# Без выреза разметку не трогаем ВООБЩЕ: на настольной машине и на телефоне
+	# без островка игра обязана остаться такой, какой её нарисовали.
 	sa.call("simulate", Vector4.ZERO)
-	await process_frame
-	var r : Rect2 = sa.call("rect")
-	_check(r.position.is_equal_approx(Vector2.ZERO)
-		and r.size.is_equal_approx(CANVAS),
-		"на машине без выреза безопасен весь холст: %s" % [r])
-	var cl := CanvasLayer.new()
-	get_root().add_child(cl)
-	sa.call("apply", cl)
-	await process_frame
-	_check(cl.scale.is_equal_approx(Vector2.ONE)
-		and cl.offset.is_equal_approx(Vector2.ZERO),
-		"и слой остаётся нетронутым: масштаб %s, сдвиг %s" % [cl.scale, cl.offset])
-	cl.queue_free()
-	await process_frame
+	var none : Rect2 = sa.call("island")
+	_check(none.size.x <= 0.0, "без выреза пятна нет: %s" % none)
+	_check(float(sa.call("content_left", 22.0)) == 22.0
+			and float(sa.call("content_right", 900.0)) == 900.0,
+		"и поля разметки не меняются")
 
-# ГЛАВНОЕ ОБЕЩАНИЕ: что бы разметка ни нарисовала в пределах холста, оно
-# окажется внутри безопасной области. Проверяется на обеих сторонах, потому что
-# поворот разрешён в обе, и одна сторона — это половина проверки.
-func _test_both_sides() -> void:
-	var sa := _sa()
-	for side in [["слева", Vector4(66.0, 0.0, 0.0, 18.0)],
-			["справа", Vector4(0.0, 0.0, 66.0, 18.0)]]:
-		sa.call("simulate", (side as Array)[1])
-		await process_frame
-		var cl := CanvasLayer.new()
-		get_root().add_child(cl)
-		sa.call("apply", cl)
-		await process_frame
-		var safe : Rect2 = sa.call("rect")
-		var got  : Rect2 = _mapped(cl)
-		# Внутри — с запасом в полпикселя на округление.
-		var inside : bool = got.position.x >= safe.position.x - 0.5 \
-			and got.position.y >= safe.position.y - 0.5 \
-			and got.end.x <= safe.end.x + 0.5 \
-			and got.end.y <= safe.end.y + 0.5
-		_check(inside, "островок %s: холст лёг внутрь — %s в %s"
-			% [(side as Array)[0], got, safe])
-		# И НЕ УЖАЛСЯ СИЛЬНЕЕ НУЖНОГО: масштаб равномерный и равен меньшей доле.
-		var want : float = minf(safe.size.x / CANVAS.x, safe.size.y / CANVAS.y)
-		_check(is_equal_approx(cl.scale.x, cl.scale.y)
-			and absf(cl.scale.x - want) < 0.001,
-			"и ужался ровно настолько, насколько надо: %.4f при %.4f"
-			% [cl.scale.x, want])
-		cl.queue_free()
-		await process_frame
+	sa.call("simulate", SIM_L)
+	var l : Rect2 = sa.call("island")
+	# Пятно стоит ПОСЕРЕДИНЕ края, а не вдоль всего: именно поэтому чип паузы в
+	# верхнем углу трогать не нужно, и именно это отличает новую модель от
+	# старой, где отступ съедал весь край.
+	_check(l.position.x == 0.0 and l.position.y > 1.0
+			and l.end.y < CANVAS.y - 1.0,
+		"островок слева — пятно посередине края: %s" % l)
+	sa.call("simulate", SIM_R)
+	var r : Rect2 = sa.call("island")
+	_check(r.end.x >= CANVAS.x - 0.5 and r.position.x > CANVAS.x * 0.5,
+		"островок справа — пятно у правого края: %s" % r)
+	sa.call("simulate", Vector4.ZERO)
 
-# Добыча из мини-игры летит в счётчики, которые живут в ДРУГОМ слое. Пока
-# отступ у всех один, координаты слоёв сравнимы между собой — как и было до
-# островка. Разъедутся отступы — добыча улетит мимо, и молча.
-func _test_layers_agree() -> void:
-	var sa := _sa()
-	sa.call("simulate", Vector4(66.0, 0.0, 0.0, 18.0))
-	await process_frame
-	var a := CanvasLayer.new()
-	var b := CanvasLayer.new()
-	get_root().add_child(a)
-	get_root().add_child(b)
-	sa.call("apply", a)
-	sa.call("apply", b)
-	await process_frame
-	_check(a.scale.is_equal_approx(b.scale) and a.offset.is_equal_approx(b.offset),
-		"два слоя получили один отступ: %s / %s" % [a.offset, b.offset])
-	a.queue_free()
-	b.queue_free()
-	await process_frame
-
-# Телефон поворачивают в руках, и островок переезжает с одного бока на другой.
-# Слой, выданный ДО поворота, обязан переехать вместе с ним.
-func _test_rotation() -> void:
-	var sa := _sa()
-	sa.call("simulate", Vector4(66.0, 0.0, 0.0, 18.0))
-	await process_frame
-	var cl := CanvasLayer.new()
-	get_root().add_child(cl)
-	sa.call("apply", cl)
-	await process_frame
-	var before : Vector2 = cl.offset
-	sa.call("simulate", Vector4(0.0, 0.0, 66.0, 18.0))
-	await process_frame
-	_check(not cl.offset.is_equal_approx(before),
-		"после поворота слой переехал сам: %s → %s" % [before, cl.offset])
-	var safe : Rect2 = sa.call("rect")
-	_check(_mapped(cl).end.x <= safe.end.x + 0.5,
-		"и снова лежит внутри: %s в %s" % [_mapped(cl), safe])
-	cl.queue_free()
-	await process_frame
-
-# Полосы обязаны доходить до краёв экрана: поле по бокам читалось бы как рамка,
-# а предметы влетали бы «из ниоткуда» в десятке пикселей от края.
-func _test_world_full_bleed() -> void:
-	var sa := _sa()
-	sa.call("simulate", Vector4(66.0, 0.0, 0.0, 18.0))
+# ── Слои остаются как есть ────────────────────────────────────────────────
+# Ужимать слой перестали, и это проверяется отдельно: масштаб, поставленный
+# «на всякий случай» в одном месте, вернул бы всю прежнюю беду разом и молча.
+func _test_layers_untouched() -> void:
 	var game : Node = load("res://scenes/game.tscn").instantiate()
 	get_root().add_child(game)
-	await process_frame
-	var hud : CanvasLayer = game.get_node_or_null("HUD")
-	var sp  : Node2D      = game.get_node_or_null("Spawner")
-	var nd  : Node2D      = game.get_node_or_null("Normaldo")
-	var bg  : Node2D      = game.get_node_or_null("Background")
-	await process_frame
-	_check(sp.scale.is_equal_approx(Vector2.ONE)
-		and nd.scale.is_equal_approx(Vector2.ONE)
-		and bg.scale.is_equal_approx(Vector2.ONE),
-		"спавнер, Нормальдо и фон не ужаты: %s / %s / %s"
-		% [sp.scale, nd.scale, bg.scale])
-	# Полосы считает спавнер — крайние обязаны остаться на своих местах.
-	var lanes : Array = sp.call("_lane_centers")
-	_check(lanes.size() > 0 and float(lanes[0]) < CANVAS.y * 0.2
-		and float(lanes[lanes.size() - 1]) > CANVAS.y * 0.8,
-		"и полосы по-прежнему от края до края: %s" % [lanes])
-	# А интерфейс — ужат, и это тот же слой, что и у всех.
-	_check(hud.offset.x > 60.0,
-		"а интерфейс отступил от островка: сдвиг %s" % [hud.offset])
+	for _i in 6:
+		await process_frame
+	var sa := get_root().get_node_or_null("SafeArea")
+	sa.call("simulate", SIM_L)
+	for _i in 4:
+		await process_frame
+	var moved : Array = []
+	_scan_layers(get_root(), moved)
+	_check(moved.is_empty(), "ни один слой интерфейса не ужат и не сдвинут: %s"
+		% [moved])
 	sa.call("simulate", Vector4.ZERO)
 	game.queue_free()
 	await process_frame
 
-# ── НОВЫЙ СЛОЙ ОБЯЗАН РЕШИТЬ, ВО ВЕСЬ ЭКРАН ОН ИЛИ НЕТ ─────────────────────
-# Слоёв в игре два десятка, и заводятся новые. Забытый `SafeArea.apply` — это
-# баннер босса, наполовину уехавший под островок, и заметить это можно только
-# на устройстве и только если повернуть телефон нужной стороной.
-#
-# Поэтому проверка идёт ПО ТЕКСТУ: каждый `CanvasLayer.new()` либо берёт
-# отступ следующей же строкой, либо стоит в функции из списка полноэкранных.
-func _test_every_layer_decides() -> void:
-	var missed : Array = []
-	var seen : int = 0
-	for path in _scripts():
-		var src := FileAccess.get_file_as_string(path)
-		if src == "":
-			continue
-		var lines := src.split("\n")
-		for i in lines.size():
-			if String(lines[i]).find("CanvasLayer.new()") < 0:
-				continue
-			seen += 1
-			var applied := false
-			for j in range(i + 1, mini(i + 4, lines.size())):
-				if String(lines[j]).find("SafeArea.apply(") >= 0:
-					applied = true
-					break
-			if applied:
-				continue
-			if FULLBLEED_FUNCS.has(_func_at(lines, i)):
-				continue
-			missed.append("%s:%d (%s)" % [path.get_file(), i + 1, _func_at(lines, i)])
-	_check(seen >= 15, "слоёв в игре найдено: %d" % seen)
-	_check(missed.is_empty(), "и у каждого решён отступ: %s" % [missed])
+func _scan_layers(n: Node, out: Array) -> void:
+	if n is CanvasLayer:
+		var cl := n as CanvasLayer
+		if not cl.scale.is_equal_approx(Vector2.ONE) \
+				or not cl.offset.is_equal_approx(Vector2.ZERO):
+			out.append("%s масштаб %s сдвиг %s" % [cl.name, cl.scale, cl.offset])
+	for c in n.get_children():
+		_scan_layers(c, out)
 
-# Имя функции, внутри которой стоит строка.
-func _func_at(lines: PackedStringArray, idx: int) -> String:
-	for i in range(idx, -1, -1):
-		var l := String(lines[i])
-		if l.begins_with("func ") or l.begins_with("static func "):
-			var head := l.substr(l.find("func ") + 5)
-			return head.substr(0, head.find("("))
-	return "<вне функции>"
+# ── Экраны ────────────────────────────────────────────────────────────────
+func _test_screens() -> void:
+	for side in ["left", "right"]:
+		var bad : Array = []
+		for screen in SCREENS:
+			bad.append_array(await _one_screen(screen, side))
+		_check(bad.is_empty(), "островок %s — под ним пусто: %s"
+			% [side, bad.slice(0, 8)])
 
-func _scripts() -> Array:
-	var out : Array = []
-	var d := DirAccess.open("res://scripts")
-	if d == null:
-		return out
-	for f in d.get_files():
-		if f.ends_with(".gd"):
-			out.append("res://scripts/" + f)
-	return out
+# Экран поднимается в СВОЁЙ сцене и сносится следом. Открывать их один за другим
+# в одном дереве нельзя: они не закрывают друг друга, и список выходит
+# накопительным — под островком «оказывается» то, что лежит на экране, открытом
+# три шага назад. Ровно так этот тест и врал в первой версии.
+func _one_screen(screen: String, side: String) -> Array:
+	var save := get_root().get_node_or_null("SaveData")
+	save.set("tutorial_done", true)
+	save.set("dollars", 99000)
+	save.set("tokens", 83)
+	save.set("episodes_done", 5)
+	var seen : Dictionary = {}
+	for k in ["tour", "start", "quests", "skins", "slots", "leaders", "book", "awards"]:
+		seen[k] = true
+	save.set("menu_tips_seen", seen)
+	var sa := get_root().get_node_or_null("SafeArea")
+	sa.call("simulate", SIM_L if side == "left" else SIM_R)
+
+	var game : Node = load("res://scenes/game.tscn").instantiate()
+	get_root().add_child(game)
+	for _i in 6:
+		await process_frame
+	var hud : Node = game.get_node_or_null("HUD")
+	match screen:
+		"сетка":      hud.set("_skins_card_view", false); hud.call("_show_shop")
+		"карточки":   hud.set("_skins_card_view", true);  hud.call("_show_shop")
+		"задания":    hud.call("_show_quests")
+		"лидеры":     hud.call("_show_leaderboard")
+		"достижения": hud.call("_show_achievements")
+		"настройки":  hud.call("_show_settings_modal", "sound")
+		"слоты":      hud.call("_show_slots")
+		"забег":      hud.call("_start_game")
+		"пауза":
+			hud.call("_start_game")
+			for _i in 60:
+				await process_frame
+			hud.call("_open_pause_menu")
+		"смерть":
+			hud.set("_dollars_this_run", 640)
+			hud.set("_elapsed_time", 96.0)
+			hud.call("_show_game_over", 420, [], 40, 1)
+	for _i in 50:
+		get_root().get_tree().paused = false
+		await process_frame
+
+	var isl : Rect2 = sa.call("island")
+	var hits : Array = []
+	_scan(get_root(), isl, screen, hits)
+	game.queue_free()
+	await process_frame
+	sa.call("simulate", Vector4.ZERO)
+	return hits
+
+func _scan(n: Node, isl: Rect2, screen: String, out: Array) -> void:
+	if n is Control:
+		var c := n as Control
+		if c.is_visible_in_tree() and c.size.x > 2.0 and c.size.y > 2.0 \
+				and c.get_child_count() == 0 and not _clipped(c) and not _is_dev(c):
+			var r := _drawn_rect(c)
+			if isl.intersects(r) and not _is_backdrop(r):
+				var what := c.get_class()
+				var t = c.get("text")
+				if t is String and String(t) != "":
+					what += " «%s»" % String(t).substr(0, 20)
+				out.append("%s: %s %.0f..%.0f" % [screen, what, r.position.x, r.end.x])
+	for ch in n.get_children():
+		_scan(ch, isl, screen, out)
+
+func _drawn_rect(c: Control) -> Rect2:
+	var r := Rect2(c.global_position, c.size)
+	if c is Label:
+		var l := c as Label
+		var w : float = minf(r.size.x, l.get_combined_minimum_size().x)
+		var x := r.position.x
+		match l.horizontal_alignment:
+			HORIZONTAL_ALIGNMENT_CENTER: x += (r.size.x - w) * 0.5
+			HORIZONTAL_ALIGNMENT_RIGHT:  x += r.size.x - w
+		return Rect2(Vector2(x, r.position.y), Vector2(w, r.size.y))
+	return r
+
+func _clipped(c: Control) -> bool:
+	var n := c.get_parent()
+	while n != null:
+		if n is ScrollContainer:
+			return true
+		n = n.get_parent()
+	return false
+
+# ── ДЕВ-ЧИПЫ НЕ В СЧЁТ ────────────────────────────────────────────────────
+# Они стоят в тех же углах, что и настоящий интерфейс, и под островок попадают
+# честно — но в релизе их нет вовсе (`DevFlags.ENABLED`). Двигать ради них
+# разметку значит подгонять игру под инструмент. Метку ставит `hud._dev_chip`.
+func _is_dev(c: Control) -> bool:
+	var n : Node = c
+	while n != null:
+		if n.is_in_group("dev_ui"):
+			return true
+		n = n.get_parent()
+	return false

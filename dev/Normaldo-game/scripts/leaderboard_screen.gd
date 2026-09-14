@@ -316,8 +316,13 @@ func _build(vp: Vector2) -> void:
 	# Список: непрозрачная скруглённая панель. Раньше строки были полупрозрачные,
 	# и сквозь них просвечивала кирпичная стена — текст дрался с текстурой.
 	var list_pos  := Vector2(float(lay["margin"]), float(lay["list_y"]))
-	var list_size := Vector2(vp.x - float(lay["margin"]) * 2.0, float(lay["list_h"]))
-	UiKit.panel(_slide_root, list_pos - Vector2(4.0, 4.0), list_size + Vector2(8.0, 8.0),
+	var list_size := Vector2(vp.x - float(lay["margin"]) - float(lay["margin_r"]),
+		float(lay["list_h"]))
+	# Рамка идёт на 4 пикселя ШИРЕ списка — и ровно на эти 4 пикселя заезжала под
+	# островок, когда поле уже было расширено. Её тоже держим в полосе.
+	var frame := SafeArea.clear_rect(
+		Rect2(list_pos - Vector2(4.0, 4.0), list_size + Vector2(8.0, 8.0)))
+	UiKit.panel(_slide_root, frame.position, frame.size,
 		Color(0.05, 0.04, 0.03, 0.94), 12, Color(0.26, 0.22, 0.16, 0.95))
 
 	_scroll = ScrollContainer.new()
@@ -339,6 +344,14 @@ func _build(vp: Vector2) -> void:
 # Раскладка экрана в одном месте — её спрашивают и сборка, и перестройка списка.
 func _layout(vp: Vector2) -> Dictionary:
 	var margin   : float = 22.0
+	# ── ПОЛЯ СТАЛИ РАЗНЫМИ ──────────────────────────────────────────────────
+	# Поле было одно на обе стороны, и список тянулся от 22 до vp.x - 22. На
+	# айфоне с вырезом его левый край уходил под островок (замер: панель с 18).
+	# Теперь поле с той стороны, где железо, ровно настолько шире, насколько
+	# нужно, — а с другой остаётся прежним. Без выреза оба равны 22, как и были.
+	var band := SafeArea.band(margin, vp.x - margin)
+	var mar_l : float = band.x
+	var mar_r : float = vp.x - band.y
 	var tabs_y   : float = 46.0
 	var tabs_h   : float = 30.0
 	var podium_y : float = tabs_y + tabs_h + 8.0
@@ -347,7 +360,7 @@ func _layout(vp: Vector2) -> Dictionary:
 	var strip_y  : float = vp.y - strip_h - 8.0
 	var list_y   : float = podium_y + podium_h + 10.0
 	return {
-		"margin": margin, "tabs_y": tabs_y, "tabs_h": tabs_h,
+		"margin": mar_l, "margin_r": mar_r, "tabs_y": tabs_y, "tabs_h": tabs_h,
 		"podium_y": podium_y, "podium_h": podium_h,
 		"list_y": list_y, "list_h": strip_y - 10.0 - list_y,
 		"strip_y": strip_y, "strip_h": strip_h,
@@ -545,7 +558,8 @@ func _build_podium_card(r: Dictionary, pos: Vector2, size: Vector2, place: int, 
 func _build_my_strip(vp: Vector2) -> void:
 	var lay := _layout(vp)
 	var pos  := Vector2(float(lay["margin"]), float(lay["strip_y"]))
-	var size := Vector2(vp.x - float(lay["margin"]) * 2.0, float(lay["strip_h"]))
+	var size := Vector2(vp.x - float(lay["margin"]) - float(lay["margin_r"]),
+		float(lay["strip_h"]))
 	_my_pos_btn = Node2D.new()
 	_my_pos_btn.process_mode = Node.PROCESS_MODE_ALWAYS
 	# В _slide_root, а не в экран: иначе строка стоит на месте, пока весь
