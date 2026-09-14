@@ -75,10 +75,13 @@ func _initialize() -> void:
 
 # Как называется кадр, который сейчас на собаке, — по имени файла.
 func _frame_of(dog: Node) -> String:
-	for c in dog.get_children():
-		if c is Sprite2D and (c as Sprite2D).texture != null:
-			return String((c as Sprite2D).texture.resource_path).get_file()
-	return "?"
+	# ПО ИМЕНИ УЗЛА, а не «первый спрайт среди детей»: под собакой лежит ещё и
+	# аура, она тоже Sprite2D, и её рисованная текстура не имеет пути к файлу —
+	# слепой поиск возвращал пустую строку вместо имени кадра.
+	var f := dog.get_node_or_null(DOG.FRAME_NODE) as Sprite2D
+	if f == null or f.texture == null:
+		return "?"
+	return String(f.texture.resource_path).get_file()
 
 func _save(out: String, name: String) -> void:
 	get_root().get_texture().get_image().save_png("%s/%s.png" % [out, name])

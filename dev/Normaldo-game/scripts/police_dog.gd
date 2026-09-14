@@ -41,6 +41,9 @@ const TEX_LEASHED := preload("res://assets/bosses/police/dog/leashed.png")
 const TEX_STRAIN  := preload("res://assets/bosses/police/dog/strain.png")
 const TEX_RUN     := preload("res://assets/bosses/police/dog/run.png")
 const TEX_BITE    := preload("res://assets/bosses/police/dog/bite.png")
+# Имя узла с кадром. Под ним собаку находят снаружи — смотровые скрипты и
+# проверки; см. «ДЕТЕЙ ЗОВУТ ПО ИМЕНАМ» в `_ready`.
+const FRAME_NODE  : String = "Frame"
 const SFX_BARK  := preload("res://assets/audio/dog.mp3")
 
 const ItemAura := preload("res://scripts/item_aura.gd")
@@ -172,15 +175,27 @@ func _ready() -> void:
 	# рисования.
 	z_index = 41
 
+	# ── ДЕТЕЙ ЗОВУТ ПО ИМЕНАМ ───────────────────────────────────────────────
+	# Кадр собаки лежал единственным Sprite2D, и снаружи его так и искали —
+	# «первый спрайт среди детей». Аура — ТОЖЕ Sprite2D, и в тот же день, когда
+	# она появилась, этот поиск начал возвращать её: текстура у ауры рисованная,
+	# пути к файлу у неё нет, и проверка кадров молча получала пустую строку
+	# вместо «leashed.png».
+	#
+	# Поэтому у каждого теперь имя, и находят их по имени. Следующая деталь,
+	# которую сюда добавят, ничего не сломает.
+	_glow = ItemAura.make(AURA_COLOR, DOG_PX * AURA_K, AURA_A)
+	_glow.name = "Aura"
 	# Аура ПЕРВОЙ: она ложится под собаку, а порядок детей задаёт порядок
 	# отрисовки внутри одного z_index.
-	_glow = ItemAura.make(AURA_COLOR, DOG_PX * AURA_K, AURA_A)
 	add_child(_glow)
 
 	_dust = _make_dust()
+	_dust.name = "Dust"
 	add_child(_dust)
 
 	_sprite = Sprite2D.new()
+	_sprite.name           = FRAME_NODE
 	_sprite.texture        = TEX_RUN
 	_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_sprite.z_index        = 2
