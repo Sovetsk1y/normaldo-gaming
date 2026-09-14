@@ -49,8 +49,8 @@ const SWAT_SCRIPT  := preload("res://scripts/police_swat.gd")
 const DOG_SCRIPT   := preload("res://scripts/police_dog.gd")
 const FIRE_SCENE   := preload("res://scenes/fire.tscn")
 
-const COP_TEX    := preload("res://assets/bosses/police/cop.png")
-const RADIO_TEX  := preload("res://assets/bosses/police/radio.png")
+const COP_TEX    := preload("res://assets/bosses/police/cop_radio.png")
+
 const BANNER_TEX := preload("res://assets/bosses/police/banner.png")
 # ── ПИЦЦА НА ЛИЦО — ДРУГАЯ, НЕ ТА, ЧТО ЛЕТАЕТ В ПОТОКЕ ─────────────────────
 # Здесь стояла обычная пицца из потока, и знак читался неверно: «в капитана
@@ -68,28 +68,38 @@ const BOSS_MUSIC   := preload("res://assets/audio/hard_track.mp3")
 const SFX_PIZZA    := preload("res://assets/audio/super_pizza.mp3")
 
 # ── Размеры ─────────────────────────────────────────────────────────────────
+# ── ГДЕ В РИСУНКЕ ГОЛОВА ─────────────────────────────────────────────────────
+# Рисунок — голова ВМЕСТЕ с рукой и рацией: коп говорит в неё, и держать руку
+# отдельным спрайтом больше не нужно (раньше её приходилось и двигать, и
+# наклонять к лицу — всё это теперь нарисовано).
+#
+# Но подгонять размер по всему рисунку нельзя: рука шире головы почти на треть.
+# Поэтому здесь лежит рамка САМОЙ ГОЛОВЫ в пикселях текстуры. Замерена по
+# красному контуру — он есть у головы и нет у руки:
+#
+#   python3 - <<'\''EOF'\''
+#   from PIL import Image
+#   im = Image.open("assets/bosses/police/cop_radio.png").convert("RGBA"); a = im.load()
+#   xs = [(x, y) for y in range(im.height) for x in range(im.width)
+#         if a[x, y][3] > 20 and a[x, y][0] > 150 and a[x, y][1] < 90 and a[x, y][2] < 90]
+#   print(min(x for x, _ in xs), min(y for _, y in xs),
+#         max(x for x, _ in xs), max(y for _, y in xs))
+#   EOF
+const COP_HEAD : Rect2i = Rect2i(140, 67, 341, 312)
 const COP_PX   : float = 150.0
-# ── РАЦИЯ СТОИТ ТАК, КАК ЕЁ СОБРАЛ ХУДОЖНИК ────────────────────────────────
-# Прислана она отдельной картинкой вместе с уже собранным кадром «коп с рацией»
-# (parts cops/policeman.png). Собран он в натуральную величину обоих рисунков:
-# голова 341 px шириной, рация 161×298, и её центр стоит на (−195, +39) от
-# центра головы.
+
+# ── ГДЕ В ГОЛОВЕ СТОИТ УЗЕЛ ─────────────────────────────────────────────────
+# Не в центре головы, а чуть ниже и левее — и это НЕ вкусовщина, а сохранение
+# ровно той точки, что была до смены рисунка. Раньше спрайт вписывался «по
+# содержимому» и ставился центром КАДРА 500×500: голова в старом cop.png лежала
+# на (82, 65) размером 341×312, поэтому центр кадра (250, 250) приходился на
+# (250−82)/341 = 0.493 по ширине и (250−65)/312 = 0.593 по высоте головы.
 #
-# Числа ниже — ровно это, переведённое в доли COP_PX (то есть ширины головы):
-# 298 × 150/341 ≈ 131 в высоту, смещение (−85.8, +17.2) px от центра рисунка
-# головы, а тот сидит на (+0.9, −12.8) от узла.
-#
-# До этого рация была ужата до 62 px и сдвинута на −63: она налезала боссу на
-# щёку и читалась не как «он говорит в рацию», а как деталь на лице.
-const RADIO_PX : float = 131.0
-# От УЗЛА, в долях COP_PX. Ставится по центру своего рисунка (`anchor_sprite`) —
-# иначе к смещению пришлось бы прибавлять ещё и то, насколько рисунок рации
-# сдвинут внутри своего кадра 500×500.
-const RADIO_POS : Vector2 = Vector2(-0.545, 0.115)
-# Наклон рации К ЛИЦУ. Нарисована она стоймя, антенной вверх, и в кадре коп
-# выглядел так, будто держит её подальше от себя. Верх завален вправо, к щеке, —
-# и поза читается как «говорит в неё», ради чего рация тут и появилась.
-const RADIO_TILT : float = 18.0
+# От этой точки посчитано всё остальное: и посадка победной пиццы, и место
+# собаки, и высота троса, и якорь реплик. Поставь узел в центр головы — и лицо
+# уедет вниз на 13 px, а вместе с ним промахнутся мимо лица пицца и трос.
+const HEAD_ANCHOR : Vector2 = Vector2(0.4927, 0.5929)
+
 # Капитан стоит У ПРАВОГО КРАЯ и никуда не двигается: он не боец, он штаб.
 # Отступ больше половины головы: ровно половина прижала бы её к самому краю, и
 # фуражка срезалась бы рамкой экрана.
@@ -217,7 +227,6 @@ var _game_root : Node2D = null
 var boss_test_mode : bool = false
 
 var _sprite : Sprite2D = null
-var _radio  : Sprite2D = null
 var _music  : AudioStreamPlayer = null
 var _alive_flag : bool = true
 
@@ -238,31 +247,20 @@ func _ready() -> void:
 	_sprite = Sprite2D.new()
 	_sprite.texture        = COP_TEX
 	_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	ItemSizing.fit_sprite_content(_sprite, COP_PX)
-	add_child(_sprite)
-
-	# Рация в руке — единственное, чем он «атакует», и потому она в кадре
-	# всегда, а не только на вызове.
-	_radio = Sprite2D.new()
-	_radio.texture        = RADIO_TEX
-	_radio.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	_radio.z_index        = 1
-	ItemSizing.fit_sprite_content(_radio, RADIO_PX)
-	ItemSizing.anchor_sprite(_radio, 0.5, 0.5)
-	_radio.position       = Vector2.ZERO
-	# ── РАЦИЯ РАЗВЁРНУТА К ЛИЦУ ────────────────────────────────────────────
-	# Коп смотрит влево, и весь его рисунок отзеркален — вместе с рукой. Рация
-	# от этого оказывалась наклонена ОТ лица: кулак у щеки, а антенна уходит в
-	# сторону, будто он держит её подальше от себя. Теперь говорит В неё.
+	# ── ВПИСЫВАЕМ ПО ГОЛОВЕ, А НЕ ПО ВСЕМУ РИСУНКУ ─────────────────────────
+	# В кадре теперь и рука с рацией. Обычная подгонка «по содержимому» считает
+	# от всего нарисованного — голова ужалась бы на четверть, а вместе с ней и
+	# сам босс: от неё считаются и позиции, и размах.
 	#
-	# Поворачивает ПОДСТАВКА, а не сам спрайт: начало спрайта смещено «якорем»
-	# (anchor_sprite), и поворот вокруг него уводил бы рацию по дуге за край
-	# лица. Подставка стоит ровно в центре рисунка — рация крутится на месте.
-	var radio_pivot := Node2D.new()
-	radio_pivot.position = RADIO_POS * COP_PX
-	radio_pivot.rotation = deg_to_rad(RADIO_TILT)
-	radio_pivot.add_child(_radio)
-	add_child(radio_pivot)
+	# Точка опоры тоже считается ОТ ГОЛОВЫ (HEAD_ANCHOR): рука пририсована
+	# слева, и центр всего рисунка уехал от лица на пол-ладони. Без этого босс
+	# встал бы правее, чем стоял, ровно на эту половину.
+	var k : float = COP_PX / float(COP_HEAD.size.x)
+	var anchor_px : Vector2 = Vector2(COP_HEAD.position) \
+		+ Vector2(COP_HEAD.size) * HEAD_ANCHOR
+	_sprite.scale  = Vector2(k, k)
+	_sprite.offset = COP_TEX.get_size() * 0.5 - anchor_px
+	add_child(_sprite)
 
 	_music = AudioStreamPlayer.new()
 	var ms := BOSS_MUSIC.duplicate() as AudioStreamMP3
