@@ -79,56 +79,49 @@ func _initialize() -> void:
 	_test_version_in_sync()
 	_finish()
 
-# ── ВЕРСИЯ В ИГРЕ = ВЕРСИЯ СБОРКИ ──────────────────────────────────────────
+# ── ВЕРСИЯ ЕСТЬ, И КОНВЕЙЕР ЕЁ ПЕРЕНОСИТ ───────────────────────────────────
 # Версия живёт в ОДНОМ месте — `project.godot`, поле Project Settings →
-# Application → Config → Version. Её показывает игра, её же шлёт аналитика, и её
-# же `dev/tools/sync_version.py` переносит в пресет перед сборкой, чтобы она
-# попала в Info.plist. Номер сборки едет обратно: его поднимает релизный скрипт,
-# а игра показывает рядом с версией.
+# Application → Config → Version. Её показывает игра, её шлёт аналитика, и её же
+# `dev/tools/sync_version.py` переносит в пресет перед сборкой, чтобы она попала
+# в Info.plist.
 #
-# Держать версию в пресете пробовали — и это подвело: `export_presets.cfg` у
-# каждого разработчика свой (в нём настройки подписи), в гите он расходится с
-# рабочей копией. В репозитории лежало 1.0.3, на машине 1.9.3, игра показывала
-# 1.0.1 — и на вопрос «новая ли сборка стоит на телефоне» экран настроек
-# отвечал неправдой. Полдня ушло на поиски кеша, которого не было.
+# Держать версию в пресете пробовали — подвело: `export_presets.cfg` у каждого
+# разработчика свой (в нём настройки подписи), в гите он расходится с рабочей
+# копией. В репозитории лежало 1.0.3, на машине 1.9.3, игра показывала 1.0.1 — и
+# на вопрос «новая ли сборка стоит на телефоне» экран настроек отвечал неправдой.
 #
-# Эта проверка следит, чтобы перенос не забыли позвать.
-func _test_version_in_sync() -> void:
-	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	var short  := _preset_value(preset, "application/short_version")
-	var build  := _preset_value(preset, "application/version")
-	_check(short != "", "в пресете iOS есть версия: %s" % short)
-	var ver := str(ProjectSettings.get_setting("application/config/version", ""))
-	var bld := str(ProjectSettings.get_setting("application/config/build", ""))
-	_check(ver == short and bld == build,
-		"и пресет собран с ней же: в игре %s (сборка %s), в пресете %s (сборка %s)%s"
-			% [ver, bld, short, build,
-				"" if (ver == short and bld == build)
-				else " — почините: python3 dev/tools/sync_version.py"])
+# ── ПОЧЕМУ НЕ СВЕРЯЕМ ПРЕСЕТ С ИГРОЙ ───────────────────────────────────────
+# Такая проверка здесь СТОЯЛА И БЫЛА ВРЕДНА. Версия в пресете — не второй
+# источник, а отпечаток последней сборки, и между «поднял версию в редакторе» и
+# «собрал» они расходятся ЗАКОННО. А `release_testflight.sh` зовёт этот тест в
+# блоке проверок, то есть ДО переноса: подняв версию, разработчик получал
+# красную проверку и остановленный релиз — причём останавливался он ровно перед
+# той строкой, которая расхождение и устраняет.
+#
+# Поэтому проверяется то, что действительно должно быть верно ВСЕГДА: версия у
+# игры есть, и конвейер её переносит.
+const RELEASE_SH : String = "res://dev/release_testflight.sh"
 
-# Значение из секции пресета iOS. Ищется в блоке с `platform="iOS"`, а не по
-# имени пресета: имя разработчик волен поменять, платформу — нет.
-#
-# Блок берётся ОТ ЗАГОЛОВКА ДО ЗАГОЛОВКА, а не «от слова iOS до следующей
-# скобки»: сами версии лежат не в `[preset.0]`, а в `[preset.0.options]` — то
-# есть за той самой скобкой, на которой наивный поиск и останавливался, находя
-# пустоту.
-func _preset_value(preset: String, key: String) -> String:
-	var heads := RegEx.new()
-	heads.compile("(?m)^\\[preset\\.\\d+\\]")
-	var hs := heads.search_all(preset)
-	for i in hs.size():
-		var from : int = (hs[i] as RegExMatch).get_start()
-		var to : int = (hs[i + 1] as RegExMatch).get_start() \
-			if i + 1 < hs.size() else preset.length()
-		var block := preset.substr(from, to - from)
-		if not block.contains("platform=\"iOS\""):
-			continue
-		var re := RegEx.new()
-		re.compile("(?m)^%s=\"([^\"]*)\"" % key)
-		var m := re.search(block)
-		return m.get_string(1) if m != null else ""
-	return ""
+func _test_version_in_sync() -> void:
+	var ver := str(ProjectSettings.get_setting("application/config/version", ""))
+	var re := RegEx.new()
+	re.compile("^\\d+\\.\\d+")
+	_check(re.search(ver) != null,
+		"версия игры задана и похожа на версию: «%s»" % ver)
+
+	# И перенос не выпал из конвейера. Без него в Info.plist уедет то, что
+	# осталось в пресете от прошлого раза, — молча и не глядя на игру.
+	#
+	# Ищется ВЫЗОВ, а не упоминание: имя скрипта стоит и в комментарии рядом с
+	# ним, и первая версия этой проверки зеленела на конвейере, из которого
+	# вызов был вырезан начисто.
+	var called := false
+	for line in FileAccess.get_file_as_string(RELEASE_SH).split("\n"):
+		var t := String(line).strip_edges()
+		if not t.begins_with("#") and t.contains("sync_version.py"):
+			called = true
+			break
+	_check(called, "а релизный скрипт переносит её в пресет")
 
 # ── СИСТЕМНАЯ ЗАСТАВКА iOS — ЧЁРНЫЙ ЭКРАН И НИЧЕГО НА НЁМ ──────────────────
 # Своя заставка игры (scripts/splash.gd) начинается с чёрного, и системная перед
