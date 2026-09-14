@@ -1,31 +1,33 @@
 #!/usr/bin/env python3
-"""Версия сборки → версия, которую показывает игра.
+"""Версия игры → настройки сборки. И номер сборки обратно.
 
     python3 dev/tools/sync_version.py            # синхронизировать
-    python3 dev/tools/sync_version.py --check    # только проверить, ничего не писать
+    python3 dev/tools/sync_version.py --check    # только сверить, ничего не писать
 
-── ЗАЧЕМ ───────────────────────────────────────────────────────────────────────
-Версий в проекте две, и живут они в разных файлах:
+── ГДЕ ЖИВЁТ ВЕРСИЯ ────────────────────────────────────────────────────────────
+В `project.godot` → `application/config/version`. Это Project Settings →
+Application → Config → Version в редакторе Godot: одно поле, одно место, видно
+глазами. Его же игра показывает в настройках и шлёт в аналитику.
 
-  * `export_presets.cfg` → `application/short_version` и `application/version` —
-    то, что уходит в Info.plist и что видно в TestFlight. Это ТА САМАЯ версия,
-    которую разработчик пишет руками перед сборкой;
-  * `project.godot` → `application/config/version` — то, что игра показывает в
-    настройках и шлёт в аналитику.
+`export_presets.cfg` → `application/short_version` — ПРОИЗВОДНОЕ. Скрипт
+переписывает его перед каждой сборкой, руками туда лезть незачем.
 
-Прочитать пресет в игре нельзя: `export_presets.cfg` — файл РЕДАКТОРА, в сборку
-он не попадает вовсе. Поэтому версию переносит этот скрипт — до экспорта.
+── ПОЧЕМУ НЕ НАОБОРОТ ──────────────────────────────────────────────────────────
+Сначала было наоборот — версия жила в пресете, а скрипт нёс её в игру. И сразу
+подвело: `export_presets.cfg` у каждого разработчика СВОЙ (в нём настройки
+подписи), в гите он расходится с рабочей копией — и «версия проекта» оказалась
+величиной, которая у всех разная. В репозитории лежало 1.0.3, на машине 1.9.3, и
+какая из них настоящая, не мог сказать никто.
 
-Разошлись они молча и надолго: в пресете стояло 1.0.3, в игре показывалось
-1.0.1, и на вопрос «а новая ли сборка у меня на телефоне» экран настроек отвечал
-неправдой. Ровно тогда, когда ответ и был нужен.
+`project.godot` общий для всех и коммитится как обычный файл. Поэтому источник —
+он.
 
-── НОМЕР СБОРКИ ТОЖЕ ───────────────────────────────────────────────────────────
-`application/version` (CFBundleVersion) — счётчик сборок. Именно он различает две
-заливки с одинаковой версией, и именно его не хватало, чтобы понять, та ли
-сборка стоит на телефоне. Он кладётся в `application/config/build` рядом —
-отдельно, а не внутрь строки версии: версия уходит в аналитику, и номер сборки
-размыл бы там группировку.
+── НОМЕР СБОРКИ ИДЁТ В ДРУГУЮ СТОРОНУ ──────────────────────────────────────────
+`application/version` (CFBundleVersion) — счётчик заливок, его поднимает сам
+release_testflight.sh, и печатать его руками не надо никогда. Он переносится
+ОБРАТНО, из пресета в `application/config/build`, чтобы игра могла показать, какая
+именно сборка стоит на телефоне: две заливки бывают с одной версией и разными
+номерами, и без номера их не различить ничем.
 """
 from __future__ import annotations
 import pathlib
@@ -37,61 +39,72 @@ PRESETS  = ROOT / "export_presets.cfg"
 PROJECT  = ROOT / "project.godot"
 
 
-def ios_preset_versions(text: str) -> tuple[str, str]:
-    """`short_version` и `version` из пресета iOS.
+def ios_block(text: str) -> tuple[int, int]:
+    """Границы секций пресета iOS — от заголовка до следующего заголовка.
 
-    Секция ищется по `platform="iOS"`, а не по имени пресета: имя разработчик
-    волен поменять, платформу — нет.
+    Версии лежат не в `[preset.N]`, а в `[preset.N.options]`, то есть за той
+    скобкой, на которой останавливается наивный поиск «от слова iOS до
+    следующей скобки».
     """
-    blocks = re.split(r'\n(?=\[preset\.\d+\])', text)
-    for b in blocks:
-        if 'platform="iOS"' not in b:
-            continue
-        short = re.search(r'^application/short_version="([^"]*)"', b, re.M)
-        build = re.search(r'^application/version="([^"]*)"', b, re.M)
-        if short is None or build is None:
-            raise SystemExit("в пресете iOS нет application/short_version или "
-                             "application/version")
-        return short.group(1), build.group(1)
+    heads = [m.start() for m in re.finditer(r'^\[preset\.\d+\]', text, re.M)]
+    for i, start in enumerate(heads):
+        end = heads[i + 1] if i + 1 < len(heads) else len(text)
+        if 'platform="iOS"' in text[start:end]:
+            return start, end
     raise SystemExit('в export_presets.cfg не нашёлся пресет с platform="iOS"')
 
 
-def project_versions(text: str) -> tuple[str, str]:
-    ver = re.search(r'^config/version="([^"]*)"', text, re.M)
-    bld = re.search(r'^config/build="([^"]*)"', text, re.M)
-    return (ver.group(1) if ver else ""), (bld.group(1) if bld else "")
-
-
-def write_project(text: str, short: str, build: str) -> str:
-    text = re.sub(r'^config/version="[^"]*"', f'config/version="{short}"',
-                  text, count=1, flags=re.M)
-    if re.search(r'^config/build="', text, re.M):
-        return re.sub(r'^config/build="[^"]*"', f'config/build="{build}"',
-                      text, count=1, flags=re.M)
-    # Строки ещё нет — ставим сразу за версией, чтобы они читались парой.
-    return re.sub(r'^(config/version="[^"]*")',
-                  rf'\1\nconfig/build="{build}"', text, count=1, flags=re.M)
+def read_key(block: str, key: str) -> str:
+    m = re.search(rf'^{re.escape(key)}="([^"]*)"', block, re.M)
+    return m.group(1) if m else ""
 
 
 def main() -> int:
     check_only = "--check" in sys.argv
     presets = PRESETS.read_text(encoding="utf-8")
     project = PROJECT.read_text(encoding="utf-8")
-    short, build = ios_preset_versions(presets)
-    cur_ver, cur_build = project_versions(project)
 
-    if (cur_ver, cur_build) == (short, build):
-        print(f"версии совпадают: {short} (сборка {build})")
+    start, end = ios_block(presets)
+    block = presets[start:end]
+
+    version = read_key(project, "config/version")
+    if not version:
+        raise SystemExit("в project.godot пусто application/config/version — "
+                         "поставьте версию в Project Settings → Application → Config")
+    build = read_key(block, "application/version")
+    if not build:
+        raise SystemExit("в пресете iOS нет application/version (номера сборки)")
+
+    preset_ver = read_key(block, "application/short_version")
+    project_bld = read_key(project, "config/build")
+    ok = preset_ver == version and project_bld == build
+    if ok:
+        print(f"совпадают: версия {version}, сборка {build}")
         return 0
     if check_only:
-        print(f"РАЗОШЛИСЬ: в пресете {short} (сборка {build}), "
-              f"в игре {cur_ver or '—'} (сборка {cur_build or '—'})")
+        print(f"РАЗОШЛИСЬ: версия в игре {version}, в пресете {preset_ver or '—'}; "
+              f"сборка в пресете {build}, в игре {project_bld or '—'}")
         print("почините: python3 dev/tools/sync_version.py")
         return 1
 
-    PROJECT.write_text(write_project(project, short, build), encoding="utf-8")
-    print(f"project.godot: {cur_ver or '—'} (сборка {cur_build or '—'}) "
-          f"→ {short} (сборка {build})")
+    # Версия: игра → пресет.
+    block_new = re.sub(r'^application/short_version="[^"]*"',
+                       f'application/short_version="{version}"',
+                       block, count=1, flags=re.M)
+    PRESETS.write_text(presets[:start] + block_new + presets[end:], encoding="utf-8")
+
+    # Номер сборки: пресет → игра.
+    if re.search(r'^config/build="', project, re.M):
+        project = re.sub(r'^config/build="[^"]*"', f'config/build="{build}"',
+                         project, count=1, flags=re.M)
+    else:
+        # Строки ещё нет — ставим сразу за версией, чтобы читались парой.
+        project = re.sub(r'^(config/version="[^"]*")', rf'\1\nconfig/build="{build}"',
+                         project, count=1, flags=re.M)
+    PROJECT.write_text(project, encoding="utf-8")
+
+    print(f"версия {version} → пресет (было {preset_ver or '—'})")
+    print(f"сборка {build} → игра (было {project_bld or '—'})")
     return 0
 
 
