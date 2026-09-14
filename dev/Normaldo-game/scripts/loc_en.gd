@@ -1142,6 +1142,7 @@ const STRINGS : Dictionary = {
 	"ЗАДАНИЕ: %s":      "QUEST: %s",
 	"РЕЗИСТ: %s":       "RESIST: %s",
 	"+ РЕЗИСТ: %s":     "+ RESIST: %s",
+	"ПАССИВНАЯ · %d УРОВЕНЬ": "PASSIVE · LEVEL %d",
 	"РЕЗИСТ · %d УРОВЕНЬ": "RESIST · LEVEL %d",
 	"Откроется на %d уровне": "Unlocks at level %d",
 	"Открывает %d-е состояние": "Unlocks the %d-th state",

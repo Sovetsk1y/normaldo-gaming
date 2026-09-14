@@ -574,14 +574,19 @@ func _test_big_fist() -> void:
 		(e["game"] as Node).queue_free()
 		await process_frame
 
-	# «POWER!» — только по попаданию.
-	var power : Texture2D = load("res://assets/skills/power.png")
+	# Слово удара — только по попаданию.
+	#
+	# Картинка берётся ИЗ КОДА, а не по своему пути: слово менялось («POWER!» →
+	# «BAM!»), и тест, знавший путь наизусть, искал на экране картинку, которой
+	# там больше нет, — то есть проверял, что её не видно, и был этим доволен.
+	var power : Texture2D = load("res://scripts/normaldo.gd") \
+		.get_script_constant_map().get("_POWER_TEX")
 	var e2 : Dictionary = await _boot("viking", 1)
 	var n2 : Node = e2["n"]
 	n2.call("_try_fire_ability", (n2 as Node2D).position + Vector2(300.0, 0.0))
 	await _wait(0.5)
 	_check(_sprites_with((n2 as Node).get_parent(), power, []).is_empty(),
-		"промах — «POWER!» не печатается")
+		"промах — слово удара не печатается")
 
 	await _wait(5.0)                                   # откат мили-спелла
 	for i in 3:                                        # три цели в один мах
@@ -590,7 +595,7 @@ func _test_big_fist() -> void:
 	n2.call("_try_fire_ability", (n2 as Node2D).position + Vector2(300.0, 0.0))
 	await _wait(0.3)
 	var shown : int = _sprites_with((n2 as Node).get_parent(), power, []).size()
-	_check(shown == 1, "попал — «POWER!» ровно одно, а не по слову на цель: %d" % shown)
+	_check(shown == 1, "попал — слово удара ровно одно, а не по слову на цель: %d" % shown)
 	(e2["game"] as Node).queue_free()
 	await process_frame
 

@@ -51,6 +51,13 @@ const GAP  : float = 9.0
 const RING_RESIST := Color(0.90, 0.20, 0.18)
 const RING_ACTIVE := Color(0.35, 1.00, 0.45)
 const RING_PASS   := Color(0.32, 0.58, 1.00)
+# ── ЦВЕТ КОЛЬЦА ГОВОРИТ, ЧТО ЭТО ЗА СПОСОБНОСТЬ ─────────────────────────────
+# Красное — резист, зелёное — активка, синее — пассивка и венец. Правило одно на
+# всю игру, и держится оно только тем, что цвета берутся ОТСЮДА.
+#
+# Венцы своих цветов и держали: паучья реакция стояла в КРАСНОМ, то есть
+# выглядела резистом, а остановка времени — в своём голубом. В ряду из пяти
+# кружков это читалось как «тут какая-то другая система», хотя система та же.
 
 var _active_badge : Control = null   # the active-ability circle, for deny pulses
 
@@ -163,12 +170,12 @@ func setup(nrm: Node) -> void:
 	var lvl : int = int(SaveData.skin_level)
 	if SkinProgression.has_perk(sid, lvl, "time_slow"):
 		specs.append({ "key": "perk:time_slow", "tex": SkinProgression.perk_icon("time_slow"),
-			"sym": "", "mod": Color(1, 1, 1), "ring": Color(0.55, 0.85, 1.00),
+			"sym": "", "mod": Color(1, 1, 1), "ring": RING_PASS,
 			"title": "ОСТАНОВКА ВРЕМЕНИ",
 			"desc": "Раз в 30 c мир сам замедляется на 3 c." })
 	if SkinProgression.has_perk(sid, lvl, "spider_reflex"):
 		specs.append({ "key": "perk:spider_reflex", "tex": SkinProgression.perk_icon("spider_reflex"),
-			"sym": "", "mod": Color(1, 1, 1), "ring": Color(0.95, 0.25, 0.30),
+			"sym": "", "mod": Color(1, 1, 1), "ring": RING_PASS,
 			"title": "ПАУЧЬЯ РЕАКЦИЯ",
 			"desc": "Раз в 10 c один удар уходит в пустоту сам." })
 

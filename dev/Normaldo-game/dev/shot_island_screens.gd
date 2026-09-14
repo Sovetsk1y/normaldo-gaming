@@ -42,7 +42,7 @@ func _initialize() -> void:
 		"awards":   hud.call("_show_achievements")
 		"settings": hud.call("_show_settings_modal", "sound")
 		"pause":    hud.call("_start_game"); await _tick(1.0); hud.call("_open_pause_menu")
-	await _tick(2.0)
+	await _tick(float(argv[3]) if argv.size() > 3 else 2.0)
 	await RenderingServer.frame_post_draw
 	get_root().get_texture().get_image().save_png("%s/isl_%s_%s.png" % [out, screen, side])
 	print("saved ", screen, " ", side)

@@ -2436,7 +2436,10 @@ const _FIST_TEX : Dictionary = {
 	"tyson":  preload("res://assets/skills/tyson/punch.png"),
 }
 const _FIST_FALLBACK : Texture2D = preload("res://assets/skills/fist_generic.png")
-const _POWER_TEX     : Texture2D = preload("res://assets/skills/power.png")
+# «BAM!», а не «POWER!»: слово должно звучать как удар, а не как надпись на
+# энергетике. Картинка живёт среди реплик (assets/ui/reactions) — там же, откуда
+# берутся возгласы Нормальдо, и рисована в том же стиле.
+const _POWER_TEX     : Texture2D = preload("res://assets/ui/reactions/bam2.png")
 const FIST_PX        : float = 150.0   # голова — 99: кулак заведомо крупнее её
 
 func _attach_big_fist(proj: Node2D, dir: Vector2, px: float = FIST_PX) -> void:
@@ -2558,11 +2561,12 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 			# Викинг: кулак проходит дугой вплотную перед собой. Позы каста у
 			# него нет (см. _POSE_SKIP) — кулак ровно один, и он движется.
 			# Радиус и кулак у него СВОИ: «взрывной кулак» обязан сносить три
-			# цели, а не одну (см. VIKING_MELEE_RADIUS). Взрыв у него теперь и
-			# виден: по площади на три цели, а выглядел он ровно как одиночный
-			# тычок Тайсона.
-			StatusFx.burst(get_parent(), global_position + dir.normalized() * _art_px() * 0.6,
-				"rage", _art_px() * 1.9)
+			# цели, а не одну (см. VIKING_MELEE_RADIUS).
+			#
+			# ОГНЯ ПОД УДАРОМ БОЛЬШЕ НЕТ. Он ставился, чтобы площадь удара была
+			# видна, — но вспышка на пол-экрана в момент, когда игрок смотрит,
+			# во что целится, отвлекала сильнее, чем объясняла. Площадь и так
+			# читается: кулак проходит дугой и сносит всё, до чего дотянулся.
 			_cast_melee(dir, 92.0, true, VIKING_MELEE_RADIUS, VIKING_FIST_PX)
 			_play_skill_sfx(SkinSkills.COUNTER)
 		"glove_punch":
@@ -2570,10 +2574,8 @@ func _cast_spell(spell_id: String, dir: Vector2) -> void:
 			# целиком, и второй кулак поверх рисунка только мешал. Вместо
 			# снаряда — доворот головы к точке тапа.
 			_snap_face_to(dir)
-			# Ярость на кулаке: удар нарисован позой, и без вспышки он читается
-			# как смена картинки, а не как замах.
-			StatusFx.burst(get_parent(), global_position + dir.normalized() * _art_px() * 0.5,
-				"rage", _art_px() * 1.4)
+			# Огня под ударом нет — по той же причине, что и у викинга выше:
+			# вспышка перед самым носом мешает целиться.
 			_cast_melee(dir, 78.0, false)
 			_play_skill_sfx(SkinSkills.COUNTER)
 		"shovel_throw":

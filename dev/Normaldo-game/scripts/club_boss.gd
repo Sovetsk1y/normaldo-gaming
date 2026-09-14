@@ -408,6 +408,7 @@ func _show_banner() -> void:
 # боковым зрением, даже когда смотришь на свою линию.
 
 const PHONE_PX : float = 54.0
+const PHONE_TILT : float = 18.0   # градусов, верхом к лицу
 
 func _phone_up() -> void:
 	if is_instance_valid(_phone):
@@ -416,7 +417,13 @@ func _phone_up() -> void:
 	_phone.texture        = F_PHONE
 	_phone.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	ItemSizing.fit_sprite_content(_phone, PHONE_PX)
-	_phone.position = Vector2(-W_FIGHT * 0.34, W_FIGHT * 0.06)
+	# ── ТРУБКА НАКЛОНЕНА К ЛИЦУ ────────────────────────────────────────────
+	# Нарисована она стоймя, антенной вверх, и хозяин клуба выглядел так, будто
+	# держит её подальше от себя, а не говорит в неё. Верх завален к щеке, сама
+	# трубка опущена на высоту рта — та же правка, что у копа-босса, и по той же
+	# причине.
+	_phone.rotation = deg_to_rad(PHONE_TILT)
+	_phone.position = Vector2(-W_FIGHT * 0.34, W_FIGHT * 0.10)
 	_phone.z_index  = 2
 	_phone.scale   *= 0.1
 	add_child(_phone)

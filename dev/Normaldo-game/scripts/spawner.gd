@@ -742,6 +742,12 @@ func _start_level() -> void:
 	# Первый предмет — быстро. 1.2 с копились поверх карточки уровня и пролёта
 	# слова WIN, а всё это время экран и так пустой.
 	_spawn_timer   = 0.35
+	# ── ВСТУПЛЕНИЕ НА КАЖДЫЙ УРОВЕНЬ ────────────────────────────────────────
+	# Раньше счётчик выставлялся один раз, при создании спавнера, и работал
+	# только в самом начале кампании. А тяжелее всего как раз НАЧАЛО СЛЕДУЮЩЕГО
+	# уровня: игрок выходит из боя с боссом на последней жизни, и в него тут же
+	# летит поток. Времени отъесться нет — есть время умереть.
+	_campaign_intro_left = CAMPAIGN_INTRO_COUNT
 	_reset_spans()
 	set_process(true)
 	phase_entered.emit(_phase)
@@ -947,9 +953,8 @@ func _run_campaign_pattern() -> void:
 		return
 
 	if _campaign_intro_left > 0:
-		# Onboarding: first few units are a gentle centred resource line.
 		_campaign_intro_left -= 1
-		await _t1_center_line(speed, lanes, vp_w)
+		await _campaign_intro_pizza(speed, lanes, vp_w)
 		_last_sp_at = _elapsed
 	else:
 		var dc : Dictionary = _director_cfg()
@@ -1988,6 +1993,32 @@ func _t1_double_line(speed: float, lanes: Array, vp_w: float) -> void:
 	add_child(bl)
 
 # Вар.2 — pizza on centre (2), negative on 1 and 3, outer lanes empty.
+# ── ПОЛОСА ПИЦЦЫ В НАЧАЛЕ УРОВНЯ ────────────────────────────────────────────
+# Пицца НА ВСЕХ ПЯТИ ПОЛОСАХ, без единого негатива. Стоять можно где угодно — в
+# рот попадёт всё равно, и это ровно то, чего от вступления и нужно.
+#
+# Раньше здесь шла центральная линия: пицца посередине, бананы сверху и снизу.
+# Как знакомство с инерцией на первом забеге это работало, но с тех пор
+# вступление стало играть и в начале КАЖДОГО уровня — то есть сразу после боя с
+# боссом, когда у игрока остаётся один жир. Банан в такой момент не учит ничему,
+# он убивает.
+#
+# Длина посчитана от цены первого жира: колонок столько, чтобы за все
+# CAMPAIGN_INTRO_COUNT прогонов набралось чуть больше сорока пицц — то есть
+# ровно «отъесться хотя бы на один жир», как и просили.
+const CAMPAIGN_INTRO_COLS : int = 14
+
+func _campaign_intro_pizza(speed: float, lanes: Array, vp_w: float) -> void:
+	var gap := _col_gap(speed)
+	for i in CAMPAIGN_INTRO_COLS:
+		if _frozen:
+			return
+		var oy := _t1_osc_y()
+		for ln in LANE_COUNT:
+			_spawn_item(lanes[ln] + oy, vp_w, PIZZA_TEX, 0.09, speed, 0, true, true, true)
+		if i < CAMPAIGN_INTRO_COLS - 1:
+			await get_tree().create_timer(gap).timeout
+
 func _t1_center_line(speed: float, lanes: Array, vp_w: float) -> void:
 	var gap := _col_gap(speed)
 	for i in 5:

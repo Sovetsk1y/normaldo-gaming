@@ -43,7 +43,9 @@ const TEX_RUN     := preload("res://assets/bosses/police/dog/run.png")
 const TEX_BITE    := preload("res://assets/bosses/police/dog/bite.png")
 const SFX_BARK  := preload("res://assets/audio/dog.mp3")
 
-const DOG_PX : float = 72.0
+# Доберман ростом с голову Нормальдо (99 px) и чуть выше: он выбегает на цепи
+# рядом с копом, и при 72 px рядом с ним читался щенком, а не угрозой.
+const DOG_PX : float = 104.0
 
 # ── СКОЛЬКО ОНА ВИСИТ НА ЦЕПИ ──────────────────────────────────────────────
 # Меньше полусекунды, и это не пауза ради красоты: за неё игрок успевает

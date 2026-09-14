@@ -4534,6 +4534,28 @@ func _ability_items(skin_id: String) -> Array:
 			"star": "" if ptex != null else "★",
 			"kind": "ПАССИВНАЯ", "kind_col": RING_PASS,
 			"title": passive.get("label", ""), "desc": passive.get("desc", "") })
+	# ── ВЕНЕЦ 10-го УРОВНЯ — ТОЖЕ ПАССИВКА ──────────────────────────────────
+	# В забеге он стоит в ряду кружков наравне с остальными, а на карточке скина
+	# его не было вовсе: про «двойную выгоду» и «остановку времени» игрок узнавал
+	# только из колонки наград, где они выглядят разовым призом, а не умением,
+	# которое работает весь забег.
+	#
+	# Показывается ВСЕГДА, даже закрытый, — тем же способом, что и резисты: с
+	# замком и уровнем открытия. Иначе карточка молчит о том, ради чего скин и
+	# качают до десятого.
+	for lv in range(2, 11):
+		var rw : Dictionary = SkinProgression.reward_for(skin_id, lv)
+		if String(rw.get("kind", "")) != "perk":
+			continue
+		var unl : bool = SaveData.get_skin_level_for(skin_id) >= lv
+		var ptx : Texture2D = SkinProgression.perk_icon(String(rw.get("perk", "")))
+		items.append({ "ring": RING_PASS, "tex": ptx, "mod": Color(1, 1, 1),
+			"star": "" if ptx != null else "★",
+			"kind": "ПАССИВНАЯ" if unl else tr("ПАССИВНАЯ · %d УРОВЕНЬ") % lv,
+			"kind_col": RING_PASS if unl else Color(0.38, 0.48, 0.66),
+			"locked": not unl,
+			"title": rw.get("label", ""), "desc": rw.get("desc", "") })
+
 	var ab := SkinSkills.get_ability(skin_id)
 	if ab.get("type", "") == "ryagality":
 		items.append({ "ring": RING_ACTIVE, "tex": smoke, "mod": BELCH, "star": "",
