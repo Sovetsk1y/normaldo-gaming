@@ -592,16 +592,28 @@ func _test_script_sane() -> void:
 
 # Какой такт идёт сейчас — по надписи на экране. Спрашивать поле нельзя: его
 # нет, и заводить его ради теста значило бы проверять не то, что видит игрок.
+# ── ПОДПИСЬ ИЩЕТСЯ ПО ВСЕМУ ПОДДЕРЕВУ, А НЕ СРЕДИ ПРЯМЫХ ДЕТЕЙ ──────────────
+# Раньше здесь был один уровень: у облачка из долларов подписи лежали прямо в
+# нём. У телефона с пушем они на три уровня глубже — узел, опора баннера, сам
+# баннер, — и обход в один уровень возвращал «?» на каждом такте. Тест при этом
+# сообщал не «подсказки нет», а «такт не тот», то есть указывал не туда.
+#
+# Глубина — не то, о чём этому тесту стоит знать: он спрашивает «что сейчас
+# написано на экране», и ответ не должен зависеть от того, как собрана плашка.
 func _beat_of(tut: Node) -> String:
 	var cap = tut.get("_caption")
 	if cap == null or not is_instance_valid(cap):
 		return ""
-	for c in (cap as Node).get_children():
-		if c is Label:
-			var txt := String((c as Label).text)
+	var stack : Array = [cap]
+	while not stack.is_empty():
+		var n : Node = stack.pop_back()
+		if n is Label:
+			var txt := String((n as Label).text)
 			for b in _beats():
 				if String((b as Dictionary).get("big", "")) == txt:
 					return String((b as Dictionary).get("id", ""))
+		for ch in n.get_children():
+			stack.append(ch)
 	return "?"
 
 # Дождаться, пока пойдёт нужный такт.
