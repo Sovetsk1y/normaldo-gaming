@@ -18,6 +18,9 @@ const MAGNET_SCENE       := preload("res://scenes/magnet.tscn")
 const BANANA_PEEL_SCENE  := preload("res://scenes/banana_peel.tscn")
 const BEER_SCENE         := preload("res://scenes/beer.tscn")
 const BOXING_GLOVE_SCENE := preload("res://scenes/boxing_glove.tscn")
+# Сам скрипт — за перечислением пород: породу выбирает спавнер, а имена для неё
+# живут там же, где машина фаз.
+const GLOVE_SCRIPT       := preload("res://scripts/boxing_glove.gd")
 const SNAKE_SCENE        := preload("res://scenes/snake.tscn")
 const MONEY_BAG_SCENE    := preload("res://scenes/money_bag.tscn")
 const DOG_SCENE          := preload("res://scenes/dog.tscn")
@@ -1994,8 +1997,8 @@ func _t1_double_line(speed: float, lanes: Array, vp_w: float) -> void:
 
 # Вар.2 — pizza on centre (2), negative on 1 and 3, outer lanes empty.
 # ── ПОЛОСА ПИЦЦЫ В НАЧАЛЕ УРОВНЯ ────────────────────────────────────────────
-# Пицца НА ВСЕХ ПЯТИ ПОЛОСАХ, без единого негатива. Стоять можно где угодно — в
-# рот попадёт всё равно, и это ровно то, чего от вступления и нужно.
+# Пицца идёт ПОЛОСОЙ В ТРИ ЛИНИИ, и полоса ПЛЫВЁТ вверх-вниз. Ни одного
+# негатива в ней нет.
 #
 # Раньше здесь шла центральная линия: пицца посередине, бананы сверху и снизу.
 # Как знакомство с инерцией на первом забеге это работало, но с тех пор
@@ -2003,19 +2006,53 @@ func _t1_double_line(speed: float, lanes: Array, vp_w: float) -> void:
 # боссом, когда у игрока остаётся один жир. Банан в такой момент не учит ничему,
 # он убивает.
 #
-# Длина посчитана от цены первого жира: колонок столько, чтобы за все
-# CAMPAIGN_INTRO_COUNT прогонов набралось чуть больше сорока пицц — то есть
-# ровно «отъесться хотя бы на один жир», как и просили.
-const CAMPAIGN_INTRO_COLS : int = 14
+# ── ПОЧЕМУ НЕ ВО ВСЕ ПЯТЬ ───────────────────────────────────────────────────
+# Пять линий пиццы — это не вступление, а бесплатная выдача: палец можно просто
+# не трогать, и жир придёт сам. Игра в этот момент не начинается, она ставится
+# на паузу и наливает.
+#
+# Три линии кормят так же щедро (в любой из трёх пицца всё равно попадает в
+# рот), но требуют ОДНОГО: быть внутри полосы. А раз полоса плывёт, её надо
+# вести — то есть делать ровно то движение, из которого игра и состоит. Это
+# по-прежнему подарок, но подарок, который берут рукой.
+const CAMPAIGN_INTRO_COLS  : int = 14
+# Ширина полосы в линиях. Нечётное — чтобы у полосы была середина: по ней
+# считается кривая, и от неё же откладываются края.
+const CAMPAIGN_INTRO_BAND  : int = 3
+# ── ПОЛОСА ИДЁТ ПО КРИВОЙ, А НЕ ПО СТУПЕНЬКАМ ───────────────────────────────
+# Середина полосы считается НЕПРЕРЫВНО, а не прыгает по номерам линий: ступенька
+# в 86 пикселей читалась бы как «полоса дёрнулась», а не «полоса плывёт».
+# Размах ровно в одну линию — на нём крайние пиццы полосы упираются в первую и
+# пятую линии и никогда не вылезают за поле.
+const CAMPAIGN_INTRO_WAVE  : float = 11.0   # колонок на полный круг
+
+# Сквозной номер колонки вступления. Он НЕ ОБНУЛЯЕТСЯ НИГДЕ — ни между тремя
+# прогонами внутри уровня, ни между уровнями.
+#
+# Внутри уровня это обязательно: вступление идёт тремя вызовами подряд, и
+# обнулись счётчик на каждом, полоса на стыке прыгала бы обратно в середину —
+# одна длинная змея распалась бы на три одинаковых коротких.
+#
+# А между уровнями это ещё и полезно: следующее вступление начинается с той
+# фазы, на которой кончилось прошлое, и пять уровней подряд не показывают одну
+# и ту же кривую с одного и того же места.
+var _campaign_intro_col : int = 0
 
 func _campaign_intro_pizza(speed: float, lanes: Array, vp_w: float) -> void:
-	var gap := _col_gap(speed)
+	var gap    := _col_gap(speed)
+	var lane_h : float = float(lanes[1]) - float(lanes[0])
+	var half   : int   = CAMPAIGN_INTRO_BAND / 2
 	for i in CAMPAIGN_INTRO_COLS:
 		if _frozen:
 			return
-		var oy := _t1_osc_y()
-		for ln in LANE_COUNT:
-			_spawn_item(lanes[ln] + oy, vp_w, PIZZA_TEX, 0.09, speed, 0, true, true, true)
+		# Середина полосы. Синус от сквозного номера колонки — по нему полоса и
+		# плывёт; `_t1_osc_y` тут не нужен, он делал бы вторую волну поверх этой.
+		var mid : float = float(lanes[LANE_COUNT / 2]) \
+			+ sin(TAU * float(_campaign_intro_col) / CAMPAIGN_INTRO_WAVE) * lane_h
+		for k in range(-half, half + 1):
+			_spawn_item(mid + float(k) * lane_h, vp_w, PIZZA_TEX, 0.09, speed,
+				0, true, true, true)
+		_campaign_intro_col += 1
 		if i < CAMPAIGN_INTRO_COLS - 1:
 			await get_tree().create_timer(gap).timeout
 
@@ -2483,10 +2520,29 @@ func _spawn_molotov(y: float, vp_w: float, speed: float, fire_count: int = 4) ->
 	m.position   = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
 	add_child(m)
 
+# ── КТО ДЕЛАЕТ УДАР ПО ЛИНИИ НА ЭТОМ УРОВНЕ ────────────────────────────────
+# Приём один (влёт, зарядка под красной полосой, рывок через экран), а делает
+# его либо перчатка, либо СОБАКА — смотря по тому, водятся ли собаки в
+# раскладке этого уровня. Во дворе водятся; в канализации, на реке, на пляже и
+# у клуба — нет, и там летит перчатка, как летела.
+#
+# ── ПОЧЕМУ СПРАШИВАЕМ У РАСКЛАДКИ, А НЕ ПИШЕМ НОМЕР УРОВНЯ ─────────────────
+# Второй список уровней разъехался бы с первым в тот день, когда собаку добавят
+# ещё куда-нибудь: в раскладке она появилась бы, а тут нет, и приём на новом
+# уровне тихо остался бы перчаточным. `_hazard_pool()` — это и есть ответ на
+# вопрос «что водится здесь», и спрашивать надо у него.
+#
+# В хвосте бесконечного пул — сумма всех уровней, собака в нём есть, и летит
+# собака. Это ровно то обещание, которое хвост и даёт: всё, что ты видел.
+func _charger_breed() -> int:
+	return GLOVE_SCRIPT.Breed.DOG if _hazard_pool().has("dog") \
+		else GLOVE_SCRIPT.Breed.GLOVE
+
 func _spawn_glove(y: float, vp_w: float) -> void:
 	var g      := BOXING_GLOVE_SCENE.instantiate()
 	g.position  = Vector2(ItemFlow.spawn_x(vp_w, 80.0), y)
 	g.charge_duration = _glove_charge_duration_for_phase()
+	g.breed     = _charger_breed()
 	add_child(g)
 
 # Charge duration scales linearly with the current phase index:

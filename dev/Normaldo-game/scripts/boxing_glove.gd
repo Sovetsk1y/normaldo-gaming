@@ -1,6 +1,49 @@
 extends Area2D
 
+# ── ОДИН УДАР, ДВЕ ПОРОДЫ ───────────────────────────────────────────────────
+# Влетел справа, встал у края, зарядился под красной полосой, ударил по линии
+# через весь экран. Это не «перчатка», это ПРИЁМ — и на уровнях, где по
+# раскладке водятся собаки, тот же приём делает собака.
+#
+# ── ПОЧЕМУ НЕ ВТОРОЙ СКРИПТ ────────────────────────────────────────────────
+# Потому что это тот же приём, и всё, что в нём есть, — три фазы, телеграф,
+# сроки зарядки, вынос предметов на пути, — обязано вести себя ОДИНАКОВО.
+# Скопируй машину фаз во второй файл, и она немедленно начнёт расходиться:
+# правку сроков зарядки под новую фазу внесут в один, телеграф подкрутят в
+# другом, и через месяц собака будет бить не так, как перчатка, без единого
+# решения об этом.
+#
+# Поэтому разница живёт РОВНО ТАМ, ГДЕ ОНА ЕСТЬ: картинка, звук, цвет искр и
+# группа (от неё зависит, чей резист скина сработает). Всё остальное общее.
+enum Breed { GLOVE, DOG }
+
+const TEX_GLOVE := preload("res://assets/items/boxing_glove.png")
+const TEX_DOG   := preload("res://assets/items/angry_dog.png")
+
 const HIT_SOUND := preload("res://assets/audio/boxing_glove.mp3")
+const SFX_BARK  := preload("res://assets/audio/dog.mp3")
+
+# Кто именно летит. Ставится спавнером ДО добавления в дерево — `_ready`
+# собирает по нему внешность.
+@export var breed : Breed = Breed.GLOVE
+
+# Масштаб картинки. У перчатки он исторически лежит в сцене, у собаки взят
+# ТОТ ЖЕ, что у неё в потоке (dog.gd): одна и та же тварь обязана быть одного
+# размера, летит она по линии или плывёт в потоке.
+const DOG_SCALE : float = 0.20
+# Хитбокс. У перчатки круг 22, у собаки чуть шире — она и нарисована крупнее
+# (74×71 против 56×35).
+const R_GLOVE : float = 22.0
+const R_DOG   : float = 26.0
+
+# ── ЦВЕТ ИСКР ГОВОРИТ, КТО ЛЕТИТ ───────────────────────────────────────────
+# У перчатки выхлоп рыжий, а зарядка жёлтая — это пружина и разряд. У собаки
+# из-под лап идёт ПЫЛЬ (бурая, а не рыжая: она бежит по земле, а не работает
+# на тяге), а копит она не заряд, а злость — красным.
+const EXHAUST_GLOVE : Color = Color(1.00, 0.50, 0.05, 0.90)
+const EXHAUST_DOG   : Color = Color(0.62, 0.48, 0.34, 0.85)
+const CHARGE_GLOVE  : Color = Color(1.00, 0.90, 0.20, 0.95)
+const CHARGE_DOG    : Color = Color(1.00, 0.25, 0.12, 0.95)
 
 @export var speed : float = 300.0
 
@@ -35,15 +78,29 @@ var _audio       : AudioStreamPlayer
 var _warn_bar  : Node2D = null
 var _warn_fill : ColorRect = null
 
+# Как это называть в аналитике (читает normaldo._cause_name). Сцена у обеих
+# пород одна, и без этого поля смерть от собаки попадала бы в отчёт перчаткой.
+var cause_name : String = ""
+
 func _ready() -> void:
-	_vp_w       = get_viewport_rect().size.x
+	_vp_w = get_viewport_rect().size.x
+
+	var dog := breed == Breed.DOG
+	cause_name = "charging_dog" if dog else "boxing_glove"
+	if dog:
+		$Sprite2D.texture = TEX_DOG
+		$Sprite2D.scale   = Vector2.ONE * DOG_SCALE
 	_base_scale = $Sprite2D.scale
 
 	var circle    := CircleShape2D.new()
-	circle.radius  = 22.0
+	circle.radius  = R_DOG if dog else R_GLOVE
 	$CollisionShape2D.shape = circle
 	add_to_group("obstacle")
-	add_to_group("glove")
+	# ── ГРУППА РЕШАЕТ, ЧЕЙ РЕЗИСТ СРАБОТАЕТ ────────────────────────────────
+	# `normaldo._area_tag` читает группу, и по ней ищет иммунитет скина. Собака
+	# в группе "glove" означала бы, что от неё защищает «иммунитет к перчатке»,
+	# — а от неё обязан защищать иммунитет к СОБАКЕ, он для того и есть.
+	add_to_group("dog" if dog else "glove")
 	monitoring     = false   # включится только на фазе удара
 
 	_exhaust = _make_exhaust()
@@ -53,10 +110,10 @@ func _ready() -> void:
 	add_child(_charge_vfx)
 
 	_audio = AudioStreamPlayer.new()
-	_audio.stream    = HIT_SOUND
+	_audio.stream    = SFX_BARK if dog else HIT_SOUND
 	_audio.volume_db = -2.0
 	add_child(_audio)
-	_audio.play()  # звук ринга при появлении
+	_audio.play()  # звук ринга (лай) при появлении
 
 	area_entered.connect(_on_punch_area_entered)
 
@@ -116,6 +173,18 @@ func _begin_punch() -> void:
 
 	_fade_warn_bar()
 
+	# ── СОБАКА СРЫВАЕТСЯ С ЛАЕМ ────────────────────────────────────────────
+	# У перчатки момент удара МОЛЧИТ, и это верно: пружина своё уже прозвенела
+	# на влёте, а второй звонок на рывке слился бы с первым в дребезг. Собака же,
+	# уходящая в бросок беззвучно, читается как картинка, которую подвинули.
+	#
+	# Тон выше первого лая — чтобы второй лай был вторым, а не эхом; и он же
+	# остаётся на удар по игроку: собака, которая уже сорвалась, спокойным
+	# голосом не лает.
+	if breed == Breed.DOG:
+		_audio.pitch_scale = 1.18
+		_audio.play()
+
 	# squash-and-stretch — рывок вперёд
 	var tw := create_tween()
 	tw.tween_property($Sprite2D, "scale", _base_scale * Vector2(0.65, 1.35), 0.05) \
@@ -163,7 +232,7 @@ func _make_exhaust() -> CPUParticles2D:
 	p.initial_velocity_max  = 85.0
 	p.scale_amount_min      = 1.5
 	p.scale_amount_max      = 3.2
-	p.color                 = Color(1.0, 0.50, 0.05, 0.9)
+	p.color                 = EXHAUST_DOG if breed == Breed.DOG else EXHAUST_GLOVE
 	p.emission_shape        = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
 	p.emission_rect_extents = Vector2(1.0, 4.0)
 	return p
@@ -224,7 +293,7 @@ func _make_charge_vfx() -> CPUParticles2D:
 	p.initial_velocity_max   = 55.0
 	p.scale_amount_min       = 2.0
 	p.scale_amount_max       = 5.5
-	p.color                  = Color(1.0, 0.90, 0.20, 0.95)
+	p.color                  = CHARGE_DOG if breed == Breed.DOG else CHARGE_GLOVE
 	p.emission_shape         = CPUParticles2D.EMISSION_SHAPE_SPHERE
 	p.emission_sphere_radius = 14.0
 	return p

@@ -4606,11 +4606,30 @@ func _bum_feast(tag: String, area: Object = null) -> bool:
 	_show_floating_text("+3", Color(0.72, 0.20, 1.00))
 	return true
 
+# ── КАК ЭТО НАЗЫВАЕТСЯ В АНАЛИТИКЕ ─────────────────────────────────────────
+# По умолчанию — имя файла сцены, и почти всегда этого довольно: одна сцена,
+# один предмет, одно имя.
+#
+# Но ОДНА СЦЕНА МОЖЕТ ВЫПУСКАТЬ РАЗНЫХ. Удар по линии (boxing_glove.tscn) делает
+# либо перчатка, либо собака — смотря по уровню, — и по имени файла обе уходили
+# бы в отчёт «boxing_glove». Вопрос «что убивает игроков на дворе» получил бы
+# ответ про перчатку, которой там нет вовсе.
+#
+# Поэтому узел вправе назваться сам, полем `cause_name`. Кто не называется —
+# по-прежнему имя сцены.
+func _cause_name(area: Area2D) -> String:
+	var own = area.get("cause_name")
+	if own != null and String(own) != "":
+		return String(own)
+	if area.scene_file_path != "":
+		return area.scene_file_path.get_file().get_basename()
+	return area.name
+
 func _handle_obstacle(area: Area2D) -> void:
 	# Cache the cause for analytics — _die() reads it. Prefer the most specific
 	# group (snake/glove/molotov/fire) and fall back to the scene-file name.
 	_last_hit_group = _classify_hit_group(area)
-	_last_hit_name  = area.scene_file_path.get_file().get_basename() if area.scene_file_path != "" else area.name
+	_last_hit_name  = _cause_name(area)
 	_last_hit_tag   = _count_tag(area)
 
 	# Резист, открытый уровнем скина: если не на откате — предмет разбивается
