@@ -39,7 +39,9 @@ const BACK_BTN_SIZE   : Vector2 = Vector2(24.0, 15.0)
 const TITLE_X_OFFSET  : float   = -30.0
 const TITLE_Y         : float   = 6.0
 const TITLE_H         : float   = 20.0
-const TITLE_FONT_SZ   : int     = 16
+# Название экрана — рисованное, не подписью. Коробка под него та же, что была у
+# подписи; как оно в неё вписывается, решает `UiKit.screen_title`.
+const TITLE_TEX       := preload("res://assets/ui/titles/book.png")
 const RES_RIGHT_PAD   : float   = -10.0
 const RES_Y           : float   = 7.0
 const RES_ICON_SZ     : float   = 16.0
@@ -258,17 +260,8 @@ func _build(vp: Vector2) -> void:
 
 	_build_back_button(sx, sy)
 
-	var title_lbl := Label.new()
-	title_lbl.add_theme_font_override("font", UI_FONT)
-	title_lbl.add_theme_font_size_override("font_size", TITLE_FONT_SZ)
-	_apply_text_fx(title_lbl)
-	title_lbl.text                 = "КНИГА УЧИТЕЛЯ"
-	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	title_lbl.size                 = Vector2(vp.x, TITLE_H * sy)
-	title_lbl.position             = Vector2(TITLE_X_OFFSET * sx, TITLE_Y * sy)
-	title_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	_slide_root.add_child(title_lbl)
+	UiKit.screen_title(_slide_root, TITLE_TEX, vp, sx, sy,
+		TITLE_X_OFFSET, TITLE_Y + TITLE_H * 0.5)
 
 	_build_resource_strip(vp)
 

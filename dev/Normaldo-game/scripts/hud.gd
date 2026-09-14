@@ -101,9 +101,17 @@ const LEATHERHEAD_SCRIPT := preload("res://scripts/leatherhead.gd")
 const CLUB_BOSS_SCRIPT   := preload("res://scripts/club_boss.gd")
 const BUM_KING_SCRIPT    := preload("res://scripts/bum_king.gd")
 const POLICE_BOSS_SCRIPT := preload("res://scripts/police_boss.gd")
-# Денежное облако с сюжетной строкой — им первый эпизод говорит то, что
-# остальным говорит занавес (см. `money_cloud.gd`).
-const MONEY_CLOUD        := preload("res://scripts/money_cloud.gd")
+# Телефон с пушем — им игра разговаривает с игроком: сюжет первого эпизода,
+# конец уровня, подсказки обучения (см. `phone_push.gd`).
+# Название экрана скинов — рисованное, не подписью (см. `UiKit.screen_title`).
+const SKINS_TITLE_TEX    := preload("res://assets/ui/titles/skins.png")
+
+# ── ЧТО ПИШЕТ ХЛЕБ, КОГДА УРОВЕНЬ ВЗЯТ ─────────────────────────────────────
+# Слова лежат здесь, а не внутри обработчика победы: править формулировку и
+# править ход победы — разные занятия.
+const WIN_PUSH_LEAD : String = "УРОВЕНЬ ПРОЙДЕН"
+const WIN_PUSH_BODY : String = "Возвращайся на базу"
+const WIN_PUSH_HOLD : float  = 2.60
 
 const FAT_THRESHOLDS := [40, 120, 260]
 const SECTION_H      := 44.0
@@ -2813,18 +2821,8 @@ func _show_shop(restore_scroll: int = 0, from_slots: bool = false, skip_open_ani
 	close_btn.mouse_exited.connect(_menu_btn_press_anim.bind(back_visual, false))
 	overlay.add_child(close_btn)
 
-	# ── Title "СКИНЫ" (top-centre) ─────────────────────────────────────────
-	var title_lbl := Label.new()
-	title_lbl.add_theme_font_override("font", UI_FONT)
-	title_lbl.add_theme_font_size_override("font_size", 16)
-	_apply_menu_caption_fx(title_lbl)
-	title_lbl.text                 = "СКИНЫ"
-	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	title_lbl.size                 = Vector2(vp.x, 20.0 * scale_y)
-	title_lbl.position             = Vector2(-30.0 * scale_x, 6.0 * scale_y)
-	title_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	overlay.add_child(title_lbl)
+	# ── Название экрана — рисованное (сверху по центру) ────────────────────
+	UiKit.screen_title(overlay, SKINS_TITLE_TEX, vp, scale_x, scale_y, -30.0, 16.0)
 
 	# ── Top-right resources (dollar + token), same layout as quests ────────
 	var icon_sz : float = 16.0 * scale_y
@@ -6609,15 +6607,21 @@ func _start_game() -> void:
 	# должно: он прикрывает подмену фона, а первый эпизод начинается на том же
 	# фоне, на котором доиграло интро.
 	#
-	# Поэтому здесь — денежное облако: влетает справа сразу после броска пульта,
-	# висит с надписью и уходит дальше. Оно НЕ ОСТАНАВЛИВАЕТ забег: игра уже
-	# идёт, Нормальдо летит, и окно поверх него означало бы «стоп». Облако летит
-	# вместе с миром и потому окном не читается.
+	# Поэтому здесь — ТЕЛЕФОН: Нормальдо достаёт его на бегу, сверху падает пуш
+	# от Хлеба. Оно НЕ ОСТАНАВЛИВАЕТ забег: игра уже идёт, Нормальдо летит, и
+	# окно поверх него означало бы «стоп».
 	#
-	# Условие ровно обратное занавесу: где занавес был — облако не нужно, оно
-	# сказало бы то же самое второй раз подряд.
+	# До телефона тут летело облако из долларов. Как поверхность для текста оно
+	# работало, но не отвечало на вопрос, КТО это говорит: строка висела в
+	# воздухе. У пуша есть отправитель, лицо и имя — и задание перестаёт быть
+	# подписью к уровню.
+	#
+	# Условие ровно обратное занавесу: где занавес был — пуш не нужен, он
+	# сказал бы то же самое второй раз подряд.
 	if is_campaign and not need_curtain and spawner:
-		MONEY_CLOUD.spawn(get_parent(), String(spawner.call("level_story")))
+		PhonePush.spawn(get_parent(), String(spawner.call("level_story")),
+			"hleb", PhonePush.HOLD_DEFAULT,
+			get_parent().get_node_or_null("Normaldo") as Node2D)
 
 	var music := get_parent().get_node_or_null("Music")
 	if music:
@@ -7998,7 +8002,17 @@ func _on_boss_defeated() -> void:
 	var normaldo := get_parent().get_node_or_null("Normaldo")
 	if normaldo and normaldo.has_method("disable_input"):
 		normaldo.disable_input()
-	await get_tree().create_timer(1.6).timeout
+	# ── ТЕЛЕФОН НА ФИНИШЕ ───────────────────────────────────────────────────
+	# Задание в начале уровня выдаёт Хлеб, и закрывать его обязан он же: иначе
+	# выходит, что задание дал человек, а принял никто. Тот же телефон, тот же
+	# отправитель — только теперь с той стороны «готово, возвращайся».
+	#
+	# Пауза перед экраном итогов выросла с 1.6 до времени показа пуша: полторы
+	# секунды — это меньше, чем нужно, чтобы уведомление доехало и его прочли,
+	# и оно уходило бы под экран итогов недочитанным.
+	PhonePush.spawn(get_parent(), WIN_PUSH_BODY, "hleb", WIN_PUSH_HOLD,
+		normaldo as Node2D, WIN_PUSH_LEAD)
+	await get_tree().create_timer(WIN_PUSH_HOLD + 0.8).timeout
 	# Route through the regular death flow so the player gets the same panel
 	# (avatar + XP + balance + rank). The "ВЫЙГРАЛ" framing is conveyed by
 	# the unlock badge.

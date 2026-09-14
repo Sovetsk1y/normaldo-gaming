@@ -14,7 +14,7 @@ extends SceneTree
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 29
+const EXPECTED_CHECKS : int = 37
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -51,8 +51,8 @@ func _initialize() -> void:
 	await _test_finish()
 	print("── Занавес перед сменой локации ──")
 	await _test_curtain()
-	print("── Денежное облако первого эпизода ──")
-	await _test_cloud()
+	print("── Телефон с пушем в первом эпизоде ──")
+	await _test_push()
 	print("── Вход в хвост ──")
 	await _test_hardcore_entry()
 	_finish()
@@ -298,29 +298,62 @@ func _finish() -> void:
 #
 # Поэтому первому нужен свой способ сказать то же самое, и он не должен
 # останавливать забег. Проверяется ровно эта развилка: у кого занавес — у того
-# нет облака, и наоборот. Сломается она молча: игрок первого эпизода просто
+# нет пуша, и наоборот. Сломается она молча: игрок первого эпизода просто
 # никогда не узнает, зачем он бежит, а игрок второго увидит одно и то же дважды.
-func _test_cloud() -> void:
-	# Само облако: собирается, несёт текст и не имеет столкновений — поймать его
-	# нельзя, иначе первые секунды забега стали бы ловушкой из ничего.
-	var cloud_script := load("res://scripts/money_cloud.gd")
+#
+# ── И ЧТО У СООБЩЕНИЯ ЕСТЬ ОТПРАВИТЕЛЬ ─────────────────────────────────────
+# Ради этого телефон и заменил облако из долларов: облако несло текст, но не
+# говорило, КТО это сказал. Имя отправителя проверяется отдельной строкой —
+# потеряться оно может незаметно, а без него пуш снова становится надписью в
+# воздухе.
+func _test_push() -> void:
+	var push_script := load("res://scripts/phone_push.gd")
 	var host := Node2D.new()
 	get_root().add_child(host)
-	var c : Node2D = cloud_script.call("spawn", host, "Выберись из канализации")
-	_check(c != null, "облако собралось")
+	var owner_node := Node2D.new()
+	host.add_child(owner_node)
+
+	var c : Node2D = push_script.call("spawn", host, "Выберись из канализации",
+		"hleb", 3.0, owner_node)
+	_check(c != null, "пуш собрался")
 	if c != null:
 		await process_frame
-		var texts : Array = []
-		var areas : int = 0
-		for n in c.get_children():
-			if n is Label:
-				texts.append(String((n as Label).text))
-			if n is Area2D:
-				areas += 1
-		_check(texts.has("Выберись из канализации"), "и несёт сюжетную строку: %s" % [texts])
-		_check(areas == 0, "и не ловит столкновений: зон %d" % areas)
-	# Пустая строка облака не даёт вовсе: облако без текста — просто мусор,
-	# пролетевший через экран.
-	_check(cloud_script.call("spawn", host, "  ") == null, "без текста облака нет")
+		var res := _scan(c)
+		_check((res["texts"] as Array).has("Выберись из канализации"),
+			"и несёт сюжетную строку: %s" % [res["texts"]])
+		_check((res["texts"] as Array).has("Хлеб"),
+			"и имя отправителя: %s" % [res["texts"]])
+		_check(int(res["areas"]) == 0, "и не ловит столкновений: зон %d" % int(res["areas"]))
+		# Рука с телефоном — только когда есть, из кого её доставать.
+		_check(int(res["hands"]) == 1, "и рука с телефоном на месте: %d" % int(res["hands"]))
+
+	# Без хозяина руки нет: доставать телефон некому, а баннер сказать своё
+	# по-прежнему может (так он и работает в меню).
+	var no_hand : Node2D = push_script.call("spawn", host, "Строка", "hleb", 3.0, null)
+	await process_frame
+	_check(no_hand != null and int(_scan(no_hand)["hands"]) == 0,
+		"без хозяина рука не выезжает")
+
+	# Пустая строка пуша не даёт вовсе: уведомление без текста — просто шум.
+	_check(push_script.call("spawn", host, "  ") == null, "без текста пуша нет")
 	host.free()
 	await process_frame
+
+# Сколько в поддереве подписей, зон столкновения и рук с телефоном.
+func _scan(root: Node) -> Dictionary:
+	var texts : Array = []
+	var areas : int = 0
+	var hands : int = 0
+	var stack : Array = [root]
+	while not stack.is_empty():
+		var n : Node = stack.pop_back()
+		if n is Label and String((n as Label).text) != "":
+			texts.append(String((n as Label).text))
+		if n is Area2D:
+			areas += 1
+		if n is Sprite2D and (n as Sprite2D).texture != null \
+				and String((n as Sprite2D).texture.resource_path).ends_with("phone_hand.png"):
+			hands += 1
+		for ch in n.get_children():
+			stack.append(ch)
+	return { "texts": texts, "areas": areas, "hands": hands }

@@ -25,7 +25,9 @@ const BACK_BTN_SIZE   : Vector2 = Vector2(24.0, 15.0)
 const TITLE_X_OFFSET  : float   = -30.0
 const TITLE_Y         : float   = 6.0
 const TITLE_H         : float   = 20.0
-const TITLE_FONT_SZ   : int     = 16
+# Название экрана — рисованное, не подписью. Коробка под него та же, что была у
+# подписи; как оно в неё вписывается, решает `UiKit.screen_title`.
+const TITLE_TEX       := preload("res://assets/ui/titles/slots.png")
 const RES_RIGHT_PAD   : float   = -10.0
 const RES_Y           : float   = 7.0
 const RES_ICON_SZ     : float   = 16.0
@@ -802,17 +804,8 @@ func _build_top_chrome(vp: Vector2, scale_x: float, scale_y: float) -> void:
 	_slide_root.add_child(back_btn)
 
 	# Title "СЛОТЫ".
-	var title_lbl := Label.new()
-	title_lbl.add_theme_font_override("font", UI_FONT)
-	title_lbl.add_theme_font_size_override("font_size", TITLE_FONT_SZ)
-	_apply_text_fx(title_lbl)
-	title_lbl.text                 = "СЛОТЫ"
-	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	title_lbl.size                 = Vector2(vp.x, TITLE_H * scale_y)
-	title_lbl.position             = Vector2(TITLE_X_OFFSET * scale_x, TITLE_Y * scale_y)
-	title_lbl.mouse_filter         = Control.MOUSE_FILTER_IGNORE
-	_slide_root.add_child(title_lbl)
+	UiKit.screen_title(_slide_root, TITLE_TEX, vp, scale_x, scale_y,
+		TITLE_X_OFFSET, TITLE_Y + TITLE_H * 0.5)
 
 	# Resources top-right (dollar + token), same layout maths as quests.
 	var icon_sz : float = RES_ICON_SZ * scale_y

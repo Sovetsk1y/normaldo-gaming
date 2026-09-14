@@ -25,10 +25,32 @@ const UI_FONT := preload("res://assets/fonts/RussoOne-Regular.ttf")
 
 const DIM : Color = Color(0.0, 0.0, 0.0, 0.72)
 
-# Облачко подсказки — того же размера, что и в забеге, чтобы тур не выглядел
-# другой игрой.
-const TIP_W : float = 360.0
-const TIP_H : float = 108.0
+# ── ТЕЛЕФОН, А НЕ ОБЛАЧКО ИЗ ДОЛЛАРОВ ───────────────────────────────────────
+# Тем же, чем игра говорит сюжет и учит в первом забеге: сообщением от Хлеба.
+# В меню оно стоит РЯДОМ с телефоном, а не падает сверху, — падать тут неоткуда,
+# экран стоит на месте, и подсказка обязана показывать на конкретную кнопку.
+# Само устройство карточки живёт в `phone_push.gd`.
+#
+# ── И БЕРЁТСЯ ОН ЛЕНИВО, А НЕ ИМЕНЕМ КЛАССА ────────────────────────────────
+# Этот файл сам — глобальный класс (`class_name MenuTour`), и ссылка на другой
+# глобальный класс заставляет разобрать его ПРЯМО ЗДЕСЬ, при разборе тура. А
+# тур разбирается раньше, чем поднимаются автолоады, — и `SaveData` в `_done()`
+# переставал существовать: «Identifier not found: SaveData», тур не собирался
+# вовсе, а тест обучения падал двумя проверками, ни одна из которых про тур.
+#
+# Той же болезнью болел и сам скрипт обучения; там она лечится тем же — см.
+# шапку `dev/smoke_tutorial.gd`.
+func _push() -> GDScript:
+	if _push_script == null:
+		_push_script = load("res://scripts/phone_push.gd") as GDScript
+	return _push_script
+
+var _push_script : GDScript = null
+
+# Карточка ШИРЕ прежнего облачка: слева от текста теперь стоит рука с телефоном,
+# и на прежних 360 на сам текст оставалось меньше полутора сотен.
+const TIP_W : float = 470.0
+const TIP_H : float = 104.0
 
 signal finished
 
@@ -141,7 +163,8 @@ func _show(idx: int) -> void:
 # Подпись встаёт ПОД кнопкой, а если та у нижнего края — над ней. Иначе текст
 # уезжает за экран ровно у тех кнопок, что стоят внизу.
 func _caption(stop: Dictionary, hole: Rect2, vp: Vector2) -> void:
-	var below : bool = hole.end.y + TipCloud.outer(TIP_W, TIP_H).y < vp.y
+	var out := _push().call("card_outer", TIP_W, TIP_H) as Vector2
+	var below : bool = hole.end.y + out.y < vp.y
 	var y : float = (hole.end.y + 8.0) if below else (hole.position.y - TIP_H - 8.0)
 	var last : bool = _idx >= _stops.size() - 1
 	var hint : String = "ПОНЯТНО" if last else "ДАЛЬШЕ ›"
@@ -149,9 +172,8 @@ func _caption(stop: Dictionary, hole: Rect2, vp: Vector2) -> void:
 		# «ПОНЯТНО» на ведущей подсказке обещает, что её можно просто закрыть, —
 		# а закрыть её можно ровно одним способом, тапом по кнопке.
 		hint = "▼ ТАП ▼"
-	var cloud := TipCloud.build(String(stop.get("big", "")),
-		String(stop.get("small", "")), TIP_W, TIP_H, hint)
-	var out := TipCloud.outer(TIP_W, TIP_H)
+	var cloud := _push().call("card", String(stop.get("big", "")),
+		String(stop.get("small", "")), "hleb", TIP_W, TIP_H, hint) as Control
 	cloud.position = Vector2(
 		clampf(hole.get_center().x, out.x * 0.5, vp.x - out.x * 0.5),
 		clampf(y + TIP_H * 0.5, out.y * 0.5, vp.y - out.y * 0.5))
