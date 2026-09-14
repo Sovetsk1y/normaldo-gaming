@@ -334,6 +334,34 @@ else
 	fi
 fi
 
+# ── ВЕРСИЯ В САМОМ АРТЕФАКТЕ ─────────────────────────────────────────────────
+# В сгенерированном Info.plist лежат не числа, а ссылки на настройки сборки:
+# CFBundleShortVersionString = $(MARKETING_VERSION), CFBundleVersion =
+# $(CURRENT_PROJECT_VERSION). Обе Godot пишет в project.pbxproj при экспорте —
+# и между «поправил пресет» и «это уехало в сборку» лежит целый экспорт, который
+# может и не случиться.
+#
+# Так уже вышло: в поле Build у Xcode стояла строка версии, пресет правили, а в
+# проекте оставалось прежнее. Поэтому спрашиваем СОБРАННЫЙ .ipa — там ссылки уже
+# развёрнуты в значения, и это ровно то, что прочитает App Store.
+if [[ -n "$IPA_PLIST" ]]; then
+	IPA_VER="$(unzip -p "$IPA" "$IPA_PLIST" 2>/dev/null \
+		| plutil -extract CFBundleShortVersionString raw -o - - 2>/dev/null || true)"
+	IPA_BUILD="$(unzip -p "$IPA" "$IPA_PLIST" 2>/dev/null \
+		| plutil -extract CFBundleVersion raw -o - - 2>/dev/null || true)"
+	if [[ "$IPA_VER" != "$FINAL_SHORT" || "$IPA_BUILD" != "$NEXT_BUILD" ]]; then
+		red "В собранном .ipa версия $IPA_VER (сборка $IPA_BUILD),"
+		red "а собирали $FINAL_SHORT (сборка $NEXT_BUILD) — останавливаюсь до заливки."
+		echo "  Похоже, экспорт взял старые значения из проекта Xcode."
+		echo "  Проверь: grep -n 'CURRENT_PROJECT_VERSION|MARKETING_VERSION' \\"
+		echo "             $OUT_DIR/Normaldo.xcodeproj/project.pbxproj"
+		echo "  И убедись, что редактор Godot был закрыт, когда правился export_presets.cfg:"
+		echo "  открытый редактор держит пресеты в памяти и перезаписывает файл."
+		exit 1
+	fi
+	ok "Версия в .ipa: $IPA_VER (сборка $IPA_BUILD)"
+fi
+
 if [[ "$DO_UPLOAD" -eq 0 ]]; then
 	ylw "--no-upload: остановились на .ipa."
 	exit 0
