@@ -3982,7 +3982,15 @@ func _take_hit(damage: int = 1) -> void:
 		if _harry_second_chance_ready and SaveData.active_skin == "harry_potter":
 			_harry_second_chance_ready = false
 			fat_state    = 1
-			_pizza_count = 0
+			# ── СЧЁТЧИК ПИЦЦЫ — АБСОЛЮТНЫЙ, А НЕ «СКОЛЬКО В ЭТОМ ЖИРЕ» ──────
+			# Пороги ([40, 120, 260]) сравниваются с НИМ, и он обязан
+			# соответствовать выставленному жиру. Стоял ноль — и полоса начинала
+			# врать: она показывает «0 / 80» (то есть до следующего жира 80
+			# пицц), а до порога 120 оставалось ровно 120. Игрок съедал
+			# обещанные 80 и не толстел.
+			#
+			# Так же считает обычный удар ниже; здесь просто была своя строка.
+			_pizza_count = FAT_THRESHOLDS[0]
 			# Re-apply through the helper so scale + x-offset are recomputed for
 			# the new texture. Just swapping `_sprite.texture` leaves the previous
 			# state's scale/offset in place, which drifts the sprite off its
@@ -4007,7 +4015,10 @@ func _take_hit(damage: int = 1) -> void:
 	if new_fat <= 0 and _dracula_immortal_ready and SaveData.active_skin == "dracula":
 		_dracula_immortal_ready = false
 		fat_state    = 1
-		_pizza_count = 0
+		# Та же беда, что и у «второго шанса» выше: счётчик пиццы абсолютный, и
+		# ноль при первом жире заставлял полосу обещать 80 пицц там, где до
+		# порога было 120.
+		_pizza_count = FAT_THRESHOLDS[0]
 		# Re-apply through the helper so scale + x-offset are recomputed for
 		# the new texture. Just swapping `_sprite.texture` leaves the previous
 		# state's scale/offset in place, which drifts the sprite off its

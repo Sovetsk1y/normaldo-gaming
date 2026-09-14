@@ -274,3 +274,59 @@ func _test_fat_bar(hud: Node, normaldo: Node, save: Node) -> void:
 	await process_frame
 	_check(String((hud.get("_fat_left_lbl") as Label).text) == "МАКСИМУМ",
 		"на максимуме написано «МАКСИМУМ»: %s" % (hud.get("_fat_left_lbl") as Label).text)
+
+	await _test_fat_counter_paths(normaldo, save, thr)
+
+# ── ПОЛОСА ОБЕЩАЕТ РОВНО ТО, ЧТО ИГРА ПОТОМ СПРОСИТ ────────────────────────
+# Счётчик пиццы АБСОЛЮТНЫЙ: пороги ([40, 120, 260]) сравниваются прямо с ним, и
+# полоса считает остаток как «порог минус счётчик». Значит у любого пути, который
+# ставит жир руками, счётчик обязан равняться началу этого жира — иначе полоса
+# обещает одно число, а игра спрашивает другое, и обман не виден ничем, кроме
+# съеденных впустую пицц.
+#
+# Ровно так и было у двух путей из трёх: «второй шанс» Гарри и бессмертие
+# Дракулы ставили первый жир со счётчиком НОЛЬ. Полоса показывала «0 / 80», а до
+# порога оставалось 120: игрок съедал обещанные восемьдесят и не толстел.
+#
+# Проверяются все три пути, а не два починенных: четвёртый, который напишут
+# завтра, попадёт сюда же.
+func _test_fat_counter_paths(normaldo: Node, save: Node, thr: Array) -> void:
+	# ── И ТАБЛИЦА ПОРОГОВ — ОДНА НА ДВОИХ ──────────────────────────────────
+	# Пороги сравнивает `normaldo._eat_pizza`, а показывает полоса в HUD. Пока у
+	# HUD была своя копия, они разошлись — [40, 120, 260] против [30, 60, 90], —
+	# и полоса врала В КАЖДОМ забеге: обещала 40 пицц до первого жира там, где
+	# хватало 30, и 80 до второго там, где хватало 30.
+	#
+	# Сверяются ЗНАЧЕНИЯ, а не «HUD берёт их у Нормальдо»: второй способ
+	# проверяет реализацию, а нужен результат — числа обязаны совпадать, откуда
+	# бы их ни взяли.
+	var game_thr : Array = load("res://scripts/normaldo.gd") \
+		.get_script_constant_map().get("FAT_THRESHOLDS", [])
+	_check(game_thr == thr,
+		"пороги жира у полосы и у игры совпадают: %s / %s" % [thr, game_thr])
+
+	var bad : Array = []
+	for case in [
+		{ "what": "обычный удар",       "skin": "viking",       "flag": "", "from": 2 },
+		{ "what": "второй шанс Гарри",  "skin": "harry_potter",
+		  "flag": "_harry_second_chance_ready", "from": 0 },
+		{ "what": "бессмертие Дракулы", "skin": "dracula",
+		  "flag": "_dracula_immortal_ready",    "from": 1 },
+	]:
+		var c : Dictionary = case
+		_use_skin(normaldo, save, String(c["skin"]))
+		normaldo.call("set_dev_immortal", false)
+		normaldo.set("_invincible", false)
+		normaldo.set("fat_state", int(c["from"]))
+		normaldo.set("_pizza_count", 999)
+		if String(c["flag"]) != "":
+			normaldo.set(String(c["flag"]), true)
+		normaldo.call("_take_hit", 1)
+		await process_frame
+		var st  : int = int(normaldo.get("fat_state"))
+		var cnt : int = int(normaldo.get("_pizza_count"))
+		var want : int = 0 if st == 0 else int(thr[st - 1])
+		if cnt != want:
+			bad.append("%s: жир %d, счётчик %d вместо %d" % [c["what"], st, cnt, want])
+	_check(bad.is_empty(),
+		"счётчик пиццы совпадает с началом жира на всех путях: %s" % [bad])
