@@ -74,6 +74,16 @@ def main() -> int:
     build = read_key(block, "application/version")
     if not build:
         raise SystemExit("в пресете iOS нет application/version (номера сборки)")
+    # CFBundleVersion — СЧЁТЧИК заливок, а не версия. Строка «1.9.4» попадает
+    # туда, если вписать её руками в диалоге экспорта: Xcode покажет её в поле
+    # Build, а релизный скрипт на следующем запуске упадёт, пытаясь прибавить к
+    # ней единицу.
+    if not build.isdigit():
+        raise SystemExit(
+            f"номер сборки в пресете — «{build}», а должно быть целое число.\n"
+            "Это CFBundleVersion, счётчик заливок; версия живёт отдельно, в "
+            "project.godot.\n"
+            "Поправьте в export_presets.cfg: application/version=\"<число>\"")
 
     preset_ver = read_key(block, "application/short_version")
     project_bld = read_key(project, "config/build")

@@ -266,6 +266,18 @@ if [[ -n "$NEW_VERSION" ]]; then
 		"$PROJ_DIR/project.godot"
 	ok "версия игры → $NEW_VERSION"
 fi
+# ── НОМЕР СБОРКИ — ЦЕЛОЕ ЧИСЛО ───────────────────────────────────────────────
+# CFBundleVersion это СЧЁТЧИК заливок, а не версия: по нему App Store отличает
+# две сборки одной версии. Строка вида «1.9.4» туда попадает, если её вписать
+# руками в диалоге экспорта, — и дальше `$(( CUR_BUILD + 1 ))` роняет скрипт
+# арифметической ошибкой bash, по которой причину не найти.
+if ! [[ "$CUR_BUILD" =~ ^[0-9]+$ ]]; then
+	red "Номер сборки в пресете — «$CUR_BUILD», а должно быть целое число."
+	red "Это CFBundleVersion, счётчик заливок; версия живёт отдельно, в project.godot."
+	echo "  Поправь в export_presets.cfg: application/version=\"<число>\""
+	echo "  Если в TestFlight уже есть заливки этой версии — возьми следующее за наибольшим."
+	exit 1
+fi
 if [[ "$DO_BUMP" -eq 1 ]]; then
 	NEXT_BUILD=$(( CUR_BUILD + 1 ))
 	cfg_set 'application/version' "$NEXT_BUILD"
