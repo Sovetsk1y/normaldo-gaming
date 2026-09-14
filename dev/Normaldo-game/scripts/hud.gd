@@ -214,6 +214,9 @@ var _toast_node       : CanvasItem = null   # quest completion / phase toast (Co
 var _intro_quest_seq  : Node2D   = null
 
 var _menu_overlay      : ColorRect = null
+# Открытый магазин скинов — чтобы пересобрать его по повороту телефона.
+var _shop_overlay      : Control  = null
+var _shop_from_slots   : bool     = false
 # Логотип меню. Держится ради заставки: она спрашивает, где он на экране,
 # чтобы погасить свою копию ровно поверх него (см. `menu_logo_rect`).
 var _menu_logo         : TextureRect = null
@@ -360,9 +363,11 @@ var _fps_label : Label = null
 
 func _ready() -> void:
 	await get_tree().process_frame
-	# Островок и полоска «домой»: весь интерфейс уезжает в безопасный
-	# прямоугольник целиком, вместе с экранами, которые к нему подцепляются
-	# детьми (лидеры, задания, настройки). См. scripts/safe_area.gd.
+	# Островок: слой НЕ ужимается — разметка обходит само пятно там, где до него
+	# дотягивается (см. scripts/safe_area.gd). Здесь остаётся только подписка:
+	# по повороту телефона островок переезжает с края на край, и открытый
+	# магазин надо пересобрать под новый край.
+	SafeArea.changed.connect(_on_safe_changed)
 	_btn_sfx = AudioStreamPlayer.new()
 	var _btn_stream := load("res://assets/audio/button.mp3") as AudioStreamMP3
 	if _btn_stream:
@@ -2743,6 +2748,10 @@ func _show_shop(restore_scroll: int = 0, from_slots: bool = false, skip_open_ani
 	overlay.position     = Vector2.ZERO
 	overlay.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(overlay)
+	# Запоминается ради поворота телефона: магазин — единственный экран, который
+	# собирает сам HUD, и без ссылки его потом не за что взять.
+	_shop_overlay    = overlay
+	_shop_from_slots = from_slots
 
 	# Full-screen pixel-art background (bg_shop.png, 430×192).
 	var bg_tex := load("res://assets/ui/skins/bg_shop.png") as Texture2D
@@ -11686,3 +11695,25 @@ func _attempt_restore(code: String, error_lbl: Label, modal_root: Node) -> void:
 			detail = detail.substr(0, 80) + "…"
 		error_lbl.text = "%s\n%s" % [ui_msg, detail]
 		Logger.err("HUD", "restore failed: %s" % msg)
+
+# ── ПОВОРОТ ТЕЛЕФОНА ПЕРЕСОБИРАЕТ МАГАЗИН ────────────────────────────────────
+# Островок переезжает с одного края на другой, а лента карточек считает свою
+# полосу В МОМЕНТ СБОРКИ: после поворота она осталась бы сужена не с той
+# стороны, и крайняя карточка ушла бы под железо.
+#
+# Остальные экраны пересобирают себя сами (`_on_safe_changed` у каждого) —
+# магазин собирает HUD, поэтому он и здесь.
+#
+# ЭКРАН СМЕРТИ НЕ ПЕРЕСОБИРАЕТСЯ НАРОЧНО. `_show_game_over` не просто рисует: он
+# восстанавливает кошелёк, каким тот был ДО забега, и заново проигрывает прилёт
+# монет и рост опыта. Позвать его второй раз ради восьми пикселей поля — значит
+# показать игроку награду дважды. Восемь пикселей подождут до следующего экрана.
+func _on_safe_changed() -> void:
+	if not is_instance_valid(_shop_overlay):
+		return
+	var from_slots := _shop_from_slots
+	_shop_overlay.queue_free()
+	_shop_overlay = null
+	# Без анимации въезда: экран уже на месте, и повторный проезд выглядел бы
+	# так, будто магазин открыли заново.
+	_show_shop(0, from_slots, true)

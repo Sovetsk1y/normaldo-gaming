@@ -62,6 +62,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	z_index      = 90
 	_build(vp)
+	SafeArea.changed.connect(_on_safe_changed)
 
 func _layout(vp: Vector2) -> Dictionary:
 	var sx : float = vp.x / CANVAS_W
@@ -560,3 +561,23 @@ func _apply_text_fx(lbl: Label) -> void:
 
 func _press_anim(visual_root: Control, pressed: bool) -> void:
 	UiKit.press_anim(visual_root, pressed)
+
+# ── ПОВОРОТ ТЕЛЕФОНА ПЕРЕСОБИРАЕТ ЭКРАН ──────────────────────────────────────
+# Островок переезжает с одного края на другой, а разметка посчитана В МОМЕНТ
+# СБОРКИ: после поворота отступ остался бы от прежнего края, и панель уехала бы
+# под железо уже с другой стороны.
+#
+# Экран собирается заново целиком. Поворот — событие редкое, и честная
+# пересборка надёжнее, чем попытка подвинуть десяток узлов по отдельности:
+# половина разметки стоит абсолютными координатами внутри своих панелей, и
+# «подвинуть панель» их за собой не потянет.
+#
+# Старое дерево убирается ИЗ СЦЕНЫ СРАЗУ, а не одним `queue_free`: удаление
+# отложено до конца кадра, и новое успело бы нарисоваться поверх старого.
+func _on_safe_changed() -> void:
+	if not is_inside_tree():
+		return
+	for c in get_children():
+		remove_child(c)
+		c.queue_free()
+	_build(get_viewport().get_visible_rect().size)

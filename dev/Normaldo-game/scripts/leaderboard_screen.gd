@@ -126,6 +126,7 @@ func _ready() -> void:
 	_reset_seconds_left = LeaderboardModes.seconds_to_week_reset()
 	var vp := get_viewport().get_visible_rect().size
 	_build(vp)
+	SafeArea.changed.connect(_on_safe_changed)
 	_refresh_tab_visual()
 	# Сначала «Загрузка…», потом настоящие данные (или объяснение, если их нет)
 	# replaces it via _fetch_from_server_async.
@@ -1634,3 +1635,23 @@ func _on_close() -> void:
 	tw.chain().tween_callback(Callable(self, "queue_free"))
 	if _hud != null and _hud.has_method("_on_leaders_close_anim_start"):
 		_hud._on_leaders_close_anim_start(SLIDE_TIME, SLIDE_TRANS, SLIDE_EASE_OUT)
+
+# ── ПОВОРОТ ТЕЛЕФОНА ПЕРЕСОБИРАЕТ ЭКРАН ──────────────────────────────────────
+# Островок переезжает с одного края на другой, а разметка посчитана В МОМЕНТ
+# СБОРКИ: после поворота отступ остался бы от прежнего края, и панель уехала бы
+# под железо уже с другой стороны.
+#
+# Экран собирается заново целиком. Поворот — событие редкое, и честная
+# пересборка надёжнее, чем попытка подвинуть десяток узлов по отдельности:
+# половина разметки стоит абсолютными координатами внутри своих панелей, и
+# «подвинуть панель» их за собой не потянет.
+#
+# Старое дерево убирается ИЗ СЦЕНЫ СРАЗУ, а не одним `queue_free`: удаление
+# отложено до конца кадра, и новое успело бы нарисоваться поверх старого.
+func _on_safe_changed() -> void:
+	if not is_inside_tree():
+		return
+	for c in get_children():
+		remove_child(c)
+		c.queue_free()
+	_build(get_viewport().get_visible_rect().size)

@@ -47,7 +47,7 @@ func _is_backdrop(r: Rect2) -> bool:
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 7
+const EXPECTED_CHECKS : int = 9
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -64,6 +64,8 @@ func _initialize() -> void:
 	await _test_layers_untouched()
 	print("── Под островком пусто ──")
 	await _test_screens()
+	print("── Поворот телефона ──")
+	await _test_rotation()
 
 	print("")
 	if _checks < EXPECTED_CHECKS:
@@ -134,6 +136,43 @@ func _scan_layers(n: Node, out: Array) -> void:
 	for c in n.get_children():
 		_scan_layers(c, out)
 
+# ── ПОВОРОТ ────────────────────────────────────────────────────────────────
+# Островок переезжает с левого края на правый, и разметка, посчитанная при
+# сборке, остаётся от прежнего края. Экран обязан пересобраться САМ, не дожидаясь
+# переоткрытия: игрок перевернул телефон и смотрит на тот же экран.
+#
+# Проверяется не «пришёл ли сигнал», а результат: под пятном снова пусто. Экран
+# при этом НЕ ОТКРЫВАЕТСЯ ЗАНОВО — открывается один раз, поворот делается уже
+# поверх открытого.
+func _test_rotation() -> void:
+	var sa := get_root().get_node_or_null("SafeArea")
+	var bad : Array = []
+	for screen in ["карточки", "лидеры", "настройки", "задания", "слоты",
+			"достижения", "пауза"]:
+		bad.append_array(await _rotate_one(screen))
+	_check(bad.is_empty(), "после поворота под островком пусто: %s"
+		% [bad.slice(0, 8)])
+	# И обратно: поворот из правого в левый обязан работать так же.
+	var back : Array = await _rotate_one("карточки", SIM_R, SIM_L)
+	_check(back.is_empty(), "и в обратную сторону: %s" % [back])
+
+func _rotate_one(screen: String, first: Vector4 = SIM_L,
+		then: Vector4 = SIM_R) -> Array:
+	var sa := get_root().get_node_or_null("SafeArea")
+	var game := await _open(screen, first)
+	sa.call("simulate", then)
+	# Пересборка идёт в обработчике сигнала и занимает кадр-другой.
+	for _i in 30:
+		get_root().get_tree().paused = false
+		await process_frame
+	var isl : Rect2 = sa.call("island")
+	var hits : Array = []
+	_scan(get_root(), isl, screen + " после поворота", hits)
+	game.queue_free()
+	await process_frame
+	sa.call("simulate", Vector4.ZERO)
+	return hits
+
 # ── Экраны ────────────────────────────────────────────────────────────────
 func _test_screens() -> void:
 	for side in ["left", "right"]:
@@ -148,6 +187,20 @@ func _test_screens() -> void:
 # накопительным — под островком «оказывается» то, что лежит на экране, открытом
 # три шага назад. Ровно так этот тест и врал в первой версии.
 func _one_screen(screen: String, side: String) -> Array:
+	var sa := get_root().get_node_or_null("SafeArea")
+	var game := await _open(screen, SIM_L if side == "left" else SIM_R)
+	var isl : Rect2 = sa.call("island")
+	var hits : Array = []
+	_scan(get_root(), isl, screen, hits)
+	game.queue_free()
+	await process_frame
+	sa.call("simulate", Vector4.ZERO)
+	return hits
+
+# Поднять сцену и открыть нужный экран. Каждый раз СВОЯ сцена: экраны не
+# закрывают друг друга, и в общем дереве список выходил накопительным — под
+# островком «оказывалось» то, что лежит на экране, открытом три шага назад.
+func _open(screen: String, sim: Vector4) -> Node:
 	var save := get_root().get_node_or_null("SaveData")
 	save.set("tutorial_done", true)
 	save.set("dollars", 99000)
@@ -158,7 +211,7 @@ func _one_screen(screen: String, side: String) -> Array:
 		seen[k] = true
 	save.set("menu_tips_seen", seen)
 	var sa := get_root().get_node_or_null("SafeArea")
-	sa.call("simulate", SIM_L if side == "left" else SIM_R)
+	sa.call("simulate", sim)
 
 	var game : Node = load("res://scenes/game.tscn").instantiate()
 	get_root().add_child(game)
@@ -186,14 +239,7 @@ func _one_screen(screen: String, side: String) -> Array:
 	for _i in 50:
 		get_root().get_tree().paused = false
 		await process_frame
-
-	var isl : Rect2 = sa.call("island")
-	var hits : Array = []
-	_scan(get_root(), isl, screen, hits)
-	game.queue_free()
-	await process_frame
-	sa.call("simulate", Vector4.ZERO)
-	return hits
+	return game
 
 func _scan(n: Node, isl: Rect2, screen: String, out: Array) -> void:
 	if n is Control:

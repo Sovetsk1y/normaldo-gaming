@@ -222,6 +222,7 @@ func setup(hud: Node) -> void:
 func _ready() -> void:
 	_build_symbol_list()
 	_build_ui()
+	SafeArea.changed.connect(_on_safe_changed)
 	_start_music()
 	# Camera-pan-down entrance: we sit BELOW the menu and rise into view while
 	# HUD slides the main-menu chrome + scene up off-screen in lock-step.
@@ -1630,3 +1631,28 @@ func _on_close() -> void:
 		_hud._on_slots_close_anim_start(SLIDE_TIME, SLIDE_TRANS, SLIDE_EASE_OUT)
 	# Bring TV audio back up to its pre-mute level as we slide away.
 	_unmute_tv()
+
+# ── ПОВОРОТ ТЕЛЕФОНА ПЕРЕСОБИРАЕТ ЭКРАН ──────────────────────────────────────
+# Островок переезжает с одного края на другой, а разметка посчитана В МОМЕНТ
+# СБОРКИ: после поворота отступ остался бы от прежнего края, и панель уехала бы
+# под железо уже с другой стороны.
+#
+# Экран собирается заново целиком. Поворот — событие редкое, и честная
+# пересборка надёжнее, чем попытка подвинуть десяток узлов по отдельности:
+# половина разметки стоит абсолютными координатами внутри своих панелей, и
+# «подвинуть панель» их за собой не потянет.
+#
+# Старое дерево убирается ИЗ СЦЕНЫ СРАЗУ, а не одним `queue_free`: удаление
+# отложено до конца кадра, и новое успело бы нарисоваться поверх старого.
+func _on_safe_changed() -> void:
+	if not is_inside_tree():
+		return
+	# НЕ ПОСРЕДИ ВРАЩЕНИЯ. Барабаны крутит анимация, привязанная к узлам; снеся
+	# их на середине, игрок увидит, как результат просто пропал, а выигрыш
+	# считается отдельно и всё равно придёт. Дождёмся остановки.
+	if _spinning:
+		return
+	for c in get_children():
+		remove_child(c)
+		c.queue_free()
+	_build_ui()
