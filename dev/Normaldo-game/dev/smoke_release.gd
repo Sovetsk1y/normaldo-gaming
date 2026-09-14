@@ -52,7 +52,7 @@ const DEV_TEXTS : Array = [
 
 var _fails  : int = 0
 var _checks : int = 0
-const EXPECTED_CHECKS : int = 22
+const EXPECTED_CHECKS : int = 26
 
 func _check(ok: bool, what: String) -> void:
 	_checks += 1
@@ -75,7 +75,59 @@ func _initialize() -> void:
 	_test_ios_min_version()
 	print("── Системная заставка iOS чёрная ──")
 	_test_ios_launch_black()
+	print("── Версия сборки и версия в игре ──")
+	_test_version_in_sync()
 	_finish()
+
+# ── ВЕРСИЯ В ИГРЕ = ВЕРСИЯ СБОРКИ ──────────────────────────────────────────
+# Версий две, и лежат они в разных файлах: в `export_presets.cfg` — та, что
+# уходит в Info.plist и видна в TestFlight, в `project.godot` — та, что игра
+# показывает в настройках и шлёт в аналитику. Прочитать пресет в игре нельзя:
+# это файл редактора, в сборку он не попадает.
+#
+# Разошлись они молча и надолго: в пресете 1.0.3, в игре 1.0.1. И подвело это
+# ровно там, где было нужно, — на вопрос «новая ли сборка стоит на телефоне»
+# экран настроек ответил неправдой, и полдня ушло на поиски несуществующего
+# кеша.
+#
+# Переносит версию dev/tools/sync_version.py, а эта проверка следит, чтобы его
+# не забыли позвать.
+func _test_version_in_sync() -> void:
+	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
+	var short  := _preset_value(preset, "application/short_version")
+	var build  := _preset_value(preset, "application/version")
+	_check(short != "", "в пресете iOS есть версия: %s" % short)
+	var ver := str(ProjectSettings.get_setting("application/config/version", ""))
+	var bld := str(ProjectSettings.get_setting("application/config/build", ""))
+	_check(ver == short and bld == build,
+		"и игра показывает её же: в пресете %s (сборка %s), в игре %s (сборка %s)%s"
+			% [short, build, ver, bld,
+				"" if (ver == short and bld == build)
+				else " — почините: python3 dev/tools/sync_version.py"])
+
+# Значение из секции пресета iOS. Ищется в блоке с `platform="iOS"`, а не по
+# имени пресета: имя разработчик волен поменять, платформу — нет.
+#
+# Блок берётся ОТ ЗАГОЛОВКА ДО ЗАГОЛОВКА, а не «от слова iOS до следующей
+# скобки»: сами версии лежат не в `[preset.0]`, а в `[preset.0.options]` — то
+# есть за той самой скобкой, на которой наивный поиск и останавливался, находя
+# пустоту.
+func _preset_value(preset: String, key: String) -> String:
+	var heads := RegEx.new()
+	heads.compile("(?m)^\\[preset\\.\\d+\\]")
+	var hs := heads.search_all(preset)
+	for i in hs.size():
+		var from : int = (hs[i] as RegExMatch).get_start()
+		var to : int = (hs[i + 1] as RegExMatch).get_start() \
+			if i + 1 < hs.size() else preset.length()
+		var block := preset.substr(from, to - from)
+		if not block.contains("platform=\"iOS\""):
+			continue
+		var re := RegEx.new()
+		re.compile("(?m)^%s=\"([^\"]*)\"" % key)
+		var m := re.search(block)
+		return m.get_string(1) if m != null else ""
+	return ""
 
 # ── СИСТЕМНАЯ ЗАСТАВКА iOS — ЧЁРНЫЙ ЭКРАН И НИЧЕГО НА НЁМ ──────────────────
 # Своя заставка игры (scripts/splash.gd) начинается с чёрного, и системная перед

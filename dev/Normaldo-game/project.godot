@@ -11,7 +11,8 @@ config_version=5
 [application]
 
 config/name="Normaldo"
-config/version="1.0.1"
+config/version="1.0.3"
+config/build="1"
 run/main_scene="res://scenes/game.tscn"
 config/features=PackedStringArray("4.2", "GL Compatibility")
 run/max_fps=60

@@ -190,11 +190,22 @@ func _build(vp: Vector2) -> void:
 
 	# Версия — внизу корешка. Она нужна раз в жизни, при письме в поддержку, и
 	# не должна занимать место в содержимом.
+	# ── ВЕРСИЯ И НОМЕР СБОРКИ ───────────────────────────────────────────────
+	# Версию игрок называет в письме в поддержку, а НОМЕР СБОРКИ отвечает на
+	# другой вопрос — «та ли сборка у меня стоит». Две заливки в TestFlight
+	# бывают с одной версией и разными номерами, и без номера отличить их на
+	# устройстве нельзя ничем.
+	#
+	# Обе приезжают из настроек экспорта через dev/tools/sync_version.py:
+	# `export_presets.cfg` — файл редактора, в сборку он не попадает, и прочитать
+	# его в игре нельзя.
 	var ver := str(ProjectSettings.get_setting("application/config/version", ""))
+	var bld := str(ProjectSettings.get_setting("application/config/build", ""))
 	var ver_lbl := Label.new()
 	ver_lbl.add_theme_font_override("font", UI_FONT)
 	ver_lbl.add_theme_font_size_override("font_size", 9)
-	ver_lbl.text                 = "v%s" % (ver if ver != "" else "—")
+	ver_lbl.text                 = ("v%s (%s)" % [ver, bld]) if bld != "" \
+		else "v%s" % (ver if ver != "" else "—")
 	ver_lbl.modulate             = Color(0.55, 0.57, 0.62, 0.85)
 	ver_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	ver_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
